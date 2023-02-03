@@ -1,0 +1,30 @@
+datamodule:
+  _target_: data.pl_data_modules.BasePLDataModule
+  datasets:
+    train:
+      - _target_: data.datasets.BaseDataset
+        name: 'train'
+        path:
+          - 'data/path/to/dataset'
+
+    val:
+      - _target_: data.datasets.BaseDataset
+        name: 'val'
+        path:
+          - 'data/path/to/dataset'
+
+    test:
+      - _target_: data.datasets.BaseDataset
+        name: 'test'
+        path:
+          - 'data/path/to/dataset'
+
+  batch_sizes:
+    train: 32
+    val: 32
+    test: 32
+
+  num_workers:
+    train: 4
+    val: 4
+    test: 4

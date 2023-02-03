@@ -1,0 +1,128 @@
+import os
+from pathlib import Path
+from typing import Optional
+
+import hydra
+import omegaconf
+import pytorch_lightning as pl
+import torch
+from omegaconf import OmegaConf
+from pytorch_lightning import Trainer
+from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
+from pytorch_lightning.callbacks.progress.rich_progress import RichProgressBar
+from pytorch_lightning.loggers import WandbLogger
+from rich.console import Console
+
+from data.pl_data_modules import BasePLDataModule
+from models.pl_modules import BasePLModule
+from utils.logging import get_console_logger
+
+logger = get_console_logger()
+
+
+def train(conf: omegaconf.DictConfig) -> None:
+    # reproducibility
+    pl.seed_everything(conf.train.seed)
+    set_determinism_the_old_way(conf.train.pl_trainer.deterministic)
+    conf.train.pl_trainer.deterministic = False
+    torch.set_float32_matmul_precision(conf.train.float32_matmul_precision)
+
+    logger.log(
+        f"Starting training for [bold cyan]{conf.train.model_name}[/bold cyan] model"
+    )
+    if conf.train.pl_trainer.fast_dev_run:
+        logger.log(
+            f"Debug mode {conf.train.pl_trainer.fast_dev_run}. Forcing debugger configuration"
+        )
+        # Debuggers don't like GPUs nor multiprocessing
+        conf.train.pl_trainer.gpus = 0
+        conf.train.pl_trainer.precision = 32
+        conf.data.datamodule.num_workers = {
+            k: 0 for k in conf.data.datamodule.num_workers
+        }
+        # Switch wandb to offline mode to prevent online logging
+        conf.logging.log = None
+        # remove model checkpoint callback
+        conf.train.model_checkpoint_callback = None
+
+    # data module declaration
+    logger.log(f"Instantiating the Data Module")
+    pl_data_module: BasePLDataModule = hydra.utils.instantiate(
+        conf.data.datamodule, _recursive_=False
+    )
+    # force setup to get labels initialized for the model
+    pl_data_module.prepare_data()
+    pl_data_module.setup("fit")
+
+    # main module declaration
+    logger.log(f"Instantiating the Model")
+    pl_module: BasePLModule = hydra.utils.instantiate(
+        conf.model, labels=pl_data_module.labels, _recursive_=False
+    )
+
+    experiment_logger: Optional[WandbLogger] = None
+    experiment_path: Optional[Path] = None
+    if conf.logging.log:
+        logger.log(f"Instantiating Wandb Logger")
+        experiment_logger = hydra.utils.instantiate(conf.logging.wandb_arg)
+        experiment_logger.watch(pl_module, **conf.logging.watch)
+        experiment_path = Path(experiment_logger.experiment.dir)
+        # Store the YaML config separately into the wandb dir
+        yaml_conf: str = OmegaConf.to_yaml(cfg=conf)
+        (experiment_path / "hparams.yaml").write_text(yaml_conf)
+
+        # callbacks declaration
+    callbacks_store = [RichProgressBar()]
+
+    if conf.train.early_stopping_callback is not None:
+        early_stopping_callback: EarlyStopping = hydra.utils.instantiate(
+            conf.train.early_stopping_callback
+        )
+        callbacks_store.append(early_stopping_callback)
+
+    if conf.train.model_checkpoint_callback is not None:
+        model_checkpoint_callback: ModelCheckpoint = hydra.utils.instantiate(
+            conf.train.model_checkpoint_callback,
+            dirpath=experiment_path / "checkpoints",
+        )
+        callbacks_store.append(model_checkpoint_callback)
+
+    # trainer
+    logger.log(f"Instantiating the Trainer")
+    trainer: Trainer = hydra.utils.instantiate(
+        conf.train.pl_trainer,
+        callbacks=callbacks_store,
+        logger=experiment_logger,
+    )
+
+    if experiment_path:
+        # save labels before starting training
+        model_export = experiment_path / "model_export"
+        model_export.mkdir(exist_ok=True, parents=True)
+        # save labels
+        pl_data_module.save_labels(model_export / "labels.json")
+
+    # module fit
+    trainer.fit(pl_module, datamodule=pl_data_module)
+
+    # module test
+    trainer.test(pl_module, datamodule=pl_data_module)
+
+
+def set_determinism_the_old_way(deterministic: bool):
+    # determinism for cudnn
+    torch.backends.cudnn.deterministic = deterministic
+    if deterministic:
+        # fixing non-deterministic part of horovod
+        # https://github.com/PyTorchLightning/pytorch-lightning/pull/1572/files#r420279383
+        os.environ["HOROVOD_FUSION_THRESHOLD"] = str(0)
+
+
+@hydra.main(config_path="../../conf", config_name="default", version_base="1.1")
+def main(conf: omegaconf.DictConfig):
+    print(OmegaConf.to_yaml(conf))
+    train(conf)
+
+
+if __name__ == "__main__":
+    main()

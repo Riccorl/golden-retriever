@@ -1,0 +1,14 @@
+_target_: models.pl_modules.BasePLModule
+
+model:
+  _target_: models.model.BaseModel
+  language_model: "bert-base-cased"
+  your_feature: 1
+
+optim_params:
+  optimizer: "radam"
+  use_scheduler: False
+  lr: 2e-4
+  lm_lr: 2e-5
+  lm_weight_decay: 0.0
+  weight_decay: 0
