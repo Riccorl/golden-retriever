@@ -5,6 +5,7 @@ model_name: ${model_name}  # used to name the directory in which model's checkpo
 project_name: project_name  # used to name the project in wandb
 export: False
 float32_matmul_precision: "medium"
+set_determinism_the_old_way: False
 
 # pl_trainer
 pl_trainer:

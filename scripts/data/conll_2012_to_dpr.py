@@ -3,8 +3,6 @@ import os
 from pathlib import Path
 from typing import Union, Dict, List, Optional, Any
 
-from nlp_dataset_readers import Conll2012Reader
-
 
 def conll_2012_to_dpr(
     conll_path: Union[str, os.PathLike],
@@ -14,10 +12,7 @@ def conll_2012_to_dpr(
     # Read CoNLL 2012 file
     with open(conll_path, "r") as f:
         conll_data = json.load(f)
-    # conll_data = Conll2012Reader().read(conll_path)
-    # all_predicates = set(
-    #     [p.sense for sentence in conll_data for p in sentence.predicates]
-    # )
+
     definitions = {}
     if definitions_path is not None:
         # Read definitions
@@ -49,7 +44,12 @@ def conll_2012_to_dpr(
                 }
             )
             for role_index, role in enumerate(annotation["roles"]):
-                if role == "B-V" or role == "I-V" or role.startswith("I-") or role == "_":
+                if (
+                    role == "B-V"
+                    or role == "I-V"
+                    or role.startswith("I-")
+                    or role == "_"
+                ):
                     continue
                 role = role[2:]
                 positive_ctxs.append(

@@ -78,7 +78,9 @@ def read_frames(path: str, pos_tag: str = None, verbal_predicates: Dict = None):
     frames = {}
 
     for filename in sorted(os.listdir(path)):
-        if not filename.endswith(".xml") or (pos_tag and f"-{pos_tag}." not in filename):
+        if not filename.endswith(".xml") or (
+            pos_tag and f"-{pos_tag}." not in filename
+        ):
             continue
 
         file_path = os.path.join(path, filename)

@@ -5,6 +5,7 @@ from typing import Any, Union, List, Optional, Sequence
 import hydra
 import pytorch_lightning as pl
 import torch
+import transformers as tr
 from omegaconf import DictConfig
 from pytorch_lightning.utilities.types import EVAL_DATALOADERS
 from torch.utils.data import DataLoader, Dataset
@@ -16,52 +17,12 @@ logger = get_console_logger()
 
 
 class BasePLDataModule(pl.LightningDataModule):
-    """
-    FROM LIGHTNING DOCUMENTATION
-
-    A DataModule standardizes the training, val, test splits, data preparation and transforms.
-    The main advantage is consistent data splits, data preparation and transforms across models.
-
-    Example::
-
-        class MyDataModule(LightningDataModule):
-            def __init__(self):
-                super().__init__()
-            def prepare_data(self):
-                # download, split, etc...
-                # only called on 1 GPU/TPU in distributed
-            def setup(self):
-                # make assignments here (val/train/test split)
-                # called on every process in DDP
-            def train_dataloader(self):
-                train_split = Dataset(...)
-                return DataLoader(train_split)
-            def val_dataloader(self):
-                val_split = Dataset(...)
-                return DataLoader(val_split)
-            def test_dataloader(self):
-                test_split = Dataset(...)
-                return DataLoader(test_split)
-
-    A DataModule implements 5 key methods:
-
-    * **prepare_data** (things to do on 1 GPU/TPU not on every GPU/TPU in distributed mode).
-    * **setup**  (things to do on every accelerator in distributed mode).
-    * **train_dataloader** the training dataloader.
-    * **val_dataloader** the val dataloader(s).
-    * **test_dataloader** the test dataloader(s).
-
-
-    This allows you to share a full dataset without explaining how to download,
-    split transform and process the data
-
-    """
-
     def __init__(
         self,
         datasets: DictConfig,
         batch_sizes: DictConfig,
         num_workers: DictConfig,
+        tokenizer: Union[str, tr.PreTrainedTokenizer],
         labels: Labels = None,
         *args,
         **kwargs,
@@ -76,6 +37,12 @@ class BasePLDataModule(pl.LightningDataModule):
         self.test_datasets: Optional[Sequence[Dataset]] = None
         # label file
         self.labels: Labels = labels
+        # tokenizer
+        self.tokenizer = (
+            tokenizer
+            if isinstance(tokenizer, tr.PreTrainedTokenizer)
+            else tr.AutoTokenizer.from_pretrained(tokenizer)
+        )
 
     def build_labels(self) -> Labels:
         """
@@ -124,7 +91,9 @@ class BasePLDataModule(pl.LightningDataModule):
             batch_size=self.batch_sizes.train,
             num_workers=self.num_workers.train,
             pin_memory=True,
-            collate_fn=partial(self.train_dataset.collate_fn, *args, **kwargs),
+            collate_fn=partial(
+                self.train_dataset.collate_fn, tokenizer=self.tokenizer, *args, **kwargs
+            ),
         )
 
     def val_dataloader(self, *args, **kwargs) -> Union[DataLoader, List[DataLoader]]:
@@ -135,7 +104,9 @@ class BasePLDataModule(pl.LightningDataModule):
                 batch_size=self.batch_sizes.val,
                 num_workers=self.num_workers.val,
                 pin_memory=True,
-                collate_fn=partial(dataset.collate_fn, *args, **kwargs),
+                collate_fn=partial(
+                    dataset.collate_fn, tokenizer=self.tokenizer, *args, **kwargs
+                ),
             )
             for dataset in self.val_datasets
         ]
@@ -148,7 +119,9 @@ class BasePLDataModule(pl.LightningDataModule):
                 batch_size=self.batch_sizes.test,
                 num_workers=self.num_workers.test,
                 pin_memory=True,
-                collate_fn=partial(dataset.collate_fn, *args, **kwargs),
+                collate_fn=partial(
+                    dataset.collate_fn, tokenizer=self.tokenizer, *args, **kwargs
+                ),
             )
             for dataset in self.test_datasets
         ]
@@ -159,7 +132,7 @@ class BasePLDataModule(pl.LightningDataModule):
     def transfer_batch_to_device(
         self, batch: Any, device: torch.device, dataloader_idx: int
     ) -> Any:
-        super().transfer_batch_to_device(batch, device, dataloader_idx)
+        return super().transfer_batch_to_device(batch, device, dataloader_idx)
 
     def __repr__(self) -> str:
         return (

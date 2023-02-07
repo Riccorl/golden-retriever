@@ -15,27 +15,28 @@ from rich.console import Console
 
 from data.pl_data_modules import BasePLDataModule
 from models.pl_modules import BasePLModule
-from utils.logging import get_console_logger
-
-logger = get_console_logger()
 
 
 def train(conf: omegaconf.DictConfig) -> None:
+    # fancy logger
+    console = Console()
     # reproducibility
     pl.seed_everything(conf.train.seed)
-    set_determinism_the_old_way(conf.train.pl_trainer.deterministic)
-    conf.train.pl_trainer.deterministic = False
-    torch.set_float32_matmul_precision(conf.train.float32_matmul_precision)
+    if conf.train.set_determinism_the_old_way:
+        set_determinism_the_old_way(conf.train.pl_trainer.deterministic)
+        conf.train.pl_trainer.deterministic = False
 
-    logger.log(
+    console.log(
         f"Starting training for [bold cyan]{conf.train.model_name}[/bold cyan] model"
     )
     if conf.train.pl_trainer.fast_dev_run:
-        logger.log(
+        console.log(
             f"Debug mode {conf.train.pl_trainer.fast_dev_run}. Forcing debugger configuration"
         )
         # Debuggers don't like GPUs nor multiprocessing
-        conf.train.pl_trainer.gpus = 0
+        conf.train.pl_trainer.accelerator = "cpu"
+        conf.train.pl_trainer.devices = 1
+        conf.train.pl_trainer.strategy = None
         conf.train.pl_trainer.precision = 32
         conf.data.datamodule.num_workers = {
             k: 0 for k in conf.data.datamodule.num_workers
@@ -46,7 +47,7 @@ def train(conf: omegaconf.DictConfig) -> None:
         conf.train.model_checkpoint_callback = None
 
     # data module declaration
-    logger.log(f"Instantiating the Data Module")
+    console.log(f"Instantiating the Data Module")
     pl_data_module: BasePLDataModule = hydra.utils.instantiate(
         conf.data.datamodule, _recursive_=False
     )
@@ -54,16 +55,34 @@ def train(conf: omegaconf.DictConfig) -> None:
     pl_data_module.prepare_data()
     pl_data_module.setup("fit")
 
-    # main module declaration
-    logger.log(f"Instantiating the Model")
-    pl_module: BasePLModule = hydra.utils.instantiate(
-        conf.model, labels=pl_data_module.labels, _recursive_=False
+    # count the number of training steps
+    if "max_epochs" in conf.train.pl_trainer:
+        conf.model.optim_params.num_training_steps = (
+            len(pl_data_module.train_dataloader()) * conf.train.pl_trainer.max_epochs
+        )
+    elif "max_steps" in conf.train.pl_trainer:
+        conf.model.optim_params.num_training_steps = conf.train.pl_trainer.max_steps
+    else:
+        raise ValueError(
+            "Either `max_epochs` or `max_steps` should be specified in the trainer configuration"
+        )
+    # and set the number of warmup steps as 10% of the total number of training steps
+    conf.model.optim_params.num_warmup_steps = int(
+        conf.model.optim_params.num_training_steps * 0.1
     )
+    console.log(
+        f"Expected number of training steps: {conf.model.optim_params.num_training_steps}"
+    )
+    console.log(f"Number of warmup steps: {conf.model.optim_params.num_warmup_steps}")
+
+    # main module declaration
+    console.log(f"Instantiating the Model")
+    pl_module: BasePLModule = hydra.utils.instantiate(conf.model, _recursive_=False)
 
     experiment_logger: Optional[WandbLogger] = None
     experiment_path: Optional[Path] = None
     if conf.logging.log:
-        logger.log(f"Instantiating Wandb Logger")
+        console.log(f"Instantiating Wandb Logger")
         experiment_logger = hydra.utils.instantiate(conf.logging.wandb_arg)
         experiment_logger.watch(pl_module, **conf.logging.watch)
         experiment_path = Path(experiment_logger.experiment.dir)
@@ -74,25 +93,25 @@ def train(conf: omegaconf.DictConfig) -> None:
         # callbacks declaration
     callbacks_store = [RichProgressBar()]
 
+    early_stopping_callback: Optional[EarlyStopping] = None
     if conf.train.early_stopping_callback is not None:
-        early_stopping_callback: EarlyStopping = hydra.utils.instantiate(
+        early_stopping_callback = hydra.utils.instantiate(
             conf.train.early_stopping_callback
         )
         callbacks_store.append(early_stopping_callback)
 
+    model_checkpoint_callback: Optional[ModelCheckpoint] = None
     if conf.train.model_checkpoint_callback is not None:
-        model_checkpoint_callback: ModelCheckpoint = hydra.utils.instantiate(
+        model_checkpoint_callback = hydra.utils.instantiate(
             conf.train.model_checkpoint_callback,
             dirpath=experiment_path / "checkpoints",
         )
         callbacks_store.append(model_checkpoint_callback)
 
     # trainer
-    logger.log(f"Instantiating the Trainer")
+    console.log(f"Instantiating the Trainer")
     trainer: Trainer = hydra.utils.instantiate(
-        conf.train.pl_trainer,
-        callbacks=callbacks_store,
-        logger=experiment_logger,
+        conf.train.pl_trainer, callbacks=callbacks_store, logger=experiment_logger
     )
 
     if experiment_path:
@@ -105,8 +124,15 @@ def train(conf: omegaconf.DictConfig) -> None:
     # module fit
     trainer.fit(pl_module, datamodule=pl_data_module)
 
+    # load best model for testing
+    if model_checkpoint_callback and not conf.train.pl_trainer.fast_dev_run:
+        best_pl_module = BasePLModule.load_from_checkpoint(
+            model_checkpoint_callback.best_model_path
+        )
+    else:
+        best_pl_module = pl_module
     # module test
-    trainer.test(pl_module, datamodule=pl_data_module)
+    trainer.test(best_pl_module, datamodule=pl_data_module)
 
 
 def set_determinism_the_old_way(deterministic: bool):
@@ -120,7 +146,6 @@ def set_determinism_the_old_way(deterministic: bool):
 
 @hydra.main(config_path="../../conf", config_name="default", version_base="1.1")
 def main(conf: omegaconf.DictConfig):
-    print(OmegaConf.to_yaml(conf))
     train(conf)
 
 

@@ -26,20 +26,23 @@ class BasePLModule(pl.LightningModule):
             output_dict: forward output containing the predictions (output logits ecc...) and the loss if any.
 
         """
-        output_dict = {}
-        return output_dict
+        return self.model(**kwargs)
 
     def training_step(self, batch: dict, batch_idx: int) -> torch.Tensor:
-        forward_output = self.forward(**batch)
+        step_kwargs = {**batch, "return_loss": True}
+        forward_output = self.forward(**step_kwargs)
         self.log("loss", forward_output["loss"])
         return forward_output["loss"]
 
     def validation_step(self, batch: dict, batch_idx: int) -> None:
-        forward_output = self.forward(**batch)
+        step_kwargs = {**batch, "return_loss": True, "return_predictions": True}
+        forward_output = self.forward(**step_kwargs)
         self.log("val_loss", forward_output["loss"])
 
     def test_step(self, batch: dict, batch_idx: int) -> Any:
-        raise NotImplementedError
+        step_kwargs = {**batch, "return_loss": True, "return_predictions": True}
+        forward_output = self.forward(**step_kwargs)
+        self.log("test_loss", forward_output["loss"])
 
     def configure_optimizers(self):
         param_optimizer = list(self.named_parameters())

@@ -1,23 +1,27 @@
 datamodule:
   _target_: data.pl_data_modules.BasePLDataModule
+  tokenizer: ${model.model.language_model}
   datasets:
     train:
-      - _target_: data.datasets.BaseDataset
-        name: 'train'
-        path:
-          - 'data/path/to/dataset'
+      _target_: data.datasets.DPRDataset
+      name: 'train'
+      split_contexts: True
+      path:
+        - 'data/preprocessed/ontonotes_definitions/ontonotes_train.json'
 
     val:
-      - _target_: data.datasets.BaseDataset
+      - _target_: data.datasets.DPRDataset
         name: 'val'
+        split_contexts: True
         path:
-          - 'data/path/to/dataset'
+          - 'data/preprocessed/ontonotes_definitions/ontonotes_dev.json'
 
     test:
-      - _target_: data.datasets.BaseDataset
+      - _target_: data.datasets.DPRDataset
         name: 'test'
+        split_contexts: True
         path:
-          - 'data/path/to/dataset'
+          - 'data/preprocessed/ontonotes_definitions/ontonotes_test.json'
 
   batch_sizes:
     train: 32

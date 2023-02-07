@@ -12,3 +12,5 @@ optim_params:
   lm_lr: 2e-5
   lm_weight_decay: 0.0
   weight_decay: 0
+  num_warmup_steps: 10
+  num_training_steps: 1000
