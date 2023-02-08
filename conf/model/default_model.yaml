@@ -6,9 +6,9 @@ model:
   your_feature: 1
 
 optim_params:
-  optimizer: "radam"
+  optimizer: "adam"
   use_scheduler: False
-  lr: 2e-4
+  lr: 2e-5
   lm_lr: 2e-5
   lm_weight_decay: 0.0
   weight_decay: 0

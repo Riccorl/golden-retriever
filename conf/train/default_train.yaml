@@ -16,7 +16,7 @@ pl_trainer:
   strategy: null
   accumulate_grad_batches: 1
   gradient_clip_val: 1.0
-  val_check_interval: 1.0  # you can specify an int "n" here => validation every "n" steps
+  val_check_interval: 0.2  # you can specify an int "n" here => validation every "n" steps
   max_epochs: 40
   deterministic: True
   fast_dev_run: False
@@ -27,8 +27,8 @@ pl_trainer:
 # "early_stopping_callback: null" will disable early stopping
 early_stopping_callback:
   _target_: pytorch_lightning.callbacks.EarlyStopping
-  monitor: val_overall_f1
-  mode: max
+  monitor: val_loss
+  mode: min
   patience: 5
 
 # model_checkpoint_callback

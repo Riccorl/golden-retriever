@@ -77,6 +77,8 @@ class BaseModel(torch.nn.Module):
             q_num = question_encodings.size(0)
             logits = logits.view(q_num, -1)
 
+        logits = F.log_softmax(logits, dim=1)
+
         output = {"logits": logits}
 
         if return_predictions:
@@ -106,20 +108,3 @@ class BaseModel(torch.nn.Module):
         #     logits.view(-1, self.labels.get_label_size()), labels.view(-1)
         # )
         return F.nll_loss(logits, labels, reduction="mean")
-
-    @staticmethod
-    def dot_product(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-        """
-        Calculates x->y scores for every row in y
-
-        Args:
-            x (`torch.Tensor`):
-                The first tensor, with shape (n1, D).
-            y (`torch.Tensor`):
-                The second tensor, with shape (n2, D).
-
-        Returns:
-            obj:`torch.Tensor`: The dot product of the two tensors.
-        """
-        # x: n1 x D, y: n2 x D, result n1 x n2
-        return torch.matmul(x, torch.transpose(y, 0, 1))

@@ -73,16 +73,18 @@ class BasePLDataModule(pl.LightningDataModule):
             # usually there is only one dataset for train
             # if you need more train loader, you can follow
             # the same logic as val and test datasets
-            self.train_dataset = hydra.utils.instantiate(self.datasets.train)
-            self.val_datasets = [
-                hydra.utils.instantiate(dataset_cfg)
-                for dataset_cfg in self.datasets.val
-            ]
-        if stage == "test" or stage is None:
-            self.test_datasets = [
-                hydra.utils.instantiate(dataset_cfg)
-                for dataset_cfg in self.datasets.test
-            ]
+            if self.train_dataset is None:
+                self.train_dataset = hydra.utils.instantiate(self.datasets.train)
+                self.val_datasets = [
+                    hydra.utils.instantiate(dataset_cfg)
+                    for dataset_cfg in self.datasets.val
+                ]
+        if stage == "test":
+            if self.test_datasets is None:
+                self.test_datasets = [
+                    hydra.utils.instantiate(dataset_cfg)
+                    for dataset_cfg in self.datasets.test
+                ]
 
     def train_dataloader(self, *args, **kwargs) -> DataLoader:
         return DataLoader(

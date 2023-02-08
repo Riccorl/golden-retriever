@@ -29,20 +29,37 @@ class BasePLModule(pl.LightningModule):
         return self.model(**kwargs)
 
     def training_step(self, batch: dict, batch_idx: int) -> torch.Tensor:
-        step_kwargs = {**batch, "return_loss": True}
-        forward_output = self.forward(**step_kwargs)
+        forward_output = self.shared_step(batch, batch_idx)
         self.log("loss", forward_output["loss"])
         return forward_output["loss"]
 
     def validation_step(self, batch: dict, batch_idx: int) -> None:
-        step_kwargs = {**batch, "return_loss": True, "return_predictions": True}
-        forward_output = self.forward(**step_kwargs)
+        forward_output = self.shared_step(batch, batch_idx, is_eval=True)
         self.log("val_loss", forward_output["loss"])
+        self.log(
+            "val_pred_ratio",
+            self.compute_metrics(forward_output["predictions"], batch["labels"]),
+            prog_bar=True,
+        )
 
     def test_step(self, batch: dict, batch_idx: int) -> Any:
-        step_kwargs = {**batch, "return_loss": True, "return_predictions": True}
-        forward_output = self.forward(**step_kwargs)
+        forward_output = self.shared_step(batch, batch_idx, is_eval=True)
         self.log("test_loss", forward_output["loss"])
+        self.log(
+            "test_pred_ratio",
+            self.compute_metrics(forward_output["predictions"], batch["labels"]),
+            prog_bar=True,
+        )
+
+    def shared_step(self, batch: dict, batch_idx: int, is_eval: bool = False) -> Any:
+        step_kwargs = {**batch, "return_loss": True}
+        if is_eval:
+            step_kwargs["return_predictions"] = True
+        forward_output = self.forward(**step_kwargs)
+        return forward_output
+
+    def compute_metrics(self, predictions, labels):
+        return (predictions == labels).sum() / len(labels)
 
     def configure_optimizers(self):
         param_optimizer = list(self.named_parameters())
