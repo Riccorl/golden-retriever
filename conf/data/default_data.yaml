@@ -24,9 +24,9 @@ datamodule:
           - 'data/preprocessed/ontonotes_definitions/ontonotes_test.json'
 
   batch_sizes:
-    train: 32
-    val: 32
-    test: 32
+    train: 64
+    val: 64
+    test: 64
 
   num_workers:
     train: 4
