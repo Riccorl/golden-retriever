@@ -7,8 +7,13 @@ from typing import Dict, Iterator, List, Union
 
 import torch
 import transformers as tr
+from rich.progress import track
 from torch.utils.data import Dataset
 from torch.utils.data import IterableDataset
+
+from utils.logging import get_console_logger
+
+logger = get_console_logger()
 
 
 class BaseDataset(Dataset):
@@ -157,7 +162,8 @@ class DPRDataset(BaseDataset):
             #   - "hard_negative_ctxs": a list of hard negative contexts
 
             # Expand the data to have one sample per context
-            for sample in json_data:
+            logger.log(f"Loading [bold cyan]{self.name}[/bold cyan] data from [bold]{path}[/bold]")
+            for sample in track(json_data):
                 if self.split_contexts:
                     positive_ctxs = sample["positive_ctxs"]
                     negative_ctxs = sample["negative_ctxs"]

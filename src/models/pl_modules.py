@@ -4,7 +4,7 @@ import hydra
 import pytorch_lightning as pl
 import torch
 import transformers as tr
-from torch.optim import RAdam
+from torch.optim import RAdam, AdamW
 
 from data.labels import Labels
 
@@ -46,7 +46,7 @@ class BasePLModule(pl.LightningModule):
 
     def configure_optimizers(self):
         param_optimizer = list(self.named_parameters())
-        if self.hparams.optim_params.optimizer == "radam":
+        if self.hparams.optim_params.optimizer in ["radam", "adam"]:
             no_decay = ["bias", "LayerNorm.bias", "LayerNorm.weight"]
             optimizer_grouped_parameters = [
                 {
@@ -65,9 +65,18 @@ class BasePLModule(pl.LightningModule):
                 },
             ]
 
-            optimizer = RAdam(
-                optimizer_grouped_parameters, lr=self.hparams.optim_params.lr
-            )
+            if self.hparams.optim_params.optimizer == "radam":
+                optimizer = RAdam(
+                    optimizer_grouped_parameters, lr=self.hparams.optim_params.lr
+                )
+            elif self.hparams.optim_params.optimizer == "adam":
+                optimizer = AdamW(
+                    optimizer_grouped_parameters, lr=self.hparams.optim_params.lr
+                )
+            else:
+                raise ValueError(
+                    f"Unknown optimizer {self.hparams.optim_params.optimizer}"
+                )
         elif self.hparams.optim_params.optimizer == "fuseadam":
             try:
                 from deepspeed.ops.adam import FusedAdam
