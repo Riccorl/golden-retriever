@@ -2,8 +2,7 @@ _target_: models.pl_modules.BasePLModule
 
 model:
   _target_: models.model.BaseModel
-  language_model: "bert-base-cased"
-  your_feature: 1
+  language_model: "sentence-transformers/all-MiniLM-L12-v2"
 
 optim_params:
   optimizer: "adam"

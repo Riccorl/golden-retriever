@@ -74,15 +74,17 @@ class BasePLDataModule(pl.LightningDataModule):
             # if you need more train loader, you can follow
             # the same logic as val and test datasets
             if self.train_dataset is None:
-                self.train_dataset = hydra.utils.instantiate(self.datasets.train)
+                self.train_dataset = hydra.utils.instantiate(
+                    self.datasets.train, tokenizer=self.tokenizer
+                )
                 self.val_datasets = [
-                    hydra.utils.instantiate(dataset_cfg)
+                    hydra.utils.instantiate(dataset_cfg, tokenizer=self.tokenizer)
                     for dataset_cfg in self.datasets.val
                 ]
         if stage == "test":
             if self.test_datasets is None:
                 self.test_datasets = [
-                    hydra.utils.instantiate(dataset_cfg)
+                    hydra.utils.instantiate(dataset_cfg, tokenizer=self.tokenizer)
                     for dataset_cfg in self.datasets.test
                 ]
 

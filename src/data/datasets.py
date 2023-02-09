@@ -1,13 +1,15 @@
 import json
 import os
+from functools import partial
 from pathlib import Path
 import random
-from typing import Any, Tuple, Sequence
+from typing import Any, Tuple, Sequence, Optional
 from typing import Dict, Iterator, List, Union
 
 import torch
 import transformers as tr
 from rich.progress import track
+from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import Dataset
 from torch.utils.data import IterableDataset
 
@@ -112,10 +114,13 @@ class DPRDataset(BaseDataset):
         self,
         name: str,
         path: Union[str, os.PathLike, List[str], List[os.PathLike]],
+        shuffle: bool = False,
+        pre_process: bool = True,
         split_contexts: bool = False,
         max_negatives: bool = False,
         max_hard_negatives: bool = False,
         shuffle_negative_contexts: bool = False,
+        tokenizer: tr.PreTrainedTokenizer = None,
         **kwargs,
     ):
         super().__init__(name, path, **kwargs)
@@ -123,7 +128,23 @@ class DPRDataset(BaseDataset):
         self.max_negatives = max_negatives
         self.max_hard_negatives = max_hard_negatives
         self.shuffle_negative_contexts = shuffle_negative_contexts
-        self.data = self.load(path)
+
+        self.padding_ops = {
+            "input_ids": partial(
+                self.pad_sequence,
+                value=tokenizer.pad_token_id,
+            ),
+            # value is None because: (read `pad_sequence` doc)
+            "attention_mask": partial(self.pad_sequence, value=0),
+            "token_type_ids": partial(
+                self.pad_sequence,
+                value=tokenizer.pad_token_type_id,
+            ),
+        }
+
+        self.data = self.load(
+            path, tokenizer=tokenizer, pre_process=pre_process, shuffle=shuffle
+        )
 
     def __len__(self) -> int:
         return len(self.data)
@@ -136,6 +157,9 @@ class DPRDataset(BaseDataset):
     def load(
         self,
         paths: Union[str, os.PathLike, List[str], List[os.PathLike]],
+        tokenizer: tr.PreTrainedTokenizer = None,
+        pre_process: bool = True,
+        shuffle: bool = False,
         *args,
         **kwargs,
     ) -> Any:
@@ -147,12 +171,17 @@ class DPRDataset(BaseDataset):
         else:
             paths = [self.project_folder / paths]
 
+        tmp_data = []
         # read the data and put it in a placeholder list
         for path in paths:
             if not path.exists():
                 raise ValueError(f"{path} does not exist")
 
+            logger.log(
+                f"Loading [bold cyan]{self.name}[/bold cyan] data from [bold]{path}[/bold]"
+            )
             json_data = json.load(open(path, "r"))
+            tmp_data += json_data
             # The data is a list of dictionaries, each dictionary is a sample
             # Each sample has the following keys:
             #   - "question": the question
@@ -161,78 +190,173 @@ class DPRDataset(BaseDataset):
             #   - "negative_ctxs": a list of negative contexts
             #   - "hard_negative_ctxs": a list of hard negative contexts
 
+        if pre_process:
+            if not tokenizer:
+                raise ValueError("Tokenizer is required for pre-processing")
+            # Pre-process the data
+            if shuffle:
+                # shuffle the data
+                random.shuffle(tmp_data)
+
+            for sample in track(tmp_data):
+                question = tokenizer(sample["question"])
+                positive_ctxs = [tokenizer(p["text"]) for p in sample["positive_ctxs"]]
+                negative_ctxs = [tokenizer(n["text"]) for n in sample["negative_ctxs"]]
+                hard_negative_ctxs = [
+                    tokenizer(h["text"]) for h in sample["hard_negative_ctxs"]
+                ]
+                context = positive_ctxs + negative_ctxs + hard_negative_ctxs
+                positive_index_end = len(positive_ctxs)
+                data.append(
+                    {
+                        "question": question,
+                        "context": context,
+                        "positives": sample["positive_ctxs"],
+                        "positive_index_end": positive_index_end,
+                    }
+                )
+
             # Expand the data to have one sample per context
-            logger.log(f"Loading [bold cyan]{self.name}[/bold cyan] data from [bold]{path}[/bold]")
-            for sample in track(json_data):
-                if self.split_contexts:
-                    positive_ctxs = sample["positive_ctxs"]
-                    negative_ctxs = sample["negative_ctxs"]
-                    hard_negative_ctxs = sample["hard_negative_ctxs"]
-                    for positive_ctx in positive_ctxs:
-                        data.append(
-                            {
-                                "question": sample["question"],
-                                "contex": positive_ctx["text"],
-                                "is_positive": True,
-                            }
-                        )
-                    if self.shuffle_negative_contexts:
-                        random.shuffle(negative_ctxs)
-                        random.shuffle(hard_negative_ctxs)
-                    for negative_ctx in negative_ctxs[: self.max_negatives]:
-                        data.append(
-                            {
-                                "question": sample["question"],
-                                "contex": negative_ctx["text"],
-                                "is_positive": False,
-                            }
-                        )
-                    for hard_negative_ctx in hard_negative_ctxs[
-                        : self.max_hard_negatives
-                    ]:
-                        data.append(
-                            {
-                                "question": sample["question"],
-                                "contex": hard_negative_ctx["text"],
-                                "is_positive": False,
-                            }
-                        )
-                else:
-                    data.append(
-                        {
-                            "question": sample["question"],
-                            "positive_ctxs": [
-                                ctx["text"] for ctx in sample["positive_ctxs"]
-                            ],
-                            "negative_ctxs": [
-                                ctx["text"] for ctx in sample["negative_ctxs"]
-                            ],
-                            "hard_negative_ctxs": [
-                                ctx["text"] for ctx in sample["hard_negative_ctxs"]
-                            ],
-                        }
-                    )
+            # for sample in track(json_data):
+            #     pass
+            # if tokenizer:
+
+            # if self.split_contexts:
+            #     positive_ctxs = sample["positive_ctxs"]
+            #     negative_ctxs = sample["negative_ctxs"]
+            #     hard_negative_ctxs = sample["hard_negative_ctxs"]
+            #     for positive_ctx in positive_ctxs:
+            #         data.append(
+            #             {
+            #                 "question": sample["question"],
+            #                 "contex": positive_ctx["text"],
+            #                 "is_positive": True,
+            #             }
+            #         )
+            #     if self.shuffle_negative_contexts:
+            #         random.shuffle(negative_ctxs)
+            #         random.shuffle(hard_negative_ctxs)
+            #     for negative_ctx in negative_ctxs[: self.max_negatives]:
+            #         data.append(
+            #             {
+            #                 "question": sample["question"],
+            #                 "contex": negative_ctx["text"],
+            #                 "is_positive": False,
+            #             }
+            #         )
+            #     for hard_negative_ctx in hard_negative_ctxs[
+            #         : self.max_hard_negatives
+            #     ]:
+            #         data.append(
+            #             {
+            #                 "question": sample["question"],
+            #                 "contex": hard_negative_ctx["text"],
+            #                 "is_positive": False,
+            #             }
+            #         )
+            # else:
+            #     data.append(
+            #         {
+            #             "question": sample["question"],
+            #             "positive_ctxs": [
+            #                 ctx["text"] for ctx in sample["positive_ctxs"]
+            #             ],
+            #             "negative_ctxs": [
+            #                 ctx["text"] for ctx in sample["negative_ctxs"]
+            #             ],
+            #             "hard_negative_ctxs": [
+            #                 ctx["text"] for ctx in sample["hard_negative_ctxs"]
+            #             ],
+            #         }
+            #     )
 
         return data
 
     @staticmethod
-    def collate_fn(
-        batch: Any, tokenizer: tr.PreTrainedTokenizer, *args, **kwargs
-    ) -> Any:
-        questions = [sample["question"] for sample in batch]
-        contexts = [sample["contex"] for sample in batch]
+    def pad_sequence(
+        sequence: Union[List, torch.Tensor],
+        length: int,
+        value: Any = None,
+        pad_to_left: bool = False,
+    ) -> Union[List, torch.Tensor]:
+        """
+        Pad the input to the specified length with the given value.
 
-        # tokenize the questions, positive and negative contexts
-        questions = tokenizer(
-            questions, padding=True, truncation=True, return_tensors="pt"
+        Args:
+            sequence (:obj:`List`, :obj:`torch.Tensor`):
+                Element to pad, it can be either a :obj:`List` or a :obj:`torch.Tensor`.
+            length (:obj:`int`, :obj:`str`, optional, defaults to :obj:`subtoken`):
+                Length after pad.
+            value (:obj:`Any`, optional):
+                Value to use as padding.
+            pad_to_left (:obj:`bool`, optional, defaults to :obj:`False`):
+                If :obj:`True`, pads to the left, right otherwise.
+
+        Returns:
+            :obj:`List`, :obj:`torch.Tensor`: The padded sequence.
+
+        """
+        padding = [value] * abs(length - len(sequence))
+        if isinstance(sequence, torch.Tensor):
+            if len(sequence.shape) > 1:
+                raise ValueError(
+                    f"Sequence tensor must be 1D. Current shape is `{len(sequence.shape)}`"
+                )
+            padding = torch.as_tensor(padding)
+        if pad_to_left:
+            if isinstance(sequence, torch.Tensor):
+                return torch.cat((padding, sequence), -1)
+            return padding + sequence
+        if isinstance(sequence, torch.Tensor):
+            return torch.cat((sequence, padding), -1)
+        return sequence + padding
+
+    def convert_to_batch(self, samples: Any, *args, **kwargs) -> Dict[str, torch.Tensor]:
+        """
+        Convert the list of samples to a batch.
+
+        Args:
+            samples (:obj:`List`):
+                List of samples to convert to a batch.
+
+        Returns:
+            :obj:`Dict[str, torch.Tensor]`: The batch.
+        """
+        # invert questions from list of dict to dict of list
+        samples = {k: [d[k] for d in samples] for k in samples[0]}
+        # get max length of questions
+        max_len = max(len(x) for x in samples["input_ids"])
+        # pad the questions
+        for key in samples:
+            if key in self.padding_ops:
+                samples[key] = torch.as_tensor(
+                    [self.padding_ops[key](b, max_len) for b in samples[key]]
+                )
+        return samples
+
+    # @staticmethod
+    def collate_fn(self, batch: Any, *args, **kwargs) -> Any:
+
+        questions = [sample["question"] for sample in batch]
+        contexts = [sample["context"] for sample in batch]
+        # positives = [s for sample in batch for s in sample["positives"]]
+        positive_index_end = [sample["positive_index_end"] for sample in batch]
+
+        questions = self.convert_to_batch(questions)
+        # first flat the list of list of contexts
+        contexts = [c for ctxs in contexts for c in ctxs]
+        # invert contexts from list of dict to dict of list
+        contexts = self.convert_to_batch(contexts)
+
+        # labels is a mask of positive contexts for each question
+        # has shape num_questions x num_contexts
+        labels = torch.zeros(
+            questions["input_ids"].shape[0], contexts["input_ids"].shape[0]
         )
-        # now tokenize the contexts
-        contexts = tokenizer(
-            contexts, padding=True, truncation=True, return_tensors="pt"
-        )
-        # build the labels for the positive contexts
-        labels = torch.tensor(
-            [i for i, sample in enumerate(batch) if sample["is_positive"]],
-            dtype=torch.long,
-        )
+        # set the positive contexts to 1
+        for i, end in enumerate(positive_index_end):
+            start = 0 if i == 0 else positive_index_end[i - 1]
+            end = end if i == 0 else end + positive_index_end[i - 1]
+            labels[i, start:end] = 1
+        # TODO put 1 if there are common positive contexts between questions in positives
         return {"questions": questions, "contexts": contexts, "labels": labels}

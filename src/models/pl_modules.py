@@ -58,7 +58,8 @@ class BasePLModule(pl.LightningModule):
         forward_output = self.forward(**step_kwargs)
         return forward_output
 
-    def compute_metrics(self, predictions, labels):
+    @staticmethod
+    def compute_metrics(predictions, labels):
         return (predictions == labels).sum() / len(labels)
 
     def configure_optimizers(self):

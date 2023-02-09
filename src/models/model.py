@@ -12,6 +12,7 @@ class BaseModel(torch.nn.Module):
         language_model: Union[str, tr.PreTrainedModel] = "bert-base-cased",
         question_encoder: Optional[Union[str, tr.PreTrainedModel]] = None,
         context_encoder: Optional[Union[str, tr.PreTrainedModel]] = None,
+        loss_type: str = "nll",
         labels: Labels = None,
         *args,
         **kwargs,
@@ -19,7 +20,7 @@ class BaseModel(torch.nn.Module):
         super().__init__()
         if labels is not None:
             self.labels = labels
-        
+
         if not question_encoder:
             question_encoder = language_model
         if isinstance(question_encoder, str):
@@ -32,6 +33,8 @@ class BaseModel(torch.nn.Module):
             self.context_encoder = tr.AutoModel.from_pretrained(context_encoder)
         else:
             self.context_encoder = context_encoder
+
+        self.loss_type = loss_type
 
     def encode(
         self,
@@ -47,10 +50,12 @@ class BaseModel(torch.nn.Module):
             model_kwargs["token_type_ids"] = token_type_ids
         return self.mean_pooling(encoder(**model_kwargs), attention_mask)
 
-    def mean_pooling(self, model_output, attention_mask):
-        token_embeddings = model_output[
-            0
-        ]  # First element of model_output contains all token embeddings
+    @staticmethod
+    def mean_pooling(
+        model_output: tr.modeling_utils.ModelOutput, attention_mask: torch.Tensor
+    ) -> torch.Tensor:
+        # First element of model_output contains all token embeddings
+        token_embeddings = model_output[0]
         input_mask_expanded = (
             attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
         )
@@ -107,8 +112,8 @@ class BaseModel(torch.nn.Module):
 
         return output
 
-    @staticmethod
-    def compute_loss(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+    # @staticmethod
+    def compute_loss(self, logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
         """
         Compute the loss of the model.
 
@@ -124,4 +129,27 @@ class BaseModel(torch.nn.Module):
         # return F.cross_entropy(
         #     logits.view(-1, self.labels.get_label_size()), labels.view(-1)
         # )
-        return F.nll_loss(logits, labels, reduction="mean")
+        # return F.nll_loss(logits, labels, reduction="mean")
+        return self.sum_log_nce_loss(logits, labels, reduction="sum")
+
+    def sum_log_nce_loss(self, logits, mask, reduction="sum"):
+        """
+        :param logits: reranking logits(B x C) or span loss(B x C x L)
+        :param mask: reranking mask(B x C) or span mask(B x C x L)
+        :return: sum log p_positive i  over (positive i, negatives)
+        """
+        gold_scores = logits.masked_fill(~(mask.bool()), 0)
+        gold_scores_sum = gold_scores.sum(-1)  # B x C
+        neg_logits = logits.masked_fill(mask.bool(), float("-inf"))  # B x C x L
+        neg_log_sum_exp = torch.logsumexp(neg_logits, -1, keepdim=True)  # B x C x 1
+        norm_term = (
+            torch.logaddexp(logits, neg_log_sum_exp)
+            .masked_fill(~(mask.bool()), 0)
+            .sum(-1)
+        )
+        gold_log_probs = gold_scores_sum - norm_term
+        loss = -gold_log_probs.sum()
+        if reduction == "mean":
+            print("mean reduction")
+            loss /= logits.size(0)
+        return loss
