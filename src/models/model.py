@@ -95,11 +95,11 @@ class BaseModel(torch.nn.Module):
         contexts_encodings = self.encode(self.context_encoder, **contexts)
         logits = torch.matmul(question_encodings, contexts_encodings.T)
 
-        if len(question_encodings.size()) > 1:
-            q_num = question_encodings.size(0)
-            logits = logits.view(q_num, -1)
+        # if len(question_encodings.size()) > 1:
+        #     q_num = question_encodings.size(0)
+        #     logits = logits.view(q_num, -1)
 
-        logits = F.log_softmax(logits, dim=1)
+        # logits = F.log_softmax(logits, dim=1)
 
         output = {"logits": logits}
 
