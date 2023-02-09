@@ -22,6 +22,7 @@ def train(conf: omegaconf.DictConfig) -> None:
     console = Console()
     # reproducibility
     pl.seed_everything(conf.train.seed)
+    torch.set_float32_matmul_precision(conf.train.float32_matmul_precision)
     if conf.train.set_determinism_the_old_way:
         set_determinism_the_old_way(conf.train.pl_trainer.deterministic)
         conf.train.pl_trainer.deterministic = False
