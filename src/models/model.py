@@ -104,7 +104,9 @@ class BaseModel(torch.nn.Module):
         output = {"logits": logits}
 
         if return_predictions:
-            _, predictions = torch.max(logits, 1)
+            # _, predictions = torch.max(logits, 1)
+            predictions = torch.sigmoid(logits)
+            predictions[predictions >= 0.5] = 1
             output["predictions"] = predictions
 
         if return_loss and labels is not None:
