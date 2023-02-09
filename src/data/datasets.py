@@ -211,7 +211,7 @@ class DPRDataset(BaseDataset):
                     {
                         "question": question,
                         "context": context,
-                        "positives": sample["positive_ctxs"],
+                        "positives": set([p["text"] for p in sample["positive_ctxs"]]),
                         "positive_index_end": positive_index_end,
                     }
                 )
@@ -311,7 +311,9 @@ class DPRDataset(BaseDataset):
             return torch.cat((sequence, padding), -1)
         return sequence + padding
 
-    def convert_to_batch(self, samples: Any, *args, **kwargs) -> Dict[str, torch.Tensor]:
+    def convert_to_batch(
+        self, samples: Any, *args, **kwargs
+    ) -> Dict[str, torch.Tensor]:
         """
         Convert the list of samples to a batch.
 
@@ -336,10 +338,8 @@ class DPRDataset(BaseDataset):
 
     # @staticmethod
     def collate_fn(self, batch: Any, *args, **kwargs) -> Any:
-
         questions = [sample["question"] for sample in batch]
         contexts = [sample["context"] for sample in batch]
-        # positives = [s for sample in batch for s in sample["positives"]]
         positive_index_end = [sample["positive_index_end"] for sample in batch]
 
         questions = self.convert_to_batch(questions)
@@ -354,9 +354,20 @@ class DPRDataset(BaseDataset):
             questions["input_ids"].shape[0], contexts["input_ids"].shape[0]
         )
         # set the positive contexts to 1
-        for i, end in enumerate(positive_index_end):
-            start = 0 if i == 0 else positive_index_end[i - 1]
-            end = end if i == 0 else end + positive_index_end[i - 1]
-            labels[i, start:end] = 1
+        # for i, end in enumerate(positive_index_end):
+        #     start = 0 if i == 0 else positive_index_end[i - 1]
+        #     end = end if i == 0 else end + positive_index_end[i - 1]
+        #     labels[i, start:end] = 1
         # TODO put 1 if there are common positive contexts between questions in positives
+        flat_positives = [s for sample in batch for s in sample["positives"]]
+        positives = [sample["positives"] for sample in batch]
+        for p_index, p in enumerate(flat_positives):
+            for i, positive in enumerate(positives):
+                for positive_ctx in positive:
+                    if positive_ctx in p:
+                        labels[i, p_index] = 1
+        # for i, positive in enumerate(positives):
+        #     for j, positive_ctx in enumerate(positive):
+        #         if positive_ctx in contexts:
+
         return {"questions": questions, "contexts": contexts, "labels": labels}
