@@ -44,7 +44,7 @@ class TopKEvaluationCallback(pl.Callback):
             for batch in tqdm(dataloader, desc="Computing context embeddings"):
                 context_embeddings.append(context_encoder(**batch["contexts"]))
                 for context_ids in batch["contexts"]["input_ids"]:
-                    context_index[context_ids.tolist()] = len(context_index)
+                    context_index[" ".join(context_ids.tolist())] = len(context_index)
             context_embeddings = torch.cat(context_embeddings, dim=0)
             # now compute the question embeddings and compute the top-k accuracy
             recall_at_k_scores = []
@@ -60,16 +60,16 @@ class TopKEvaluationCallback(pl.Callback):
                     labels = batch["labels"][i]
                     # get the positive context ids
                     positive_context_ids = [
-                        context_id
-                        for context_id, label in zip(
+                        context_ids
+                        for context_ids, label in zip(
                             batch["contexts"]["input_ids"][i], labels
                         )
                         if label == 1
                     ]
                     # get the positive context indices
                     positive_context_indices = [
-                        context_index[context_id.tolist()]
-                        for context_id in positive_context_ids
+                        context_index[" ".join(context_ids.tolist())]
+                        for context_ids in positive_context_ids
                     ]
                     # compute the recall at k
                     recall_at_k.append(
