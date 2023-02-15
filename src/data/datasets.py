@@ -216,60 +216,6 @@ class DPRDataset(BaseDataset):
                     }
                 )
 
-            # Expand the data to have one sample per context
-            # for sample in track(json_data):
-            #     pass
-            # if tokenizer:
-
-            # if self.split_contexts:
-            #     positive_ctxs = sample["positive_ctxs"]
-            #     negative_ctxs = sample["negative_ctxs"]
-            #     hard_negative_ctxs = sample["hard_negative_ctxs"]
-            #     for positive_ctx in positive_ctxs:
-            #         data.append(
-            #             {
-            #                 "question": sample["question"],
-            #                 "contex": positive_ctx["text"],
-            #                 "is_positive": True,
-            #             }
-            #         )
-            #     if self.shuffle_negative_contexts:
-            #         random.shuffle(negative_ctxs)
-            #         random.shuffle(hard_negative_ctxs)
-            #     for negative_ctx in negative_ctxs[: self.max_negatives]:
-            #         data.append(
-            #             {
-            #                 "question": sample["question"],
-            #                 "contex": negative_ctx["text"],
-            #                 "is_positive": False,
-            #             }
-            #         )
-            #     for hard_negative_ctx in hard_negative_ctxs[
-            #         : self.max_hard_negatives
-            #     ]:
-            #         data.append(
-            #             {
-            #                 "question": sample["question"],
-            #                 "contex": hard_negative_ctx["text"],
-            #                 "is_positive": False,
-            #             }
-            #         )
-            # else:
-            #     data.append(
-            #         {
-            #             "question": sample["question"],
-            #             "positive_ctxs": [
-            #                 ctx["text"] for ctx in sample["positive_ctxs"]
-            #             ],
-            #             "negative_ctxs": [
-            #                 ctx["text"] for ctx in sample["negative_ctxs"]
-            #             ],
-            #             "hard_negative_ctxs": [
-            #                 ctx["text"] for ctx in sample["hard_negative_ctxs"]
-            #             ],
-            #         }
-            #     )
-
         return data
 
     @staticmethod

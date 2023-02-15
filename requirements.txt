@@ -6,4 +6,5 @@ rich
 transformers>=4.26,<4.27
 black[d]
 #
-nlp-dataset-readers
+# nlp-dataset-readers
+# farm-haystack

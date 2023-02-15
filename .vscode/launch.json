@@ -1,0 +1,44 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Train Debug",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            },
+            "args": [
+                "model.model.language_model=sentence-transformers/all-MiniLM-L6-v2",
+                "train.pl_trainer.fast_dev_run=True",
+                "train.pl_trainer.accelerator=cpu",
+                "train.pl_trainer.precision=32",
+                "data.datamodule.batch_sizes.train=2",
+                "hydra.run.dir=.",
+                "hydra.output_subdir=null",
+                "hydra/job_logging=disabled",
+                "hydra/hydra_logging=disabled"
+            ],
+            "justMyCode": false
+        },
+        {
+            "name": "Train Debug (GPU)",
+            "type": "python",
+            "request": "launch",
+            "program": "src/bin/train.py",
+            "console": "integratedTerminal",
+            "args": [
+                "model.model.language_model=sentence-transformers/all-MiniLM-L6-v2"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            },
+            "justMyCode": false
+        }
+    ]
+}

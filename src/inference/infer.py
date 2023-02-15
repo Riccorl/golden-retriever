@@ -84,7 +84,7 @@ def main(
     # load the data
     with open(input_path, "r") as f:
         data = json.load(f)
-    
+
     context_embeddings, embedding_dict = produce_context_embeddings(
         checkpoint_path=checkpoint_path,
         data=data,

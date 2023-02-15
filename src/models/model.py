@@ -133,6 +133,7 @@ class BaseModel(torch.nn.Module):
         # )
         # return F.nll_loss(logits, labels, reduction="mean")
         return self.sum_log_nce_loss(logits, labels, reduction="sum")
+        # return self.log_sum_loss(logits, labels)
 
     def sum_log_nce_loss(self, logits, mask, reduction="sum"):
         """
@@ -152,6 +153,21 @@ class BaseModel(torch.nn.Module):
         gold_log_probs = gold_scores_sum - norm_term
         loss = -gold_log_probs.sum()
         if reduction == "mean":
-            print("mean reduction")
+            loss /= logits.size(0)
+        return loss
+
+    def log_sum_loss(self, logits, mask, reduction="sum"):
+        """
+        :param logits: reranking logits(B x C) or span loss(B x C x L)
+        :param mask: reranking mask(B x C) or span mask(B x C x L)
+        :return: log sum p_positive
+        """
+        #  log marginal likelihood
+        gold_logits = logits.masked_fill(~(mask.bool()), -10000)
+        gold_log_sum_exp = torch.logsumexp(gold_logits, -1)
+        all_log_sum_exp = torch.logsumexp(logits, -1)
+        gold_log_probs = gold_log_sum_exp - all_log_sum_exp
+        loss = -gold_log_probs.sum()
+        if reduction == "mean":
             loss /= logits.size(0)
         return loss
