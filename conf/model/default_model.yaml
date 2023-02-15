@@ -1,15 +1,24 @@
-_target_: models.pl_modules.BasePLModule
+language_model: "sentence-transformers/all-MiniLM-L6-v2"
 
-model:
-  _target_: models.model.BaseModel
-  language_model: "sentence-transformers/all-MiniLM-L12-v2"
-
-optim_params:
-  optimizer: "adam"
-  use_scheduler: False
-  lr: 2e-5
-  lm_lr: 2e-5
-  lm_weight_decay: 0.0
-  weight_decay: 0
-  num_warmup_steps: 10
-  num_training_steps: 1000
+pl_module:
+  _target_: models.pl_modules.BasePLModule
+  model:
+    _target_: models.model.BaseModel
+    question_encoder:
+      _target_: models.model.SentenceEncoder
+      language_model: ${model.language_model}
+    context_encoder:
+      _target_: models.model.SentenceEncoder
+      language_model: ${model.language_model}
+    loss_type:
+      _target_: models.losses.MultiLabelNCELoss
+      reduction: "sum"
+  optim_params:
+    optimizer: "adam"
+    use_scheduler: False
+    lr: 2e-5
+    lm_lr: 2e-5
+    lm_weight_decay: 0.0
+    weight_decay: 0
+    num_warmup_steps: 10
+    num_training_steps: 1000

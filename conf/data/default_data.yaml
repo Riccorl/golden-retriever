@@ -1,6 +1,6 @@
 datamodule:
   _target_: data.pl_data_modules.BasePLDataModule
-  tokenizer: ${model.model.language_model}
+  tokenizer: ${model.language_model}
   datasets:
     train:
       _target_: data.datasets.DPRDataset

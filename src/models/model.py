@@ -5,14 +5,62 @@ import torch.nn.functional as F
 from data.labels import Labels
 import transformers as tr
 
+from models.losses import MultiLabelNCELoss
+
+
+class SentenceEncoder(torch.nn.Module):
+    def __init__(
+        self,
+        language_model: Union[
+            str, tr.PreTrainedModel
+        ] = "sentence-transformers/all-MiniLM-6-v2",
+        *args,
+        **kwargs,
+    ):
+        super().__init__()
+        if isinstance(language_model, str):
+            self.language_model = tr.AutoModel.from_pretrained(language_model)
+        else:
+            self.language_model = language_model
+
+    def forward(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+        token_type_ids: Optional[torch.Tensor] = None,
+        pooling_strategy: str = "mean",
+        *args,
+        **kwargs,
+    ) -> torch.Tensor:
+        model_kwargs = {"input_ids": input_ids, "attention_mask": attention_mask}
+        if token_type_ids is not None:
+            model_kwargs["token_type_ids"] = token_type_ids
+
+        model_output = self.language_model(**model_kwargs)
+        if pooling_strategy == "cls":
+            return model_output.pooler_output
+        elif pooling_strategy == "mean":
+            # mean pooling
+            token_embeddings = model_output.last_hidden_state
+            input_mask_expanded = (
+                attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
+            )
+            mean_pooling = torch.sum(
+                token_embeddings * input_mask_expanded, 1
+            ) / torch.clamp(input_mask_expanded.sum(1), min=1e-9)
+            return mean_pooling
+        else:
+            raise ValueError(
+                f"Pooling strategy {pooling_strategy} not supported, use 'cls' or 'mean'"
+            )
+
 
 class BaseModel(torch.nn.Module):
     def __init__(
         self,
-        language_model: Union[str, tr.PreTrainedModel] = "bert-base-cased",
-        question_encoder: Optional[Union[str, tr.PreTrainedModel]] = None,
-        context_encoder: Optional[Union[str, tr.PreTrainedModel]] = None,
-        loss_type: str = "nll",
+        question_encoder: SentenceEncoder,
+        loss_type: torch.nn.Module,
+        context_encoder: Optional[SentenceEncoder] = None,
         labels: Labels = None,
         *args,
         **kwargs,
@@ -21,47 +69,13 @@ class BaseModel(torch.nn.Module):
         if labels is not None:
             self.labels = labels
 
-        if not question_encoder:
-            question_encoder = language_model
-        if isinstance(question_encoder, str):
-            self.question_encoder = tr.AutoModel.from_pretrained(question_encoder)
-        else:
-            self.question_encoder = question_encoder
+        self.question_encoder = question_encoder
+
         if not context_encoder:
-            context_encoder = language_model
-        if isinstance(context_encoder, str):
-            self.context_encoder = tr.AutoModel.from_pretrained(context_encoder)
-        else:
-            self.context_encoder = context_encoder
+            context_encoder = question_encoder
+        self.context_encoder = context_encoder
 
         self.loss_type = loss_type
-
-    def encode(
-        self,
-        encoder: tr.PreTrainedModel,
-        input_ids: torch.Tensor,
-        attention_mask: torch.Tensor,
-        token_type_ids: Optional[torch.Tensor] = None,
-        *args,
-        **kwargs,
-    ) -> torch.Tensor:
-        model_kwargs = {"input_ids": input_ids, "attention_mask": attention_mask}
-        if token_type_ids is not None:
-            model_kwargs["token_type_ids"] = token_type_ids
-        return self.mean_pooling(encoder(**model_kwargs), attention_mask)
-
-    @staticmethod
-    def mean_pooling(
-        model_output: tr.modeling_utils.ModelOutput, attention_mask: torch.Tensor
-    ) -> torch.Tensor:
-        # First element of model_output contains all token embeddings
-        token_embeddings = model_output[0]
-        input_mask_expanded = (
-            attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
-        )
-        return torch.sum(token_embeddings * input_mask_expanded, 1) / torch.clamp(
-            input_mask_expanded.sum(1), min=1e-9
-        )
 
     def forward(
         self,
@@ -91,8 +105,8 @@ class BaseModel(torch.nn.Module):
         Returns:
             obj:`torch.Tensor`: The outputs of the model.
         """
-        question_encodings = self.encode(self.question_encoder, **questions)
-        contexts_encodings = self.encode(self.context_encoder, **contexts)
+        question_encodings = self.question_encoder(**questions)
+        contexts_encodings = self.context_encoder(**contexts)
         logits = torch.matmul(question_encodings, contexts_encodings.T)
 
         # if len(question_encodings.size()) > 1:
@@ -105,69 +119,12 @@ class BaseModel(torch.nn.Module):
 
         if return_predictions:
             # _, predictions = torch.max(logits, 1)
-            predictions = torch.sigmoid(logits)
-            predictions[predictions >= 0.5] = 1
-            output["predictions"] = predictions
+            # predictions = torch.sigmoid(logits)
+            # predictions[predictions >= 0.5] = 1
+            # output["predictions"] = predictions
+            pass
 
         if return_loss and labels is not None:
-            output["loss"] = self.compute_loss(logits, labels)
+            output["loss"] = self.loss_type(logits, labels)
 
         return output
-
-    # @staticmethod
-    def compute_loss(self, logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
-        """
-        Compute the loss of the model.
-
-        Args:
-            logits (`torch.Tensor`):
-                The logits of the model.
-            labels (`torch.Tensor`):
-                The labels of the model.
-
-        Returns:
-            obj:`torch.Tensor`: The loss of the model.
-        """
-        # return F.cross_entropy(
-        #     logits.view(-1, self.labels.get_label_size()), labels.view(-1)
-        # )
-        # return F.nll_loss(logits, labels, reduction="mean")
-        return self.sum_log_nce_loss(logits, labels, reduction="sum")
-        # return self.log_sum_loss(logits, labels)
-
-    def sum_log_nce_loss(self, logits, mask, reduction="sum"):
-        """
-        :param logits: reranking logits(B x C) or span loss(B x C x L)
-        :param mask: reranking mask(B x C) or span mask(B x C x L)
-        :return: sum log p_positive i  over (positive i, negatives)
-        """
-        gold_scores = logits.masked_fill(~(mask.bool()), 0)
-        gold_scores_sum = gold_scores.sum(-1)  # B x C
-        neg_logits = logits.masked_fill(mask.bool(), float("-inf"))  # B x C x L
-        neg_log_sum_exp = torch.logsumexp(neg_logits, -1, keepdim=True)  # B x C x 1
-        norm_term = (
-            torch.logaddexp(logits, neg_log_sum_exp)
-            .masked_fill(~(mask.bool()), 0)
-            .sum(-1)
-        )
-        gold_log_probs = gold_scores_sum - norm_term
-        loss = -gold_log_probs.sum()
-        if reduction == "mean":
-            loss /= logits.size(0)
-        return loss
-
-    def log_sum_loss(self, logits, mask, reduction="sum"):
-        """
-        :param logits: reranking logits(B x C) or span loss(B x C x L)
-        :param mask: reranking mask(B x C) or span mask(B x C x L)
-        :return: log sum p_positive
-        """
-        #  log marginal likelihood
-        gold_logits = logits.masked_fill(~(mask.bool()), -10000)
-        gold_log_sum_exp = torch.logsumexp(gold_logits, -1)
-        all_log_sum_exp = torch.logsumexp(logits, -1)
-        gold_log_probs = gold_log_sum_exp - all_log_sum_exp
-        loss = -gold_log_probs.sum()
-        if reduction == "mean":
-            loss /= logits.size(0)
-        return loss

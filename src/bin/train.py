@@ -28,14 +28,14 @@ def train(conf: omegaconf.DictConfig) -> None:
         conf.train.pl_trainer.deterministic = False
 
     console.log(
-        f"Starting training for [bold cyan]{conf.train.model_name}[/bold cyan] model"
+        f"Starting training for [bold cyan]{conf.model_name}[/bold cyan] model"
     )
     if conf.train.pl_trainer.fast_dev_run:
         console.log(
             f"Debug mode {conf.train.pl_trainer.fast_dev_run}. Forcing debugger configuration"
         )
         # Debuggers don't like GPUs nor multiprocessing
-        conf.train.pl_trainer.accelerator = "cpu"
+        # conf.train.pl_trainer.accelerator = "cpu"
         conf.train.pl_trainer.devices = 1
         conf.train.pl_trainer.strategy = None
         conf.train.pl_trainer.precision = 32
@@ -58,27 +58,27 @@ def train(conf: omegaconf.DictConfig) -> None:
 
     # count the number of training steps
     if "max_epochs" in conf.train.pl_trainer:
-        conf.model.optim_params.num_training_steps = (
+        conf.model.pl_module.optim_params.num_training_steps = (
             len(pl_data_module.train_dataloader()) * conf.train.pl_trainer.max_epochs
         )
     elif "max_steps" in conf.train.pl_trainer:
-        conf.model.optim_params.num_training_steps = conf.train.pl_trainer.max_steps
+        conf.model.pl_module.pl_module.optim_params.num_training_steps = conf.train.pl_trainer.max_steps
     else:
         raise ValueError(
             "Either `max_epochs` or `max_steps` should be specified in the trainer configuration"
         )
     # and set the number of warmup steps as 10% of the total number of training steps
-    conf.model.optim_params.num_warmup_steps = int(
-        conf.model.optim_params.num_training_steps * 0.1
+    conf.model.pl_module.optim_params.num_warmup_steps = int(
+        conf.model.pl_module.optim_params.num_training_steps * 0.1
     )
     console.log(
-        f"Expected number of training steps: {conf.model.optim_params.num_training_steps}"
+        f"Expected number of training steps: {conf.model.pl_module.optim_params.num_training_steps}"
     )
-    console.log(f"Number of warmup steps: {conf.model.optim_params.num_warmup_steps}")
+    console.log(f"Number of warmup steps: {conf.model.pl_module.optim_params.num_warmup_steps}")
 
     # main module declaration
     console.log(f"Instantiating the Model")
-    pl_module: BasePLModule = hydra.utils.instantiate(conf.model, _recursive_=False)
+    pl_module: BasePLModule = hydra.utils.instantiate(conf.model.pl_module)
 
     experiment_logger: Optional[WandbLogger] = None
     experiment_path: Optional[Path] = None
@@ -108,6 +108,10 @@ def train(conf: omegaconf.DictConfig) -> None:
             dirpath=experiment_path / "checkpoints",
         )
         callbacks_store.append(model_checkpoint_callback)
+
+    if conf.train.other_callbacks is not None:
+        for callback in conf.train.other_callbacks:
+            callbacks_store.append(hydra.utils.instantiate(callback))
 
     # trainer
     console.log(f"Instantiating the Trainer")

@@ -10,11 +10,13 @@ from data.labels import Labels
 
 
 class BasePLModule(pl.LightningModule):
-    def __init__(self, labels: Labels = None, *args, **kwargs) -> None:
+    def __init__(
+        self, model: torch.nn.Module, labels: Labels = None, *args, **kwargs
+    ) -> None:
         super().__init__()
         self.save_hyperparameters()
         self.labels = labels
-        self.model = hydra.utils.instantiate(self.hparams.model, labels=labels)
+        self.model = model
 
     def forward(self, **kwargs) -> dict:
         """
@@ -36,20 +38,10 @@ class BasePLModule(pl.LightningModule):
     def validation_step(self, batch: dict, batch_idx: int) -> None:
         forward_output = self.shared_step(batch, batch_idx, is_eval=True)
         self.log("val_loss", forward_output["loss"])
-        self.log(
-            "val_pred_ratio",
-            self.compute_metrics(forward_output["predictions"], batch["labels"]),
-            prog_bar=True,
-        )
 
     def test_step(self, batch: dict, batch_idx: int) -> Any:
         forward_output = self.shared_step(batch, batch_idx, is_eval=True)
         self.log("test_loss", forward_output["loss"])
-        self.log(
-            "test_pred_ratio",
-            self.compute_metrics(forward_output["predictions"], batch["labels"]),
-            prog_bar=True,
-        )
 
     def shared_step(self, batch: dict, batch_idx: int, is_eval: bool = False) -> Any:
         step_kwargs = {**batch, "return_loss": True}
@@ -57,10 +49,6 @@ class BasePLModule(pl.LightningModule):
             step_kwargs["return_predictions"] = True
         forward_output = self.forward(**step_kwargs)
         return forward_output
-
-    @staticmethod
-    def compute_metrics(predictions, labels):
-        return (predictions == labels).sum() / len(labels)
 
     def configure_optimizers(self):
         param_optimizer = list(self.named_parameters())

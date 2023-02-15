@@ -1,8 +1,6 @@
 # reproducibility
 seed: 42
 
-model_name: ${model_name}  # used to name the directory in which model's checkpoints will be stored (experiments/model_name/...)
-project_name: dpr  # used to name the project in wandb
 export: False
 float32_matmul_precision: "medium"
 set_determinism_the_old_way: False
@@ -41,3 +39,7 @@ model_checkpoint_callback:
   save_top_k: 1
   filename: 'checkpoint-val_loss_{val_loss:.4f}-epoch_{epoch:02d}'
   auto_insert_metric_name: False
+
+other_callbacks:
+  - _target_: callbacks.evaluation.TopKEvaluationCallback
+

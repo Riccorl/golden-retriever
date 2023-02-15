@@ -1,15 +1,14 @@
 import json
 import os
+import random
 from functools import partial
 from pathlib import Path
-import random
-from typing import Any, Tuple, Sequence, Optional
+from typing import Any, Tuple, Sequence
 from typing import Dict, Iterator, List, Union
 
 import torch
 import transformers as tr
 from rich.progress import track
-from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import Dataset
 from torch.utils.data import IterableDataset
 
@@ -286,7 +285,6 @@ class DPRDataset(BaseDataset):
     def collate_fn(self, batch: Any, *args, **kwargs) -> Any:
         questions = [sample["question"] for sample in batch]
         contexts = [sample["context"] for sample in batch]
-        positive_index_end = [sample["positive_index_end"] for sample in batch]
 
         questions = self.convert_to_batch(questions)
         # first flat the list of list of contexts
@@ -299,12 +297,6 @@ class DPRDataset(BaseDataset):
         labels = torch.zeros(
             questions["input_ids"].shape[0], contexts["input_ids"].shape[0]
         )
-        # set the positive contexts to 1
-        # for i, end in enumerate(positive_index_end):
-        #     start = 0 if i == 0 else positive_index_end[i - 1]
-        #     end = end if i == 0 else end + positive_index_end[i - 1]
-        #     labels[i, start:end] = 1
-        # TODO put 1 if there are common positive contexts between questions in positives
         flat_positives = [s for sample in batch for s in sample["positives"]]
         positives = [sample["positives"] for sample in batch]
         for p_index, p in enumerate(flat_positives):
@@ -312,8 +304,5 @@ class DPRDataset(BaseDataset):
                 for positive_ctx in positive:
                     if positive_ctx in p:
                         labels[i, p_index] = 1
-        # for i, positive in enumerate(positives):
-        #     for j, positive_ctx in enumerate(positive):
-        #         if positive_ctx in contexts:
 
         return {"questions": questions, "contexts": contexts, "labels": labels}

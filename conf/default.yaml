@@ -1,9 +1,10 @@
 # Required to make the "experiments" dir the default one for the output of the models
 hydra:
   run:
-    dir: ./experiments/${train.model_name}/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    dir: ./experiments/${model_name}/${now:%Y-%m-%d}/${now:%H-%M-%S}
 
-model_name: ${model.model.language_model}
+model_name: ${model.language_model}  # used to name the model in wandb
+project_name: golden-retriever  # used to name the project in wandb
 
 defaults:
   - _self_

@@ -4,8 +4,8 @@ log: True  # set to False to avoid the logging
 
 wandb_arg:
   _target_: pytorch_lightning.loggers.WandbLogger
-  name: ${train.model_name}
-  project: ${train.project_name}
+  name: ${model_name}
+  project: ${project_name}
   save_dir: ./
   log_model: True
   mode: 'online'
