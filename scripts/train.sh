@@ -209,7 +209,7 @@ echo -e "$GPU_RAM_MESSAGE${CHECK_MARK} Starting.\n"
 
 # if you use the `GenerativeDataset` class
 # you may want to set `TOKENIZERS_PARALLELISM` to `false`
-export TOKENIZERS_PARALLELISM=false
+# export TOKENIZERS_PARALLELISM=false
 
 DIRPATH=$(dirname "$(dirname "$(readlink -f "${BASH_SOURCE:-$0}")")")/src
 export PYTHONPATH="$DIRPATH"

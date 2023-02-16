@@ -44,13 +44,13 @@ class TopKEvaluationCallback(pl.Callback):
             # compute the context embeddings
             context_embeddings = []
             context_index = {}
+            i = 0
             for batch in dataloader:
                 batch = move_data_to_device(batch, pl_module.device)
                 context_embeddings.append(context_encoder(**batch["contexts"]))
                 for context_ids in batch["contexts"]["input_ids"]:
-                    context_index[" ".join(map(str, context_ids.tolist()))] = len(
-                        context_index
-                    )
+                    context_index[" ".join(map(str, context_ids.tolist()))] = i
+                    i += 1
             context_embeddings = torch.cat(context_embeddings, dim=0)
 
             # now compute the question embeddings and compute the top-k accuracy
@@ -66,17 +66,14 @@ class TopKEvaluationCallback(pl.Callback):
                 # compute recall at k
                 recall_at_k = []
                 for sample_idx, top_k in enumerate(top_ks):
-                    labels = batch["labels"][sample_idx]
+                    labels = batch["positive_indices"][sample_idx]
                     # get the positive context ids
                     positive_context_ids = [
                         context_ids
-                        for label_idx, context_ids, label in enumerate(
-                            zip(batch["contexts"]["input_ids"], labels)
+                        for context_ids, label in zip(
+                            batch["contexts"]["input_ids"], labels
                         )
                         if label == 1
-                        # this filters out the positives that are not in the
-                        # dataset for the current question
-                        and label_idx in batch["positive_indices"][sample_idx]
                     ]
                     # get the positive context indices
                     positive_context_indices = [
@@ -86,10 +83,9 @@ class TopKEvaluationCallback(pl.Callback):
                     # compute the recall at k
                     recall_at_k.append(
                         len(set(top_k.tolist()) & set(positive_context_indices))
-                        / len(positive_context_indices)
+                        / len(set(positive_context_indices))
                     )
-                recall_at_k = sum(recall_at_k) / len(recall_at_k)
-                recall_at_k_scores.append(recall_at_k)
+                recall_at_k_scores += recall_at_k
 
             mean_recall_at_k = sum(recall_at_k_scores) / len(recall_at_k_scores)
             # compute the mean recall at k

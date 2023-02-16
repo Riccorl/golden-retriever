@@ -24,9 +24,9 @@ if [ -n "$PYTORCH_VERSION" ]; then
   PYTORCH_VERSION="=$PYTORCH_VERSION"
 fi
 if [ -z "$CUDA_VERSION" ]; then
-    conda install -y pytorch"$PYTORCH_VERSION" cpuonly -c pytorch
+  conda install -y pytorch"$PYTORCH_VERSION" cpuonly faiss-cpu -c pytorch
 else
-    conda install -y pytorch"$PYTORCH_VERSION" pytorch-cuda="$CUDA_VERSION" -c pytorch -c nvidia
+  conda install -y pytorch"$PYTORCH_VERSION" pytorch-cuda="$CUDA_VERSION" faiss-gpu -c pytorch -c nvidia
 fi
 
 # install python requirements

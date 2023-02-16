@@ -1,16 +1,19 @@
 import json
+import multiprocessing
 import os
 import random
+import time
 from functools import partial
+from multiprocessing import Pool, Process, Queue, cpu_count
+from multiprocessing.pool import ThreadPool
 from pathlib import Path
-from typing import Any, Tuple, Sequence
-from typing import Dict, Iterator, List, Union
+from typing import Any, Dict, Iterator, List, Sequence, Tuple, Union
 
+import psutil
 import torch
 import transformers as tr
 from rich.progress import track
-from torch.utils.data import Dataset
-from torch.utils.data import IterableDataset
+from torch.utils.data import Dataset, IterableDataset
 
 from utils.logging import get_console_logger
 
@@ -197,25 +200,40 @@ class DPRDataset(BaseDataset):
                 # shuffle the data
                 random.shuffle(tmp_data)
 
-            for sample in track(tmp_data):
-                question = tokenizer(sample["question"])
-                positive_ctxs = [tokenizer(p["text"]) for p in sample["positive_ctxs"]]
-                negative_ctxs = [tokenizer(n["text"]) for n in sample["negative_ctxs"]]
-                hard_negative_ctxs = [
-                    tokenizer(h["text"]) for h in sample["hard_negative_ctxs"]
-                ]
-                context = positive_ctxs + negative_ctxs + hard_negative_ctxs
-                data.append(
-                    {
-                        "question": question,
-                        "context": context,
-                        "positives": set([p["text"] for p in sample["positive_ctxs"]]),
-                        "positive_indices": [
-                            p_idx for p_idx in range(len(positive_ctxs))
-                        ],
-                    }
+            num_cores = psutil.cpu_count(logical=False)
+            # measure how long the preprocessing takes
+            start = time.time()
+            chunks = [tmp_data[i::num_cores] for i in range(num_cores)]
+            with multiprocessing.Pool(processes=num_cores) as pool:
+                results = pool.starmap(
+                    self.process_sample, zip(chunks, [tokenizer] * num_cores)
                 )
+            data = [item for sublist in results for item in sublist]
+            end = time.time()
+            logger.log(
+                f"Pre-processing [bold cyan]{self.name}[/bold cyan] data took [bold]{end - start:.2f}[/bold] seconds"
+            )
+        return data
 
+    @staticmethod
+    def process_sample(samples, tokenizer):
+        data = []
+        for sample in samples:
+            question = tokenizer(sample["question"])
+            positive_ctxs = [tokenizer(p["text"]) for p in sample["positive_ctxs"]]
+            negative_ctxs = [tokenizer(n["text"]) for n in sample["negative_ctxs"]]
+            hard_negative_ctxs = [
+                tokenizer(h["text"]) for h in sample["hard_negative_ctxs"]
+            ]
+            context = positive_ctxs + negative_ctxs + hard_negative_ctxs
+            data.append(
+                {
+                    "question": question,
+                    "context": context,
+                    "positives": set([p["text"] for p in sample["positive_ctxs"]]),
+                    "positive_indices": [p_idx for p_idx in range(len(positive_ctxs))],
+                }
+            )
         return data
 
     @staticmethod
@@ -309,22 +327,42 @@ class DPRDataset(BaseDataset):
                     if positive_ctx in p:
                         labels[i, p_idx] = 1
 
+        # actual positives
+        actual_labels = torch.zeros(
+            questions["input_ids"].shape[0], contexts["input_ids"].shape[0]
+        )
+        positive_indices = [sample["positive_indices"] for sample in batch]
+        for i, p_indices in enumerate(positive_indices):
+            for p_idx in p_indices:
+                # take into account the offset of the positive indices
+                if i == 0:
+                    actual_labels[i, p_idx] = 1
+                else:
+                    actual_labels[i, p_idx + positive_indices[i - 1][-1] + 1] = 1
+
         model_inputs = {"questions": questions, "contexts": contexts, "labels": labels}
 
         # additional stuff
         # positive indices for computing actual recall-at-k that doesn't include
         # the other weak-positive stuff
-        positive_indices = []
-        for s_idx, sample in enumerate(batch):
-            if s_idx == 0:
-                positive_indices.append(sample["positive_indices"])
-            else:
-                # add the last index of the previous sample to the current one as offset
-                positive_indices.append(
-                    [
-                        p_idx + positive_indices[-1][-1] + 1
-                        for p_idx in sample["positive_indices"]
-                    ]
-                )
-        model_inputs.update({"positive_indices": positive_indices})
+        # positive_indices = []
+        # for s_idx, sample in enumerate(batch):
+        #     if s_idx == 0:
+        #         positive_indices.append(sample["positive_indices"])
+        #     else:
+        #         # add the last index of the previous sample to the current one as offset
+        #         positive_indices.append(
+        #             [
+        #                 p_idx + positive_indices[-1][-1] + 1
+        #                 for p_idx in sample["positive_indices"]
+        #             ]
+        #         )
+        # # check if all labels that are euqal to 1 are in positive_indices
+        # for i, l in enumerate(labels):
+        #     for j, v in enumerate(l):
+        #         if v == 1:
+        #             if j not in positive_indices[i] and j >= min(positive_indices[i]) and j <= max(positive_indices[i]):
+        #                 print()
+        # assert j in positive_indices[i]
+        model_inputs.update({"positive_indices": actual_labels})
         return model_inputs

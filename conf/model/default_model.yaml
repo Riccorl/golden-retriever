@@ -12,7 +12,7 @@ pl_module:
       language_model: ${model.language_model}
     loss_type:
       _target_: models.losses.MultiLabelNCELoss
-      reduction: "sum"
+      reduction: "mean"
   optim_params:
     optimizer: "adam"
     use_scheduler: False
