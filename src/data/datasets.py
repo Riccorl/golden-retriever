@@ -205,13 +205,14 @@ class DPRDataset(BaseDataset):
                     tokenizer(h["text"]) for h in sample["hard_negative_ctxs"]
                 ]
                 context = positive_ctxs + negative_ctxs + hard_negative_ctxs
-                positive_index_end = len(positive_ctxs)
                 data.append(
                     {
                         "question": question,
                         "context": context,
                         "positives": set([p["text"] for p in sample["positive_ctxs"]]),
-                        "positive_index_end": positive_index_end,
+                        "positive_indices": [
+                            p_idx for p_idx in range(len(positive_ctxs))
+                        ],
                     }
                 )
 
@@ -299,10 +300,31 @@ class DPRDataset(BaseDataset):
         )
         flat_positives = [s for sample in batch for s in sample["positives"]]
         positives = [sample["positives"] for sample in batch]
-        for p_index, p in enumerate(flat_positives):
+        # labels includes as positive also the labels that appear in the
+        # other samples but are positive for the considered one (avoid false
+        # negative context)
+        for p_idx, p in enumerate(flat_positives):
             for i, positive in enumerate(positives):
                 for positive_ctx in positive:
                     if positive_ctx in p:
-                        labels[i, p_index] = 1
+                        labels[i, p_idx] = 1
 
-        return {"questions": questions, "contexts": contexts, "labels": labels}
+        model_inputs = {"questions": questions, "contexts": contexts, "labels": labels}
+
+        # additional stuff
+        # positive indices for computing actual recall-at-k that doesn't include
+        # the other weak-positive stuff
+        positive_indices = []
+        for s_idx, sample in enumerate(batch):
+            if s_idx == 0:
+                positive_indices.append(sample["positive_indices"])
+            else:
+                # add the last index of the previous sample to the current one as offset
+                positive_indices.append(
+                    [
+                        p_idx + positive_indices[-1][-1] + 1
+                        for p_idx in sample["positive_indices"]
+                    ]
+                )
+        model_inputs.update({"positive_indices": positive_indices})
+        return model_inputs

@@ -16,8 +16,8 @@ pl_module:
   optim_params:
     optimizer: "adam"
     use_scheduler: False
-    lr: 2e-5
-    lm_lr: 2e-5
+    lr: 1e-5
+    lm_lr: 1e-5
     lm_weight_decay: 0.0
     weight_decay: 0
     num_warmup_steps: 10

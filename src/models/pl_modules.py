@@ -14,7 +14,7 @@ class BasePLModule(pl.LightningModule):
         self, model: torch.nn.Module, labels: Labels = None, *args, **kwargs
     ) -> None:
         super().__init__()
-        self.save_hyperparameters()
+        self.save_hyperparameters(ignore=['model'])
         self.labels = labels
         self.model = model
 
