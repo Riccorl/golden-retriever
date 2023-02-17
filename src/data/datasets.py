@@ -200,15 +200,16 @@ class DPRDataset(BaseDataset):
                 # shuffle the data
                 random.shuffle(tmp_data)
 
-            num_cores = psutil.cpu_count(logical=False)
-            # measure how long the preprocessing takes
+            # # measure how long the preprocessing takes
             start = time.time()
-            chunks = [tmp_data[i::num_cores] for i in range(num_cores)]
-            with multiprocessing.Pool(processes=num_cores) as pool:
-                results = pool.starmap(
-                    self.process_sample, zip(chunks, [tokenizer] * num_cores)
-                )
-            data = [item for sublist in results for item in sublist]
+            # num_cores = psutil.cpu_count(logical=False)
+            # chunks = [tmp_data[i::num_cores] for i in range(num_cores)]
+            # with multiprocessing.Pool(processes=num_cores) as pool:
+            #     results = pool.starmap(
+            #         self.process_sample, zip(chunks, [tokenizer] * num_cores)
+            #     )
+            # data = [item for sublist in results for item in sublist]
+            data = self.process_sample(tmp_data, tokenizer)
             end = time.time()
             logger.log(
                 f"Pre-processing [bold cyan]{self.name}[/bold cyan] data took [bold]{end - start:.2f}[/bold] seconds"
@@ -340,29 +341,10 @@ class DPRDataset(BaseDataset):
                 else:
                     actual_labels[i, p_idx + positive_indices[i - 1][-1] + 1] = 1
 
-        model_inputs = {"questions": questions, "contexts": contexts, "labels": labels}
-
-        # additional stuff
-        # positive indices for computing actual recall-at-k that doesn't include
-        # the other weak-positive stuff
-        # positive_indices = []
-        # for s_idx, sample in enumerate(batch):
-        #     if s_idx == 0:
-        #         positive_indices.append(sample["positive_indices"])
-        #     else:
-        #         # add the last index of the previous sample to the current one as offset
-        #         positive_indices.append(
-        #             [
-        #                 p_idx + positive_indices[-1][-1] + 1
-        #                 for p_idx in sample["positive_indices"]
-        #             ]
-        #         )
-        # # check if all labels that are euqal to 1 are in positive_indices
-        # for i, l in enumerate(labels):
-        #     for j, v in enumerate(l):
-        #         if v == 1:
-        #             if j not in positive_indices[i] and j >= min(positive_indices[i]) and j <= max(positive_indices[i]):
-        #                 print()
-        # assert j in positive_indices[i]
-        model_inputs.update({"positive_indices": actual_labels})
+        model_inputs = {
+            "questions": questions,
+            "contexts": contexts,
+            "labels": labels,
+            "positive_indices": actual_labels,
+        }
         return model_inputs

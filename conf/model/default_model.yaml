@@ -12,12 +12,12 @@ pl_module:
       language_model: ${model.language_model}
     loss_type:
       _target_: models.losses.MultiLabelNCELoss
-      reduction: "mean"
+      reduction: "sum"
   optim_params:
     optimizer: "adam"
-    use_scheduler: False
-    lr: 1e-5
-    lm_lr: 1e-5
+    use_scheduler: true
+    lr: 1e-6
+    lm_lr: 1e-6
     lm_weight_decay: 0.0
     weight_decay: 0
     num_warmup_steps: 10

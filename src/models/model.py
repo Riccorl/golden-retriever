@@ -83,7 +83,6 @@ class BaseModel(torch.nn.Module):
         contexts: Dict[str, torch.Tensor],
         labels: Optional[torch.Tensor] = None,
         return_loss: bool = False,
-        return_predictions: bool = False,
         *args,
         **kwargs,
     ) -> Dict[str, torch.Tensor]:
@@ -99,8 +98,6 @@ class BaseModel(torch.nn.Module):
                 The labels of the sentences.
             return_loss (`bool`):
                 Whether to compute the predictions.
-            return_predictions (`bool`):
-                Whether to compute the loss.
 
         Returns:
             obj:`torch.Tensor`: The outputs of the model.
@@ -109,20 +106,7 @@ class BaseModel(torch.nn.Module):
         contexts_encodings = self.context_encoder(**contexts)
         logits = torch.matmul(question_encodings, contexts_encodings.T)
 
-        # if len(question_encodings.size()) > 1:
-        #     q_num = question_encodings.size(0)
-        #     logits = logits.view(q_num, -1)
-
-        # logits = F.log_softmax(logits, dim=1)
-
         output = {"logits": logits}
-
-        if return_predictions:
-            # _, predictions = torch.max(logits, 1)
-            # predictions = torch.sigmoid(logits)
-            # predictions[predictions >= 0.5] = 1
-            # output["predictions"] = predictions
-            pass
 
         if return_loss and labels is not None:
             output["loss"] = self.loss_type(logits, labels)

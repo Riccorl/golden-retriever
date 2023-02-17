@@ -6,6 +6,7 @@ import torch
 from lightning_fabric.utilities.apply_func import move_data_to_device
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+# from faiss.indexer import FaissIndexer
 
 from utils.logging import get_console_logger
 
@@ -28,7 +29,7 @@ class TopKEvaluationCallback(pl.Callback):
         *args,
         **kwargs,
     ) -> dict:
-        logger.log(f"Computing recall-at-{self.k}")
+        logger.log(f"Computing recall@{self.k}")
 
         # retrieve the question and context encoders
         question_encoder = pl_module.model.question_encoder
@@ -49,9 +50,10 @@ class TopKEvaluationCallback(pl.Callback):
                 batch = move_data_to_device(batch, pl_module.device)
                 context_embeddings.append(context_encoder(**batch["contexts"]))
                 for context_ids in batch["contexts"]["input_ids"]:
-                    context_index[" ".join(map(str, context_ids.tolist()))] = i
+                    context_index[i] = context_ids.tolist()
                     i += 1
             context_embeddings = torch.cat(context_embeddings, dim=0)
+            # faiss_indexer = FaissIndexer(context_embeddings, normalize=True)
 
             # now compute the question embeddings and compute the top-k accuracy
             recall_at_k_scores = []
@@ -63,34 +65,35 @@ class TopKEvaluationCallback(pl.Callback):
                 similarity = torch.matmul(question_embeddings, context_embeddings.T)
                 # get the top-k indices
                 top_ks = torch.topk(similarity, k=self.k, dim=1).indices
+                # top_ks = faiss_indexer.search(question_encoder(**batch["questions"]), k=self.k)
                 # compute recall at k
                 recall_at_k = []
                 for sample_idx, top_k in enumerate(top_ks):
                     labels = batch["positive_indices"][sample_idx]
                     # get the positive context ids
                     positive_context_ids = [
-                        context_ids
+                        " ".join(map(str, context_ids.tolist()))
                         for context_ids, label in zip(
                             batch["contexts"]["input_ids"], labels
                         )
                         if label == 1
                     ]
-                    # get the positive context indices
-                    positive_context_indices = [
-                        context_index[" ".join(map(str, context_ids.tolist()))]
-                        for context_ids in positive_context_ids
+                    # get the top_k context ids
+                    top_k_context_ids = [
+                        " ".join(map(str, context_index[context_idx]))
+                        for context_idx in top_k.tolist()
                     ]
                     # compute the recall at k
                     recall_at_k.append(
-                        len(set(top_k.tolist()) & set(positive_context_indices))
-                        / len(set(positive_context_indices))
+                        len(set(top_k_context_ids) & set(positive_context_ids))
+                        / len(set(positive_context_ids))
                     )
                 recall_at_k_scores += recall_at_k
 
-            mean_recall_at_k = sum(recall_at_k_scores) / len(recall_at_k_scores)
             # compute the mean recall at k
-            metrics[f"recall_at_{self.k}_{dataloader_idx}"] = mean_recall_at_k
-
+            mean_recall_at_k = sum(recall_at_k_scores) / len(recall_at_k_scores)
+            metrics[f"recall@{self.k}_{dataloader_idx}"] = mean_recall_at_k
+        metrics[f"recall@{self.k}"] = sum(metrics.values()) / len(metrics)
         return metrics
 
     def on_validation_epoch_end(self, trainer, pl_module):

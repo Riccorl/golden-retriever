@@ -8,6 +8,7 @@ def conll_2012_to_dpr(
     conll_path: Union[str, os.PathLike],
     output_path: Union[str, os.PathLike],
     definitions_path: Optional[Union[str, os.PathLike]] = None,
+    only_predicates: bool = False,
 ) -> List[Dict[str, Any]]:
     # Read CoNLL 2012 file
     with open(conll_path, "r") as f:
@@ -43,22 +44,23 @@ def conll_2012_to_dpr(
                     "passage_id": f"{sentence_id}_{predicate_index}",
                 }
             )
-            for role_index, role in enumerate(annotation["roles"]):
-                if (
-                    role == "B-V"
-                    or role == "I-V"
-                    or role.startswith("I-")
-                    or role == "_"
-                ):
-                    continue
-                role = role[2:]
-                positive_ctxs.append(
-                    {
-                        "title": role,
-                        "text": predicate_definition["roleset"].get(role, role),
-                        "passage_id": f"{sentence_id}_{predicate_index}_{role_index}",
-                    }
-                )
+            if not only_predicates:
+                for role_index, role in enumerate(annotation["roles"]):
+                    if (
+                        role == "B-V"
+                        or role == "I-V"
+                        or role.startswith("I-")
+                        or role == "_"
+                    ):
+                        continue
+                    role = role[2:]
+                    positive_ctxs.append(
+                        {
+                            "title": role,
+                            "text": predicate_definition["roleset"].get(role, role),
+                            "passage_id": f"{sentence_id}_{predicate_index}_{role_index}",
+                        }
+                    )
         if len(positive_ctxs) == 0:
             continue
         dpr.append(
@@ -86,7 +88,8 @@ if __name__ == "__main__":
     parser.add_argument("input", type=str, help="Path to CoNLL 2012 file")
     parser.add_argument("output", type=str, help="Path to output file")
     parser.add_argument("--definitions", type=str, help="Path to output file")
+    parser.add_argument("--only_predicates", action="store_true", help="Only predicates")
     args = parser.parse_args()
 
     # Convert to DPR
-    conll_2012_to_dpr(args.input, args.output, args.definitions)
+    conll_2012_to_dpr(args.input, args.output, args.definitions, args.only_predicates)
