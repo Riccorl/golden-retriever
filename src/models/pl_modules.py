@@ -9,7 +9,7 @@ from torch.optim import RAdam, AdamW
 from data.labels import Labels
 
 
-class BasePLModule(pl.LightningModule):
+class GoldenRetrieverPLModule(pl.LightningModule):
     def __init__(
         self, model: torch.nn.Module, labels: Labels = None, *args, **kwargs
     ) -> None:

@@ -2,8 +2,8 @@ import hydra
 import torch
 from omegaconf import omegaconf
 
-from data.pl_data_modules import BasePLDataModule
-from models.pl_modules import BasePLModule
+from data.pl_data_modules import PLDataModule
+from models.pl_modules import GoldenRetrieverPLModule
 from utils.logging import get_console_logger
 
 logger = get_console_logger()
@@ -14,14 +14,14 @@ def evaluate(conf: omegaconf.DictConfig):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     hydra.utils.log.info("Using {} as device".format(device))
 
-    pl_data_module: BasePLDataModule = hydra.utils.instantiate(
+    pl_data_module: PLDataModule = hydra.utils.instantiate(
         conf.data.datamodule, _recursive_=False
     )
     pl_data_module.prepare_data()
     pl_data_module.setup("test")
 
     logger.log(f"Instantiating the Model from {conf.evaluation.checkpoint}")
-    model = BasePLModule.load_from_checkpoint(
+    model = GoldenRetrieverPLModule.load_from_checkpoint(
         conf.evaluation.checkpoint,
         _recursive_=False,
     )

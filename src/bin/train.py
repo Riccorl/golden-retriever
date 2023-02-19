@@ -13,11 +13,12 @@ from pytorch_lightning.callbacks.progress.rich_progress import RichProgressBar
 from pytorch_lightning.loggers import WandbLogger
 from rich.pretty import pprint
 
-from data.pl_data_modules import BasePLDataModule
-from models.pl_modules import BasePLModule
+from data.pl_data_modules import PLDataModule
+from models.pl_modules import GoldenRetrieverPLModule
 from utils.logging import get_console_logger
 
 logger = get_console_logger()
+
 
 def train(conf: omegaconf.DictConfig) -> None:
     # reproducibility
@@ -27,9 +28,7 @@ def train(conf: omegaconf.DictConfig) -> None:
         set_determinism_the_old_way(conf.train.pl_trainer.deterministic)
         conf.train.pl_trainer.deterministic = False
 
-    logger.log(
-        f"Starting training for [bold cyan]{conf.model_name}[/bold cyan] model"
-    )
+    logger.log(f"Starting training for [bold cyan]{conf.model_name}[/bold cyan] model")
     if conf.train.pl_trainer.fast_dev_run:
         logger.log(
             f"Debug mode {conf.train.pl_trainer.fast_dev_run}. Forcing debugger configuration"
@@ -47,10 +46,12 @@ def train(conf: omegaconf.DictConfig) -> None:
         # remove model checkpoint callback
         conf.train.model_checkpoint_callback = None
 
-    pprint(OmegaConf.to_container(conf), console=logger, expand_all=True)
+    if "print_config" in conf and conf.print_config:
+        pprint(OmegaConf.to_container(conf), console=logger, expand_all=True)
+
     # data module declaration
     logger.log(f"Instantiating the Data Module")
-    pl_data_module: BasePLDataModule = hydra.utils.instantiate(
+    pl_data_module: PLDataModule = hydra.utils.instantiate(
         conf.data.datamodule, _recursive_=False
     )
     # force setup to get labels initialized for the model
@@ -63,7 +64,9 @@ def train(conf: omegaconf.DictConfig) -> None:
             len(pl_data_module.train_dataloader()) * conf.train.pl_trainer.max_epochs
         )
     elif "max_steps" in conf.train.pl_trainer:
-        conf.model.pl_module.pl_module.optim_params.num_training_steps = conf.train.pl_trainer.max_steps
+        conf.model.pl_module.pl_module.optim_params.num_training_steps = (
+            conf.train.pl_trainer.max_steps
+        )
     else:
         raise ValueError(
             "Either `max_epochs` or `max_steps` should be specified in the trainer configuration"
@@ -75,11 +78,13 @@ def train(conf: omegaconf.DictConfig) -> None:
     logger.log(
         f"Expected number of training steps: {conf.model.pl_module.optim_params.num_training_steps}"
     )
-    logger.log(f"Number of warmup steps: {conf.model.pl_module.optim_params.num_warmup_steps}")
+    logger.log(
+        f"Number of warmup steps: {conf.model.pl_module.optim_params.num_warmup_steps}"
+    )
 
     # main module declaration
     logger.log(f"Instantiating the Model")
-    pl_module: BasePLModule = hydra.utils.instantiate(conf.model.pl_module)
+    pl_module: GoldenRetrieverPLModule = hydra.utils.instantiate(conf.model.pl_module)
 
     experiment_logger: Optional[WandbLogger] = None
     experiment_path: Optional[Path] = None
@@ -132,7 +137,7 @@ def train(conf: omegaconf.DictConfig) -> None:
 
     # load best model for testing
     if model_checkpoint_callback and not conf.train.pl_trainer.fast_dev_run:
-        best_pl_module = BasePLModule.load_from_checkpoint(
+        best_pl_module = GoldenRetrieverPLModule.load_from_checkpoint(
             model_checkpoint_callback.best_model_path
         )
     else:
@@ -150,7 +155,7 @@ def set_determinism_the_old_way(deterministic: bool):
         os.environ["HOROVOD_FUSION_THRESHOLD"] = str(0)
 
 
-@hydra.main(config_path="../../conf", config_name="default", version_base="1.1")
+@hydra.main(config_path="../../conf", config_name="default")
 def main(conf: omegaconf.DictConfig):
     train(conf)
 

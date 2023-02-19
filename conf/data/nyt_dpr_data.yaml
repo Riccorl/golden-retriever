@@ -1,0 +1,43 @@
+max_positives: 1
+in_batch_positives_augmentation: False
+
+datamodule:
+  _target_: data.pl_data_modules.PLDataModule
+  tokenizer: ${model.language_model}
+  datasets:
+    train:
+      _target_: data.datasets.DPRDataset
+      name: 'train'
+      split_contexts: True
+      max_positives: ${data.max_positives}
+      in_batch_positives_augmentation: ${data.in_batch_positives_augmentation}
+      path:
+        - 'data/nyt_dpr/train.json'
+
+    val:
+      - _target_: data.datasets.DPRDataset
+        name: 'val'
+        split_contexts: True
+        max_positives: ${data.max_positives}
+        in_batch_positives_augmentation: ${data.in_batch_positives_augmentation}
+        path:
+          - 'data/nyt_dpr/dev.json'
+
+    test:
+      - _target_: data.datasets.DPRDataset
+        name: 'test'
+        split_contexts: True
+        max_positives: ${data.max_positives}
+        in_batch_positives_augmentation: ${data.in_batch_positives_augmentation}
+        path:
+          - 'data/nyt_dpr/test.json'
+
+  batch_sizes:
+    train: 32
+    val: 32
+    test: 32
+
+  num_workers:
+    train: 4
+    val: 4
+    test: 4

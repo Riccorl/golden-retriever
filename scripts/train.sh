@@ -18,6 +18,7 @@ where:
                   training will wait until there is enough space.
     -s            Strategy to use for distributed training, default NULL.
     -o            Run the experiment offline
+    -v            Print the config
     OVERRIDES     Overrides for the experiment, in the form of key=value.
                   For example, 'model_name=bert-base-uncased'
 Example:
@@ -25,11 +26,30 @@ Example:
   ./script/train.sh -l bert-base-cased -m 10000
 "
 
+# Transform long options to short ones
+for arg in "$@"; do
+  shift
+  case "$arg" in
+    '--help')   set -- "$@" '-h'   ;;
+    '--language-model') set -- "$@" '-l'   ;;
+    '--debug')   set -- "$@" '-d'   ;;
+    '--precision')     set -- "$@" '-p'   ;;
+    '--cpu')     set -- "$@" '-c'   ;;
+    '--devices')     set -- "$@" '-g'   ;;
+    '--nodes')     set -- "$@" '-n'   ;;
+    '--gpu-mem')     set -- "$@" '-m'   ;;
+    '--strategy')     set -- "$@" '-s'   ;;
+    '--offline')     set -- "$@" '-o'   ;;
+    '--print')     set -- "$@" '-v'   ;;
+    *)          set -- "$@" "$arg" ;;
+  esac
+done
+
 # check for named params
 #while [ $OPTIND -le "$#" ]; do
-while getopts ":hl:dp:cg:n:m:s:o" opt; do
+while getopts ":hl:dp:cg:n:m:s:ov" opt; do
   case $opt in
-  h)
+  h|help)
     printf "%s$USAGE" && exit 0
     ;;
   l)
@@ -59,6 +79,9 @@ while getopts ":hl:dp:cg:n:m:s:o" opt; do
   o)
     WANDB="offline"
     ;;
+  v)
+    PRINT_CONFIG="++print_config=True"
+    ;;
   \?)
     echo "Invalid option -$OPTARG" >&2 && echo "$USAGE" && exit 0
     ;;
@@ -76,6 +99,10 @@ fi
 shift $((OPTIND - 1))
 # split overrides into key=value pairs
 OVERRIDES=$(echo "$@" | sed -e 's/ /\n/g')
+
+if [ "$PRINT_CONFIG" ]; then
+  OVERRIDES="$OVERRIDES $PRINT_CONFIG"
+fi
 
 # PRELIMINARIES
 CONDA_BASE=$(conda info --base)

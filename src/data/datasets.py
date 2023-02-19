@@ -119,17 +119,21 @@ class DPRDataset(BaseDataset):
         shuffle: bool = False,
         pre_process: bool = True,
         split_contexts: bool = False,
-        max_negatives: bool = False,
-        max_hard_negatives: bool = False,
+        max_positives: int = -1,
+        max_negatives: int = 0,
+        max_hard_negatives: int = 0,
         shuffle_negative_contexts: bool = False,
+        in_batch_positives_augmentation: bool = True,
         tokenizer: tr.PreTrainedTokenizer = None,
         **kwargs,
     ):
         super().__init__(name, path, **kwargs)
         self.split_contexts = split_contexts
+        self.max_positives = max_positives
         self.max_negatives = max_negatives
         self.max_hard_negatives = max_hard_negatives
         self.shuffle_negative_contexts = shuffle_negative_contexts
+        self.in_batch_positives_augmentation = in_batch_positives_augmentation
 
         self.padding_ops = {
             "input_ids": partial(
@@ -209,7 +213,13 @@ class DPRDataset(BaseDataset):
             #         self.process_sample, zip(chunks, [tokenizer] * num_cores)
             #     )
             # data = [item for sublist in results for item in sublist]
-            data = self.process_sample(tmp_data, tokenizer)
+            data = self.process_sample(
+                tmp_data,
+                tokenizer,
+                self.max_positives,
+                self.max_negatives,
+                self.max_hard_negatives,
+            )
             end = time.time()
             logger.log(
                 f"Pre-processing [bold cyan]{self.name}[/bold cyan] data took [bold]{end - start:.2f}[/bold] seconds"
@@ -217,22 +227,34 @@ class DPRDataset(BaseDataset):
         return data
 
     @staticmethod
-    def process_sample(samples, tokenizer):
+    def process_sample(
+        samples: Dict,
+        tokenizer: tr.PreTrainedTokenizer,
+        max_positives: int,
+        max_negatives: int,
+        max_hard_negatives: int,
+    ) -> List[Dict]:
         data = []
         for sample in samples:
             question = tokenizer(sample["question"])
             positive_ctxs = [tokenizer(p["text"]) for p in sample["positive_ctxs"]]
+            if max_positives != -1:
+                positive_ctxs = positive_ctxs[:max_positives]
             negative_ctxs = [tokenizer(n["text"]) for n in sample["negative_ctxs"]]
+            if max_negatives != -1:
+                negative_ctxs = negative_ctxs[:max_negatives]
             hard_negative_ctxs = [
                 tokenizer(h["text"]) for h in sample["hard_negative_ctxs"]
             ]
+            if max_hard_negatives != -1:
+                hard_negative_ctxs = hard_negative_ctxs[:max_hard_negatives]
             context = positive_ctxs + negative_ctxs + hard_negative_ctxs
             data.append(
                 {
                     "question": question,
                     "context": context,
                     "positives": set([p["text"] for p in sample["positive_ctxs"]]),
-                    "positive_indices": [p_idx for p_idx in range(len(positive_ctxs))],
+                    "positive_index_end": len(positive_ctxs)
                 }
             )
         return data
@@ -312,39 +334,48 @@ class DPRDataset(BaseDataset):
         # invert contexts from list of dict to dict of list
         contexts = self.convert_to_batch(contexts)
 
-        # labels is a mask of positive contexts for each question
-        # has shape num_questions x num_contexts
+        # actual positives
         labels = torch.zeros(
             questions["input_ids"].shape[0], contexts["input_ids"].shape[0]
         )
-        flat_positives = [s for sample in batch for s in sample["positives"]]
-        positives = [sample["positives"] for sample in batch]
-        # labels includes as positive also the labels that appear in the
-        # other samples but are positive for the considered one (avoid false
-        # negative context)
-        for p_idx, p in enumerate(flat_positives):
-            for i, positive in enumerate(positives):
-                for positive_ctx in positive:
-                    if positive_ctx in p:
-                        labels[i, p_idx] = 1
+        positive_index_end = [sample["positive_index_end"] for sample in batch]
+        last_end = 0
+        for i, end in enumerate(positive_index_end):
+            start = 0 if i == 0 else last_end
+            end = end if i == 0 else last_end + end
+            labels[i, start:end] = 1
+            last_end = end
+        # positive_indices = [sample["positive_indices"] for sample in batch]
+        # for i, p_indices in enumerate(positive_indices):
+        #     for p_idx in p_indices:
+        #         # take into account the offset of the positive indices
+        #         if i == 0:
+        #             labels[i, p_idx] = 1
+        #         else:
+        #             labels[i, p_idx + int(sum(labels[i - 1]).item())] = 1
 
-        # actual positives
-        actual_labels = torch.zeros(
-            questions["input_ids"].shape[0], contexts["input_ids"].shape[0]
-        )
-        positive_indices = [sample["positive_indices"] for sample in batch]
-        for i, p_indices in enumerate(positive_indices):
-            for p_idx in p_indices:
-                # take into account the offset of the positive indices
-                if i == 0:
-                    actual_labels[i, p_idx] = 1
-                else:
-                    actual_labels[i, p_idx + positive_indices[i - 1][-1] + 1] = 1
+        augmented_labels = None
+        if self.in_batch_positives_augmentation:
+            # labels is a mask of positive contexts for each question
+            # has shape num_questions x num_contexts
+            augmented_labels = torch.zeros(
+                questions["input_ids"].shape[0], contexts["input_ids"].shape[0]
+            )
+            flat_positives = [s for sample in batch for s in sample["positives"]]
+            positives = [sample["positives"] for sample in batch]
+            # labels includes as positive also the labels that appear in the
+            # other samples but are positive for the considered one (avoid false
+            # negative context)
+            for p_idx, p in enumerate(flat_positives):
+                for i, positive in enumerate(positives):
+                    for positive_ctx in positive:
+                        if positive_ctx in p:
+                            augmented_labels[i, p_idx] = 1
 
         model_inputs = {
             "questions": questions,
             "contexts": contexts,
-            "labels": labels,
-            "positive_indices": actual_labels,
+            "labels": augmented_labels if augmented_labels is not None else labels,
+            "labels_for_metrics": labels,
         }
         return model_inputs

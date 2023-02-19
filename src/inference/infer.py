@@ -10,8 +10,8 @@ import transformers as tr
 from omegaconf import omegaconf
 from rich.progress import track
 
-from data.pl_data_modules import BasePLDataModule
-from models.pl_modules import BasePLModule
+from data.pl_data_modules import PLDataModule
+from models.pl_modules import GoldenRetrieverPLModule
 from utils.logging import get_console_logger
 
 logger = get_console_logger()
@@ -49,7 +49,9 @@ def produce_context_embeddings(
     # pl_data_module.setup("test")
 
     logger.log(f"Instantiating the Model from {checkpoint_path}")
-    pl_module = BasePLModule.load_from_checkpoint(checkpoint_path, _recursive_=False)
+    pl_module = GoldenRetrieverPLModule.load_from_checkpoint(
+        checkpoint_path, _recursive_=False
+    )
     pl_module.to(device)
     pl_module.eval()
 

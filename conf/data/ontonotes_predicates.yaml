@@ -1,5 +1,5 @@
 datamodule:
-  _target_: data.pl_data_modules.BasePLDataModule
+  _target_: data.pl_data_modules.PLDataModule
   tokenizer: ${model.language_model}
   datasets:
     train:
@@ -24,9 +24,9 @@ datamodule:
           - 'data/preprocessed/ontonotes_definitions/ontonotes_test.predicates.json'
 
   batch_sizes:
-    train: 8
-    val: 8
-    test: 8
+    train: 4
+    val: 32
+    test: 32
 
   num_workers:
     train: 4

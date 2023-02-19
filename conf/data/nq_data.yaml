@@ -1,5 +1,5 @@
 datamodule:
-  _target_: data.pl_data_modules.BasePLDataModule
+  _target_: data.pl_data_modules.PLDataModule
   tokenizer: ${model.model.language_model}
   datasets:
     train:

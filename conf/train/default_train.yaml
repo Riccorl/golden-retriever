@@ -15,7 +15,7 @@ pl_trainer:
   strategy: null
   accumulate_grad_batches: 1
   gradient_clip_val: 1.0
-  val_check_interval: 0.4  # you can specify an int "n" here => validation every "n" steps
+  val_check_interval: 0.2  # you can specify an int "n" here => validation every "n" steps
   max_epochs: 40
   deterministic: True
   fast_dev_run: False
@@ -34,8 +34,8 @@ early_stopping_callback:
 # "model_checkpoint_callback: null" will disable model checkpointing
 model_checkpoint_callback:
   _target_: pytorch_lightning.callbacks.ModelCheckpoint
-  monitor: val_loss
-  mode: min
+  monitor: val_recall@${train.top_k}
+  mode: max
   verbose: True
   save_top_k: 1
   filename: 'checkpoint-val_recall@${train.top_k}_{val_recall@${train.top_k}:.4f}-epoch_{epoch:02d}'

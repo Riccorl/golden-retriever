@@ -55,7 +55,7 @@ class SentenceEncoder(torch.nn.Module):
             )
 
 
-class BaseModel(torch.nn.Module):
+class GoldenRetriever(torch.nn.Module):
     def __init__(
         self,
         question_encoder: SentenceEncoder,
@@ -109,6 +109,9 @@ class BaseModel(torch.nn.Module):
         output = {"logits": logits}
 
         if return_loss and labels is not None:
+            if isinstance(self.loss_type, torch.nn.NLLLoss):
+                labels = labels.argmax(dim=1)
+                logits = F.log_softmax(logits, dim=1)
             output["loss"] = self.loss_type(logits, labels)
 
         return output

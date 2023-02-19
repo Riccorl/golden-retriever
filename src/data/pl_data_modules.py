@@ -16,7 +16,7 @@ from utils.logging import get_console_logger
 logger = get_console_logger()
 
 
-class BasePLDataModule(pl.LightningDataModule):
+class PLDataModule(pl.LightningDataModule):
     def __init__(
         self,
         datasets: DictConfig,

@@ -6,6 +6,7 @@ import torch
 from lightning_fabric.utilities.apply_func import move_data_to_device
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+
 # from faiss.indexer import FaissIndexer
 
 from utils.logging import get_console_logger
@@ -45,18 +46,27 @@ class TopKEvaluationCallback(pl.Callback):
             # compute the context embeddings
             context_embeddings = []
             context_index = {}
+            contexts = set()
             i = 0
             for batch in dataloader:
                 batch = move_data_to_device(batch, pl_module.device)
-                context_embeddings.append(context_encoder(**batch["contexts"]))
-                for context_ids in batch["contexts"]["input_ids"]:
-                    context_index[i] = context_ids.tolist()
-                    i += 1
-            context_embeddings = torch.cat(context_embeddings, dim=0)
+                emb = context_encoder(**batch["contexts"])
+                # context_embeddings.append()
+                for context_ids, e in zip(batch["contexts"]["input_ids"], emb):
+                    cleaned_context = " ".join(
+                        map(str, [c for c in context_ids.tolist() if c != 0])
+                    )
+                    if cleaned_context not in contexts:
+                        contexts.add(cleaned_context)
+                        context_embeddings.append(e)
+                        context_index[i] = cleaned_context
+                        i += 1
+            context_embeddings = torch.stack(context_embeddings, dim=0)
             # faiss_indexer = FaissIndexer(context_embeddings, normalize=True)
 
             # now compute the question embeddings and compute the top-k accuracy
-            recall_at_k_scores = []
+            # recall_at_k_scores = []
+            hits, total = 0, 0
             # for batch in tqdm(dataloader, desc="Computing question scores"):
             for batch in dataloader:
                 batch = move_data_to_device(batch, pl_module.device)
@@ -69,10 +79,10 @@ class TopKEvaluationCallback(pl.Callback):
                 # compute recall at k
                 recall_at_k = []
                 for sample_idx, top_k in enumerate(top_ks):
-                    labels = batch["positive_indices"][sample_idx]
+                    labels = batch["labels_for_metrics"][sample_idx]
                     # get the positive context ids
                     positive_context_ids = [
-                        " ".join(map(str, context_ids.tolist()))
+                        " ".join(map(str, [c for c in context_ids.tolist() if c != 0]))
                         for context_ids, label in zip(
                             batch["contexts"]["input_ids"], labels
                         )
@@ -80,24 +90,19 @@ class TopKEvaluationCallback(pl.Callback):
                     ]
                     # get the top_k context ids
                     top_k_context_ids = [
-                        " ".join(map(str, context_index[context_idx]))
-                        for context_idx in top_k.tolist()
+                        context_index[context_idx] for context_idx in top_k.tolist()
                     ]
                     # compute the recall at k
-                    recall_at_k.append(
-                        len(set(top_k_context_ids) & set(positive_context_ids))
-                        / len(set(positive_context_ids))
-                    )
-                recall_at_k_scores += recall_at_k
+                    hits += len(set(top_k_context_ids) & set(positive_context_ids))
+                    total += len(set(positive_context_ids))
 
             # compute the mean recall at k
-            mean_recall_at_k = sum(recall_at_k_scores) / len(recall_at_k_scores)
-            metrics[f"recall@{self.k}_{dataloader_idx}"] = mean_recall_at_k
+            recall_at_k = hits / total
+            metrics[f"recall@{self.k}_{dataloader_idx}"] = recall_at_k
         metrics[f"recall@{self.k}"] = sum(metrics.values()) / len(metrics)
         return metrics
 
     def on_validation_epoch_end(self, trainer, pl_module):
-        # transfer the dataloaders to the device
         metrics = self(trainer.val_dataloaders, pl_module)
         metrics = {f"val_{k}": v for k, v in metrics.items()}
         pl_module.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
