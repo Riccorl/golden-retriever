@@ -125,6 +125,7 @@ class DPRDataset(BaseDataset):
         shuffle_negative_contexts: bool = False,
         in_batch_positives_augmentation: bool = True,
         tokenizer: tr.PreTrainedTokenizer = None,
+        contexts: Union[str, os.PathLike, List[str], List[os.PathLike]] = None,
         **kwargs,
     ):
         super().__init__(name, path, **kwargs)
@@ -134,6 +135,9 @@ class DPRDataset(BaseDataset):
         self.max_hard_negatives = max_hard_negatives
         self.shuffle_negative_contexts = shuffle_negative_contexts
         self.in_batch_positives_augmentation = in_batch_positives_augmentation
+
+        if contexts is not None:
+            self.contexts = self.load_contexts(contexts)
 
         self.padding_ops = {
             "input_ids": partial(
@@ -159,6 +163,17 @@ class DPRDataset(BaseDataset):
         self, index
     ) -> Union[Dict[str, torch.Tensor], Tuple[torch.Tensor, torch.Tensor]]:
         return self.data[index]
+
+    def load_contexts(
+        self, path: Union[str, os.PathLike, List[str], List[os.PathLike]]
+    ) -> List[str]:
+        if isinstance(path, str):
+            path = [path]
+        contexts = []
+        for p in path:
+            with open(p, "r") as f:
+                contexts.extend(f.readlines())
+        return contexts
 
     def load(
         self,

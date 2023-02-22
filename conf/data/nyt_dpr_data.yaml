@@ -12,7 +12,7 @@ datamodule:
       max_positives: ${data.max_positives}
       in_batch_positives_augmentation: ${data.in_batch_positives_augmentation}
       path:
-        - 'data/nyt_dpr/train.json'
+        - 'data/dpr-like/nyt/train.json'
 
     val:
       - _target_: data.datasets.DPRDataset
@@ -21,7 +21,7 @@ datamodule:
         max_positives: ${data.max_positives}
         in_batch_positives_augmentation: ${data.in_batch_positives_augmentation}
         path:
-          - 'data/nyt_dpr/dev.json'
+          - 'data/dpr-like/nyt/dev.json'
 
     test:
       - _target_: data.datasets.DPRDataset
@@ -30,7 +30,7 @@ datamodule:
         max_positives: ${data.max_positives}
         in_batch_positives_augmentation: ${data.in_batch_positives_augmentation}
         path:
-          - 'data/nyt_dpr/test.json'
+          - 'data/dpr-like/nyt/test.json'
 
   batch_sizes:
     train: 32

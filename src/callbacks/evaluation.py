@@ -32,8 +32,9 @@ class TopKEvaluationCallback(pl.Callback):
     @torch.no_grad()
     def __call__(
         self,
-        dataloaders: List[DataLoader],
+        trainer: pl.Trainer,
         pl_module: pl.LightningModule,
+        stage: str,
         *args,
         **kwargs,
     ) -> dict:
@@ -47,6 +48,10 @@ class TopKEvaluationCallback(pl.Callback):
 
         # metrics to return
         metrics = {}
+
+        # compute the context embeddings
+        # if there is a list of contexts, use that
+
 
         # compute the context embeddings index for each dataloader
         for dataloader_idx, dataloader in enumerate(dataloaders):
@@ -109,12 +114,12 @@ class TopKEvaluationCallback(pl.Callback):
         metrics[f"recall@{self.k}"] = sum(metrics.values()) / len(metrics)
         return metrics
 
-    def on_validation_epoch_end(self, trainer, pl_module):
-        metrics = self(trainer.val_dataloaders, pl_module)
+    def on_validation_epoch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule):
+        metrics = self(trainer, pl_module, "validation")
         metrics = {f"val_{k}": v for k, v in metrics.items()}
         pl_module.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
 
-    def on_test_epoch_end(self, trainer, pl_module):
-        metrics = self(trainer.test_dataloaders, pl_module)
+    def on_test_epoch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule):
+        metrics = self(trainer, pl_module, "test")
         metrics = {f"test_{k}": v for k, v in metrics.items()}
         pl_module.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
