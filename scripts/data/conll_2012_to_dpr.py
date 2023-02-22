@@ -9,6 +9,7 @@ def conll_2012_to_dpr(
     output_path: Union[str, os.PathLike],
     definitions_path: Optional[Union[str, os.PathLike]] = None,
     only_predicates: bool = False,
+    only_args: bool = False,
 ) -> List[Dict[str, Any]]:
     # Read CoNLL 2012 file
     with open(conll_path, "r") as f:
@@ -37,13 +38,14 @@ def conll_2012_to_dpr(
                 print(f"Predicate {annotation['predicate']} not found in definitions")
                 continue
             predicate_definition = definitions[annotation["predicate"]]
-            positive_ctxs.append(
-                {
-                    "title": annotation["predicate"],
-                    "text": predicate_definition["definition"],
-                    "passage_id": f"{sentence_id}_{predicate_index}",
-                }
-            )
+            if not only_args:
+                positive_ctxs.append(
+                    {
+                        "title": annotation["predicate"],
+                        "text": predicate_definition["definition"],
+                        "passage_id": f"{sentence_id}_{predicate_index}",
+                    }
+                )
             if not only_predicates:
                 for role_index, role in enumerate(annotation["roles"]):
                     if (
@@ -88,8 +90,13 @@ if __name__ == "__main__":
     parser.add_argument("input", type=str, help="Path to CoNLL 2012 file")
     parser.add_argument("output", type=str, help="Path to output file")
     parser.add_argument("--definitions", type=str, help="Path to output file")
-    parser.add_argument("--only_predicates", action="store_true", help="Only predicates")
+    parser.add_argument(
+        "--only_predicates", action="store_true", help="Only predicates"
+    )
+    parser.add_argument("--only_args", action="store_true", help="Only arguments")
     args = parser.parse_args()
 
     # Convert to DPR
-    conll_2012_to_dpr(args.input, args.output, args.definitions, args.only_predicates)
+    conll_2012_to_dpr(
+        args.input, args.output, args.definitions, args.only_predicates, args.only_args
+    )

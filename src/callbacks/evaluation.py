@@ -1,5 +1,6 @@
 # from pytorch_lightning import Callback, LightningModule
-from typing import List, Optional
+import os
+from typing import List, Optional, Union
 
 import pytorch_lightning as pl
 import torch
@@ -16,11 +17,17 @@ logger = get_console_logger()
 
 class TopKEvaluationCallback(pl.Callback):
     def __init__(
-        self, k: int = 100, report_intervals: Optional[int] = None, *args, **kwargs
+        self,
+        k: int = 100,
+        report_intervals: Optional[int] = None,
+        contexts: Union[List[str], os.PathLike] = None,
+        *args,
+        **kwargs,
     ):
         super().__init__(*args, **kwargs)
         self.k = k
         self.report_intervals = report_intervals
+        self.contexts = contexts
 
     @torch.no_grad()
     def __call__(

@@ -1,4 +1,4 @@
-max_positives: 1
+max_positives: -1
 in_batch_positives_augmentation: False
 
 datamodule:

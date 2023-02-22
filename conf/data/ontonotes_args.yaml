@@ -1,0 +1,34 @@
+datamodule:
+  _target_: data.pl_data_modules.PLDataModule
+  tokenizer: ${model.language_model}
+  datasets:
+    train:
+      _target_: data.datasets.DPRDataset
+      name: 'train'
+      split_contexts: True
+      path:
+        - 'data/preprocessed/ontonotes_definitions/ontonotes_train.args.json'
+
+    val:
+      - _target_: data.datasets.DPRDataset
+        name: 'val'
+        split_contexts: True
+        path:
+          - 'data/preprocessed/ontonotes_definitions/ontonotes_dev.args.json'
+
+    test:
+      - _target_: data.datasets.DPRDataset
+        name: 'test'
+        split_contexts: True
+        path:
+          - 'data/preprocessed/ontonotes_definitions/ontonotes_test.args.json'
+
+  batch_sizes:
+    train: 4
+    val: 32
+    test: 32
+
+  num_workers:
+    train: 4
+    val: 4
+    test: 4

@@ -206,20 +206,25 @@ class DPRDataset(BaseDataset):
 
             # # measure how long the preprocessing takes
             start = time.time()
-            # num_cores = psutil.cpu_count(logical=False)
-            # chunks = [tmp_data[i::num_cores] for i in range(num_cores)]
-            # with multiprocessing.Pool(processes=num_cores) as pool:
-            #     results = pool.starmap(
-            #         self.process_sample, zip(chunks, [tokenizer] * num_cores)
-            #     )
-            # data = [item for sublist in results for item in sublist]
-            data = self.process_sample(
-                tmp_data,
-                tokenizer,
-                self.max_positives,
-                self.max_negatives,
-                self.max_hard_negatives,
+            num_cores = psutil.cpu_count(logical=False)
+            chunks = [tmp_data[i::num_cores] for i in range(num_cores)]
+            fn = partial(
+                DPRDataset.process_sample,
+                tokenizer=tokenizer,
+                max_positives=self.max_positives,
+                max_negatives=self.max_negatives,
+                max_hard_negatives=self.max_hard_negatives,
             )
+            with multiprocessing.Pool(processes=num_cores) as pool:
+                results = pool.map(fn, chunks)
+            data = [item for sublist in results for item in sublist]
+            # data = self.process_sample(
+            #     tmp_data,
+            #     tokenizer,
+            #     self.max_positives,
+            #     self.max_negatives,
+            #     self.max_hard_negatives,
+            # )
             end = time.time()
             logger.log(
                 f"Pre-processing [bold cyan]{self.name}[/bold cyan] data took [bold]{end - start:.2f}[/bold] seconds"
@@ -228,7 +233,7 @@ class DPRDataset(BaseDataset):
 
     @staticmethod
     def process_sample(
-        samples: Dict,
+        samples: List[Dict],
         tokenizer: tr.PreTrainedTokenizer,
         max_positives: int,
         max_negatives: int,
@@ -254,7 +259,7 @@ class DPRDataset(BaseDataset):
                     "question": question,
                     "context": context,
                     "positives": set([p["text"] for p in sample["positive_ctxs"]]),
-                    "positive_index_end": len(positive_ctxs)
+                    "positive_index_end": len(positive_ctxs),
                 }
             )
         return data
