@@ -9,6 +9,7 @@ wandb_arg:
   save_dir: ./
   log_model: True
   mode: 'online'
+#  entity: null
 
 watch:
   log: 'all'

@@ -13,10 +13,15 @@ pl_module:
     loss_type:
       _target_: models.losses.MultiLabelNCELoss
       reduction: "sum"
-  optim_params:
-    optimizer: "radam"
-    use_scheduler: false
-    lr: 1e-5
-    weight_decay: 0
-    num_warmup_steps: 10
-    num_training_steps: 1000
+    optimizer: optimizer.radam
+    lr_scheduler: scheduler.linear_scheduler_with_warmup
+#  optim_params:
+#    optimizer: "adam"
+#    use_scheduler: true
+#    lr: 1e-6
+#    lm_lr: 1e-6
+#    lm_weight_decay: 0.0
+#    weight_decay: 0
+#    num_warmup_steps: 10
+#    num_training_steps: 1000
+

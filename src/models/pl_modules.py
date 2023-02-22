@@ -1,9 +1,10 @@
-from typing import Any
+from typing import Any, Union
 
 import hydra
 import pytorch_lightning as pl
 import torch
 import transformers as tr
+from omegaconf import DictConfig
 from torch.optim import RAdam, AdamW
 
 from data.labels import Labels
@@ -11,12 +12,19 @@ from data.labels import Labels
 
 class GoldenRetrieverPLModule(pl.LightningModule):
     def __init__(
-        self, model: torch.nn.Module, labels: Labels = None, *args, **kwargs
+        self,
+        model: Union[torch.nn.Module, DictConfig],
+        labels: Labels = None,
+        *args,
+        **kwargs,
     ) -> None:
         super().__init__()
-        self.save_hyperparameters(ignore=["model"])
+        self.save_hyperparameters()
         self.labels = labels
-        self.model = model
+        if isinstance(model, DictConfig):
+            self.model = hydra.utils.instantiate(model, labels=labels, *args, **kwargs)
+        else:
+            self.model = model
 
     def forward(self, **kwargs) -> dict:
         """
@@ -42,6 +50,18 @@ class GoldenRetrieverPLModule(pl.LightningModule):
     def test_step(self, batch: dict, batch_idx: int) -> Any:
         forward_output = self.forward(**{**batch, "return_loss": True})
         self.log("test_loss", forward_output["loss"])
+
+    def configure_optimizers(self):
+        optimizer = hydra.utils.instantiate(
+            self.hparams.optimizer, params=self.parameters(), _convert_="partial"
+        )
+        if "lr_scheduler" not in self.hparams:
+            return [optimizer]
+
+        lr_scheduler = hydra.utils.instantiate(
+            self.hparams.lr_scheduler, optimizer=optimizer
+        )
+        return [optimizer], [lr_scheduler]
 
     def configure_optimizers(self):
         param_optimizer = list(self.named_parameters())

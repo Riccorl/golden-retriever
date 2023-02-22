@@ -84,7 +84,7 @@ def train(conf: omegaconf.DictConfig) -> None:
 
     # main module declaration
     logger.log(f"Instantiating the Model")
-    pl_module: GoldenRetrieverPLModule = hydra.utils.instantiate(conf.model.pl_module)
+    pl_module: GoldenRetrieverPLModule = hydra.utils.instantiate(conf.model.pl_module, _recursive_=False)
 
     experiment_logger: Optional[WandbLogger] = None
     experiment_path: Optional[Path] = None
