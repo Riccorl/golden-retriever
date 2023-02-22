@@ -89,11 +89,11 @@ while getopts ":hl:dp:cg:n:m:s:ov" opt; do
 done
 
 # if LANG_MODEL_NAME is not specified, abort
-if [ -z "$LANG_MODEL_NAME" ]; then
-  printf "A language model name must be specified.\n\n"
-  printf "%s$USAGE"
-  exit 0
-fi
+# if [ -z "$LANG_MODEL_NAME" ]; then
+#   printf "A language model name must be specified.\n\n"
+#   printf "%s$USAGE"
+#   exit 0
+# fi
 
 # shift for overrides
 shift $((OPTIND - 1))
@@ -102,6 +102,10 @@ OVERRIDES=$(echo "$@" | sed -e 's/ /\n/g')
 
 if [ "$PRINT_CONFIG" ]; then
   OVERRIDES="$OVERRIDES $PRINT_CONFIG"
+fi
+
+if [ "$LANG_MODEL_NAME" ]; then
+  OVERRIDES="$OVERRIDES model_name=$LANG_MODEL_NAME"
 fi
 
 # PRELIMINARIES
@@ -244,8 +248,7 @@ export PYTHONPATH="$DIRPATH"
 export HYDRA_FULL_ERROR=1
 
 if [ "$DEV_RUN" = "True" ]; then
-  python src/bin/train.py \
-    "model.language_model=$LANG_MODEL_NAME" \
+  python src/run/train.py \
     "train.pl_trainer.fast_dev_run=$DEV_RUN" \
     "train.pl_trainer.devices=$DEVICES" \
     "train.pl_trainer.accelerator=$ACCELERATOR" \
@@ -258,8 +261,7 @@ if [ "$DEV_RUN" = "True" ]; then
     "hydra/hydra_logging=disabled" \
     $OVERRIDES
 else
-  python src/bin/train.py \
-    "model.language_model=$LANG_MODEL_NAME" \
+  python src/run/train.py \
     "train.pl_trainer.fast_dev_run=$DEV_RUN" \
     "train.pl_trainer.devices=$DEVICES" \
     "train.pl_trainer.accelerator=$ACCELERATOR" \

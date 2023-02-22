@@ -5,12 +5,20 @@ CONDA_BASE=$(conda info --base)
 source "$CONDA_BASE"/etc/profile.d/conda.sh
 
 # create conda env
-read -rp "Enter environment name: " ENV_NAME
+read -rp "Enter environment name or prefix: " ENV_NAME
 read -rp "Enter python version (default 3.9): " PYTHON_VERSION
 if [ -z "$PYTHON_VERSION" ]; then
   PYTHON_VERSION="3.9"
 fi
-conda create -yn "$ENV_NAME" python="$PYTHON_VERSION"
+
+# check if ENV_NAME is a full path
+if [[ "$ENV_NAME" == /* ]]; then
+  CONDA_NEW_ARG="--prefix"
+else
+  CONDA_NEW_ARG="--name"
+fi
+
+conda create -y "$CONDA_NEW_ARG" "$ENV_NAME" python="$PYTHON_VERSION" "$PREFIX"
 conda activate "$ENV_NAME"
 
 # replace placeholder env with $ENV_NAME in scripts/train.sh

@@ -49,6 +49,8 @@ def train(conf: omegaconf.DictConfig) -> None:
     if "print_config" in conf and conf.print_config:
         pprint(OmegaConf.to_container(conf), console=logger, expand_all=True)
 
+    conf.model.pl_module.lr_scheduler.num_warmup_steps
+
     # data module declaration
     logger.log(f"Instantiating the Data Module")
     pl_data_module: PLDataModule = hydra.utils.instantiate(
@@ -59,32 +61,43 @@ def train(conf: omegaconf.DictConfig) -> None:
     pl_data_module.setup("fit")
 
     # count the number of training steps
-    if "max_epochs" in conf.train.pl_trainer:
-        conf.model.pl_module.optim_params.num_training_steps = (
+    num_training_steps = 0
+    if "max_epochs" in conf.train.pl_trainer and conf.train.pl_trainer.max_epochs > 0:
+        num_training_steps = (
             len(pl_data_module.train_dataloader()) * conf.train.pl_trainer.max_epochs
         )
-    elif "max_steps" in conf.train.pl_trainer:
-        conf.model.pl_module.pl_module.optim_params.num_training_steps = (
-            conf.train.pl_trainer.max_steps
-        )
+        if "max_steps" in conf.train.pl_trainer:
+            logger.log(
+                f"Both `max_epochs` and `max_steps` are specified in the trainer configuration. "
+                f"Will use `max_epochs` for the number of training steps"
+            )
+            conf.train.pl_trainer.max_steps = None
+    elif "max_steps" in conf.train.pl_trainer and conf.train.pl_trainer.max_steps > 0:
+        num_training_steps = conf.train.pl_trainer.max_steps
     else:
         raise ValueError(
             "Either `max_epochs` or `max_steps` should be specified in the trainer configuration"
         )
-    # and set the number of warmup steps as 10% of the total number of training steps
-    conf.model.pl_module.optim_params.num_warmup_steps = int(
-        conf.model.pl_module.optim_params.num_training_steps * 0.1
-    )
     logger.log(
-        f"Expected number of training steps: {conf.model.pl_module.optim_params.num_training_steps}"
+        f"Expected number of training steps: {num_training_steps}"
     )
-    logger.log(
-        f"Number of warmup steps: {conf.model.pl_module.optim_params.num_warmup_steps}"
-    )
+
+    if "lr_scheduler" in conf.model.pl_module and conf.model.pl_module.lr_scheduler:
+        conf.model.pl_module.lr_scheduler.num_training_steps = num_training_steps
+        # set the number of warmup steps as 10% of the total number of training steps
+        if conf.model.pl_module.lr_scheduler.num_warmup_steps is None:
+            conf.model.pl_module.lr_scheduler.num_warmup_steps = int(
+                conf.model.pl_module.lr_scheduler.num_training_steps * 0.1
+            )
+        logger.log(
+            f"Number of warmup steps: { conf.model.pl_module.lr_scheduler.num_training_steps}"
+        )
 
     # main module declaration
     logger.log(f"Instantiating the Model")
-    pl_module: GoldenRetrieverPLModule = hydra.utils.instantiate(conf.model.pl_module, _recursive_=False)
+    pl_module: GoldenRetrieverPLModule = hydra.utils.instantiate(
+        conf.model.pl_module, _recursive_=False
+    )
 
     experiment_logger: Optional[WandbLogger] = None
     experiment_path: Optional[Path] = None

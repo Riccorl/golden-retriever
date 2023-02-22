@@ -66,6 +66,10 @@ class PLDataModule(pl.LightningDataModule):
         self.labels.to_file(path)
 
     def prepare_data(self, *args, **kwargs):
+        """
+        Method for preparing the data before the training. This method is called only once. 
+        It is used to download the data, tokenize the data, etc.
+        """
         pass
 
     def setup(self, stage: Optional[str] = None):
