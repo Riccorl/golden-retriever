@@ -7,21 +7,21 @@ datamodule:
       name: 'train'
       split_contexts: True
       path:
-        - 'data/dpr-like/ontonotes/ontonotes.train.args.json'
+        - 'data/dpr-like/srl/ontonotes/ontonotes.train.args.json'
 
     val:
       - _target_: data.datasets.DPRDataset
         name: 'val'
         split_contexts: True
         path:
-          - 'data/dpr-like/ontonotes/ontonotes.dev.args.json'
+          - 'data/dpr-like/srl/ontonotes/ontonotes.dev.args.json'
 
     test:
       - _target_: data.datasets.DPRDataset
         name: 'test'
         split_contexts: True
         path:
-          - 'data/dpr-like/ontonotes/ontonotes.test.args.json'
+          - 'data/dpr-like/srl/ontonotes/ontonotes.test.args.json'
 
   batch_sizes:
     train: 4

@@ -125,7 +125,6 @@ class DPRDataset(BaseDataset):
         shuffle_negative_contexts: bool = False,
         in_batch_positives_augmentation: bool = True,
         tokenizer: tr.PreTrainedTokenizer = None,
-        contexts: Union[str, os.PathLike, List[str], List[os.PathLike]] = None,
         **kwargs,
     ):
         super().__init__(name, path, **kwargs)
@@ -135,9 +134,6 @@ class DPRDataset(BaseDataset):
         self.max_hard_negatives = max_hard_negatives
         self.shuffle_negative_contexts = shuffle_negative_contexts
         self.in_batch_positives_augmentation = in_batch_positives_augmentation
-
-        if contexts is not None:
-            self.contexts = self.load_contexts(contexts)
 
         self.padding_ops = {
             "input_ids": partial(
@@ -163,19 +159,6 @@ class DPRDataset(BaseDataset):
         self, index
     ) -> Union[Dict[str, torch.Tensor], Tuple[torch.Tensor, torch.Tensor]]:
         return self.data[index]
-
-    @staticmethod
-    def load_contexts(
-        path: Union[str, os.PathLike, List[str], List[os.PathLike]]
-    ) -> List[str]:
-        if isinstance(path, (str, os.PathLike)):
-            path = [Path(path)]
-        contexts = set()
-        for p in path:
-            with open(p, "r") as f:
-                for line in f:
-                    contexts.add(line.strip())
-        return list(contexts)
 
     def load(
         self,
@@ -223,8 +206,6 @@ class DPRDataset(BaseDataset):
 
             # # measure how long the preprocessing takes
             start = time.time()
-            # num_cores = psutil.cpu_count(logical=False)
-            # chunks = [tmp_data[i::num_cores] for i in range(num_cores)]
             fn = partial(
                 DPRDataset.process_sample,
                 tokenizer=tokenizer,
@@ -232,13 +213,16 @@ class DPRDataset(BaseDataset):
                 max_negatives=self.max_negatives,
                 max_hard_negatives=self.max_hard_negatives,
             )
+            data = fn(tmp_data)
+            # num_cores = psutil.cpu_count(logical=False)
+            # chunks = [tmp_data[i::num_cores] for i in range(num_cores)]
             # with multiprocessing.Pool(processes=num_cores) as pool:
             #     results = pool.map(fn, chunks)
             # data = [item for sublist in results for item in sublist]
-            data = fn(tmp_data)
             end = time.time()
             logger.log(
-                f"Pre-processing [bold cyan]{self.name}[/bold cyan] data took [bold]{end - start:.2f}[/bold] seconds"
+                f"Pre-processing [bold cyan]{self.name}[/bold cyan] "
+                f"data took [bold]{end - start:.2f}[/bold] seconds"
             )
         return data
 
@@ -251,28 +235,66 @@ class DPRDataset(BaseDataset):
         max_hard_negatives: int,
     ) -> List[Dict]:
         data = []
-        for sample in samples:
-            question = tokenizer(sample["question"])
-            positive_ctxs = [tokenizer(p["text"]) for p in sample["positive_ctxs"]]
-            if max_positives != -1:
-                positive_ctxs = positive_ctxs[:max_positives]
-            negative_ctxs = [tokenizer(n["text"]) for n in sample["negative_ctxs"]]
-            if max_negatives != -1:
-                negative_ctxs = negative_ctxs[:max_negatives]
-            hard_negative_ctxs = [
-                tokenizer(h["text"]) for h in sample["hard_negative_ctxs"]
-            ]
-            if max_hard_negatives != -1:
-                hard_negative_ctxs = hard_negative_ctxs[:max_hard_negatives]
-            context = positive_ctxs + negative_ctxs + hard_negative_ctxs
+
+        questions = tokenizer([s["question"] for s in samples])
+        positive_contexts = [
+            [tokenizer(p["text"]) for p in s["positive_ctxs"]][:max_positives]
+            if max_positives != -1
+            else [tokenizer(p["text"]) for p in s["positive_ctxs"]]
+            for s in samples
+        ]
+        negative_contexts = [
+            [tokenizer(n["text"]) for n in s["negative_ctxs"]][:max_negatives]
+            if max_negatives != -1
+            else [tokenizer(n["text"]) for n in s["negative_ctxs"]]
+            for s in samples
+        ]
+        hard_negative_contexts = [
+            [tokenizer(h["text"]) for h in s["hard_negative_ctxs"]][:max_hard_negatives]
+            if max_hard_negatives != -1
+            else [tokenizer(h["text"]) for h in s["hard_negative_ctxs"]]
+            for s in samples
+        ]
+
+        for i, question in enumerate(questions):
+            context = positive_contexts[i]
+            # add negative contexts if any
+            if negative_contexts[i]:
+                context += negative_contexts[i]
+            # add hard negative contexts if any
+            if hard_negative_contexts[i]:
+                context += hard_negative_contexts[i]
             data.append(
                 {
                     "question": question,
                     "context": context,
-                    "positives": set([p["text"] for p in sample["positive_ctxs"]]),
-                    "positive_index_end": len(positive_ctxs),
+                    "positives": set([p["text"] for p in samples[i]["positive_ctxs"]]),
+                    "positive_index_end": len(positive_contexts[i]),
                 }
             )
+
+        # for sample in samples:
+        #     question = tokenizer(sample["question"])
+        #     positive_ctxs = [tokenizer(p["text"]) for p in sample["positive_ctxs"]]
+        #     if max_positives != -1:
+        #         positive_ctxs = positive_ctxs[:max_positives]
+        #     negative_ctxs = [tokenizer(n["text"]) for n in sample["negative_ctxs"]]
+        #     if max_negatives != -1:
+        #         negative_ctxs = negative_ctxs[:max_negatives]
+        #     hard_negative_ctxs = [
+        #         tokenizer(h["text"]) for h in sample["hard_negative_ctxs"]
+        #     ]
+        #     if max_hard_negatives != -1:
+        #         hard_negative_ctxs = hard_negative_ctxs[:max_hard_negatives]
+        #     context = positive_ctxs + negative_ctxs + hard_negative_ctxs
+        #     data.append(
+        #         {
+        #             "question": question,
+        #             "context": context,
+        #             "positives": set([p["text"] for p in sample["positive_ctxs"]]),
+        #             "positive_index_end": len(positive_ctxs),
+        #         }
+        #     )
         return data
 
     @staticmethod
@@ -361,14 +383,6 @@ class DPRDataset(BaseDataset):
             end = end if i == 0 else last_end + end
             labels[i, start:end] = 1
             last_end = end
-        # positive_indices = [sample["positive_indices"] for sample in batch]
-        # for i, p_indices in enumerate(positive_indices):
-        #     for p_idx in p_indices:
-        #         # take into account the offset of the positive indices
-        #         if i == 0:
-        #             labels[i, p_idx] = 1
-        #         else:
-        #             labels[i, p_idx + int(sum(labels[i - 1]).item())] = 1
 
         augmented_labels = None
         if self.in_batch_positives_augmentation:

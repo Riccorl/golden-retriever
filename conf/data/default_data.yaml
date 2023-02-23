@@ -7,21 +7,21 @@ datamodule:
       name: 'train'
       split_contexts: True
       path:
-        - 'data/dpr-like/ontonotes/ontonotes.train.json'
+        - 'data/dpr-like/srl/ontonotes/ontonotes.train.json'
 
     val:
       - _target_: data.datasets.DPRDataset
         name: 'val'
         split_contexts: True
         path:
-          - 'data/dpr-like/ontonotes/ontonotes.dev.json'
+          - 'data/dpr-like/srl/ontonotes/ontonotes.dev.json'
 
     test:
       - _target_: data.datasets.DPRDataset
         name: 'test'
         split_contexts: True
         path:
-          - 'data/dpr-like/ontonotes/ontonotes.test.json'
+          - 'data/dpr-like/srl/ontonotes/ontonotes.test.json'
 
   batch_sizes:
     train: 4

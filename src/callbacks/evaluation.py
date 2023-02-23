@@ -1,5 +1,6 @@
 # from pytorch_lightning import Callback, LightningModule
 import os
+from pathlib import Path
 from typing import List, Optional, Union
 
 import pytorch_lightning as pl
@@ -20,7 +21,7 @@ class TopKEvaluationCallback(pl.Callback):
         self,
         k: int = 100,
         report_intervals: Optional[int] = None,
-        contexts: Union[List[str], os.PathLike] = None,
+        contexts_path: Union[List[str], os.PathLike] = None,
         batch_size: int = 32,
         *args,
         **kwargs,
@@ -28,8 +29,21 @@ class TopKEvaluationCallback(pl.Callback):
         super().__init__(*args, **kwargs)
         self.k = k
         self.report_intervals = report_intervals
-        self.contexts = contexts
+        self.contexts = self.load_contexts(contexts_path)
         self.batch_size = batch_size
+
+    @staticmethod
+    def load_contexts(
+        path: Union[str, os.PathLike, List[str], List[os.PathLike]]
+    ) -> List[str]:
+        if isinstance(path, (str, os.PathLike)):
+            path = [Path(path)]
+        contexts = set()
+        for p in path:
+            with open(p, "r") as f:
+                for line in f:
+                    contexts.add(line.strip())
+        return list(contexts)
 
     @torch.no_grad()
     def __call__(
@@ -42,13 +56,13 @@ class TopKEvaluationCallback(pl.Callback):
     ) -> dict:
         logger.log(f"Computing recall@{self.k}")
 
-        if stage not in ["val", "test"]:
+        if stage not in ["validation", "test"]:
             raise ValueError(
-                f"Stage {stage} not supported, only `val` and `test` are supported."
+                f"Stage {stage} not supported, only `validation` and `test` are supported."
             )
 
         dataloaders = (
-            trainer.val_dataloaders if stage == "val" else trainer.test_dataloaders
+            trainer.val_dataloaders if stage == "validation" else trainer.test_dataloaders
         )
 
         # retrieve the question and context encoders
