@@ -3,9 +3,7 @@ from typing import Any, Union
 import hydra
 import pytorch_lightning as pl
 import torch
-import transformers as tr
 from omegaconf import DictConfig
-from torch.optim import RAdam, AdamW
 
 from data.labels import Labels
 
@@ -40,20 +38,55 @@ class GoldenRetrieverPLModule(pl.LightningModule):
 
     def training_step(self, batch: dict, batch_idx: int) -> torch.Tensor:
         forward_output = self.forward(**{**batch, "return_loss": True})
-        self.log("loss", forward_output["loss"])
+        self.log(
+            "loss",
+            forward_output["loss"],
+            batch_size=batch["questions"]["input_ids"].size(0),
+        )
         return forward_output["loss"]
 
     def validation_step(self, batch: dict, batch_idx: int) -> None:
         forward_output = self.forward(**{**batch, "return_loss": True})
-        self.log("val_loss", forward_output["loss"])
+        self.log(
+            "val_loss",
+            forward_output["loss"],
+            batch_size=batch["questions"]["input_ids"].size(0),
+        )
 
     def test_step(self, batch: dict, batch_idx: int) -> Any:
         forward_output = self.forward(**{**batch, "return_loss": True})
-        self.log("test_loss", forward_output["loss"])
+        self.log(
+            "test_loss",
+            forward_output["loss"],
+            batch_size=batch["questions"]["input_ids"].size(0),
+        )
 
     def configure_optimizers(self):
+        if "grouped_parameters" in self.hparams and self.hparams.grouped_parameters:
+            param_optimizer = list(self.named_parameters())
+            no_decay = ["bias", "LayerNorm.bias", "LayerNorm.weight"]
+            optimizer_grouped_parameters = [
+                {
+                    "params": [
+                        p
+                        for n, p in param_optimizer
+                        if not any(nd in n for nd in no_decay)
+                    ],
+                    "weight_decay": self.hparams.optimizer.weight_decay,
+                },
+                {
+                    "params": [
+                        p for n, p in param_optimizer if any(nd in n for nd in no_decay)
+                    ],
+                    "weight_decay": 0.0,
+                },
+            ]
+        else:
+            optimizer_grouped_parameters = self.parameters()
         optimizer = hydra.utils.instantiate(
-            self.hparams.optimizer, params=self.parameters(), _convert_="partial"
+            self.hparams.optimizer,
+            params=optimizer_grouped_parameters,
+            _convert_="partial",
         )
         if "lr_scheduler" not in self.hparams:
             return [optimizer]
@@ -62,75 +95,3 @@ class GoldenRetrieverPLModule(pl.LightningModule):
             self.hparams.lr_scheduler, optimizer=optimizer
         )
         return [optimizer], [lr_scheduler]
-
-    # def configure_optimizers(self):
-    #     param_optimizer = list(self.named_parameters())
-    #     if self.hparams.optim_params.optimizer in ["radam", "adam"]:
-    #         no_decay = ["bias", "LayerNorm.bias", "LayerNorm.weight"]
-    #         optimizer_grouped_parameters = [
-    #             {
-    #                 "params": [
-    #                     p
-    #                     for n, p in param_optimizer
-    #                     if not any(nd in n for nd in no_decay)
-    #                 ],
-    #                 "weight_decay": self.hparams.optim_params.weight_decay,
-    #             },
-    #             {
-    #                 "params": [
-    #                     p for n, p in param_optimizer if any(nd in n for nd in no_decay)
-    #                 ],
-    #                 "weight_decay": 0.0,
-    #             },
-    #         ]
-
-    #         if self.hparams.optim_params.optimizer == "radam":
-    #             optimizer = RAdam(
-    #                 optimizer_grouped_parameters, lr=self.hparams.optim_params.lr
-    #             )
-    #         elif self.hparams.optim_params.optimizer == "adam":
-    #             optimizer = AdamW(
-    #                 optimizer_grouped_parameters, lr=self.hparams.optim_params.lr
-    #             )
-    #         else:
-    #             raise ValueError(
-    #                 f"Unknown optimizer {self.hparams.optim_params.optimizer}"
-    #             )
-    #     elif self.hparams.optim_params.optimizer == "fuseadam":
-    #         try:
-    #             from deepspeed.ops.adam import FusedAdam
-    #         except ImportError:
-    #             raise ImportError(
-    #                 "Please install DeepSpeed (`pip install deepspeed`) to use FuseAdam optimizer."
-    #             )
-
-    #         optimizer = FusedAdam(self.parameters())
-    #     elif self.hparams.optim_params.optimizer == "deepspeedcpuadam":
-    #         try:
-    #             from deepspeed.ops.adam import DeepSpeedCPUAdam
-    #         except ImportError:
-    #             raise ImportError(
-    #                 "Please install DeepSpeed (`pip install deepspeed`) to use DeepSpeedCPUAdam optimizer."
-    #             )
-
-    #         optimizer = DeepSpeedCPUAdam(self.parameters())
-    #     elif self.hparams.optim_params.optimizer == "adafactor":
-    #         optimizer = tr.Adafactor(
-    #             self.parameters(),
-    #             scale_parameter=False,
-    #             relative_step=False,
-    #             warmup_init=False,
-    #             lr=self.hparams.optim_params.lr,
-    #         )
-    #     else:
-    #         raise ValueError(f"Unknown optimizer {self.hparams.optim_params.optimizer}")
-
-    #     if self.hparams.optim_params.use_scheduler:
-    #         lr_scheduler = tr.get_linear_schedule_with_warmup(
-    #             optimizer=optimizer,
-    #             num_warmup_steps=self.hparams.optim_params.num_warmup_steps,
-    #             num_training_steps=self.hparams.optim_params.num_training_steps,
-    #         )
-    #         return [optimizer], [lr_scheduler]
-
-    #     return optimizer

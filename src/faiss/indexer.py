@@ -1,7 +1,9 @@
 from typing import Union
-import faiss
+
 import numpy
 import torch
+
+import faiss
 
 
 class FaissIndexer:

@@ -6,12 +6,10 @@ from typing import List, Optional, Union
 import pytorch_lightning as pl
 import torch
 from lightning_fabric.utilities.apply_func import move_data_to_device
-from torch.utils.data import DataLoader
-from tqdm import tqdm
-
-# from faiss.indexer import FaissIndexer
 
 from utils.logging import get_console_logger
+
+# from faiss.indexer import FaissIndexer
 
 logger = get_console_logger()
 
@@ -62,7 +60,9 @@ class TopKEvaluationCallback(pl.Callback):
             )
 
         dataloaders = (
-            trainer.val_dataloaders if stage == "validation" else trainer.test_dataloaders
+            trainer.val_dataloaders
+            if stage == "validation"
+            else trainer.test_dataloaders
         )
 
         # retrieve the question and context encoders

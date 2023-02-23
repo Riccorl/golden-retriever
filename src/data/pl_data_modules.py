@@ -67,7 +67,7 @@ class PLDataModule(pl.LightningDataModule):
 
     def prepare_data(self, *args, **kwargs):
         """
-        Method for preparing the data before the training. This method is called only once. 
+        Method for preparing the data before the training. This method is called only once.
         It is used to download the data, tokenize the data, etc.
         """
         pass

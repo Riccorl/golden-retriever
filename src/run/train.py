@@ -78,9 +78,7 @@ def train(conf: omegaconf.DictConfig) -> None:
         raise ValueError(
             "Either `max_epochs` or `max_steps` should be specified in the trainer configuration"
         )
-    logger.log(
-        f"Expected number of training steps: {num_training_steps}"
-    )
+    logger.log(f"Expected number of training steps: {num_training_steps}")
 
     if "lr_scheduler" in conf.model.pl_module and conf.model.pl_module.lr_scheduler:
         conf.model.pl_module.lr_scheduler.num_training_steps = num_training_steps

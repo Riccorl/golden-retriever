@@ -1,11 +1,10 @@
-from typing import Dict, List, Optional, Union
+from typing import Dict, Optional, Union
 
 import torch
 import torch.nn.functional as F
-from data.labels import Labels
 import transformers as tr
 
-from models.losses import MultiLabelNCELoss
+from data.labels import Labels
 
 
 class SentenceEncoder(torch.nn.Module):

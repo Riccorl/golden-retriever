@@ -1,15 +1,11 @@
 import json
-import multiprocessing
 import os
 import random
 import time
 from functools import partial
-from multiprocessing import Pool, Process, Queue, cpu_count
-from multiprocessing.pool import ThreadPool
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Sequence, Tuple, Union
 
-import psutil
 import torch
 import transformers as tr
 from rich.progress import track
@@ -236,65 +232,28 @@ class DPRDataset(BaseDataset):
     ) -> List[Dict]:
         data = []
 
-        questions = tokenizer([s["question"] for s in samples])
-        positive_contexts = [
-            [tokenizer(p["text"]) for p in s["positive_ctxs"]][:max_positives]
-            if max_positives != -1
-            else [tokenizer(p["text"]) for p in s["positive_ctxs"]]
-            for s in samples
-        ]
-        negative_contexts = [
-            [tokenizer(n["text"]) for n in s["negative_ctxs"]][:max_negatives]
-            if max_negatives != -1
-            else [tokenizer(n["text"]) for n in s["negative_ctxs"]]
-            for s in samples
-        ]
-        hard_negative_contexts = [
-            [tokenizer(h["text"]) for h in s["hard_negative_ctxs"]][:max_hard_negatives]
-            if max_hard_negatives != -1
-            else [tokenizer(h["text"]) for h in s["hard_negative_ctxs"]]
-            for s in samples
-        ]
-
-        for i, question in enumerate(questions):
-            context = positive_contexts[i]
-            # add negative contexts if any
-            if negative_contexts[i]:
-                context += negative_contexts[i]
-            # add hard negative contexts if any
-            if hard_negative_contexts[i]:
-                context += hard_negative_contexts[i]
+        for sample in track(samples, description="Pre-processing samples"):
+            question = tokenizer(sample["question"])
+            positive_ctxs = [tokenizer(p["text"]) for p in sample["positive_ctxs"]]
+            if max_positives != -1:
+                positive_ctxs = positive_ctxs[:max_positives]
+            negative_ctxs = [tokenizer(n["text"]) for n in sample["negative_ctxs"]]
+            if max_negatives != -1:
+                negative_ctxs = negative_ctxs[:max_negatives]
+            hard_negative_ctxs = [
+                tokenizer(h["text"]) for h in sample["hard_negative_ctxs"]
+            ]
+            if max_hard_negatives != -1:
+                hard_negative_ctxs = hard_negative_ctxs[:max_hard_negatives]
+            context = positive_ctxs + negative_ctxs + hard_negative_ctxs
             data.append(
                 {
                     "question": question,
                     "context": context,
-                    "positives": set([p["text"] for p in samples[i]["positive_ctxs"]]),
-                    "positive_index_end": len(positive_contexts[i]),
+                    "positives": set([p["text"] for p in sample["positive_ctxs"]]),
+                    "positive_index_end": len(positive_ctxs),
                 }
             )
-
-        # for sample in samples:
-        #     question = tokenizer(sample["question"])
-        #     positive_ctxs = [tokenizer(p["text"]) for p in sample["positive_ctxs"]]
-        #     if max_positives != -1:
-        #         positive_ctxs = positive_ctxs[:max_positives]
-        #     negative_ctxs = [tokenizer(n["text"]) for n in sample["negative_ctxs"]]
-        #     if max_negatives != -1:
-        #         negative_ctxs = negative_ctxs[:max_negatives]
-        #     hard_negative_ctxs = [
-        #         tokenizer(h["text"]) for h in sample["hard_negative_ctxs"]
-        #     ]
-        #     if max_hard_negatives != -1:
-        #         hard_negative_ctxs = hard_negative_ctxs[:max_hard_negatives]
-        #     context = positive_ctxs + negative_ctxs + hard_negative_ctxs
-        #     data.append(
-        #         {
-        #             "question": question,
-        #             "context": context,
-        #             "positives": set([p["text"] for p in sample["positive_ctxs"]]),
-        #             "positive_index_end": len(positive_ctxs),
-        #         }
-        #     )
         return data
 
     @staticmethod

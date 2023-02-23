@@ -3,10 +3,8 @@ import logging
 import os
 from typing import Union
 
-from haystack.nodes import DensePassageRetriever
-from haystack.utils import fetch_archive_from_http
 from haystack.document_stores import InMemoryDocumentStore
-
+from haystack.nodes import DensePassageRetriever
 
 logging.basicConfig(
     format="%(levelname)s - %(name)s -  %(message)s", level=logging.WARNING
