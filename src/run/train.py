@@ -49,8 +49,6 @@ def train(conf: omegaconf.DictConfig) -> None:
     if "print_config" in conf and conf.print_config:
         pprint(OmegaConf.to_container(conf), console=logger, expand_all=True)
 
-    conf.model.pl_module.lr_scheduler.num_warmup_steps
-
     # data module declaration
     logger.log(f"Instantiating the Data Module")
     pl_data_module: PLDataModule = hydra.utils.instantiate(
@@ -61,7 +59,6 @@ def train(conf: omegaconf.DictConfig) -> None:
     pl_data_module.setup("fit")
 
     # count the number of training steps
-    num_training_steps = 0
     if "max_epochs" in conf.train.pl_trainer and conf.train.pl_trainer.max_epochs > 0:
         num_training_steps = (
             len(pl_data_module.train_dataloader()) * conf.train.pl_trainer.max_epochs
@@ -88,7 +85,7 @@ def train(conf: omegaconf.DictConfig) -> None:
                 conf.model.pl_module.lr_scheduler.num_training_steps * 0.1
             )
         logger.log(
-            f"Number of warmup steps: { conf.model.pl_module.lr_scheduler.num_training_steps}"
+            f"Number of warmup steps: {conf.model.pl_module.lr_scheduler.num_training_steps}"
         )
 
     # main module declaration
@@ -143,16 +140,21 @@ def train(conf: omegaconf.DictConfig) -> None:
         # save labels
         pl_data_module.save_labels(model_export / "labels.json")
 
-    # module fit
-    trainer.fit(pl_module, datamodule=pl_data_module)
+    if not conf.train.only_test:
+        # module fit
+        trainer.fit(pl_module, datamodule=pl_data_module)
 
-    # load best model for testing
-    if model_checkpoint_callback and not conf.train.pl_trainer.fast_dev_run:
-        best_pl_module = GoldenRetrieverPLModule.load_from_checkpoint(
-            model_checkpoint_callback.best_model_path
-        )
-    else:
+    if conf.train.pl_trainer.fast_dev_run:
         best_pl_module = pl_module
+    else:
+        # load best model for testing
+        if model_checkpoint_callback:
+            best_model_path = model_checkpoint_callback.best_model_path
+        else:
+            best_model_path = conf.evaluation.checkpoint_path
+        logger.log(f"Loading best model from {best_model_path}")
+        best_pl_module = GoldenRetrieverPLModule.load_from_checkpoint(best_model_path)
+
     # module test
     trainer.test(best_pl_module, datamodule=pl_data_module)
 

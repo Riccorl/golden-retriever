@@ -6,6 +6,8 @@ float32_matmul_precision: "medium"
 set_determinism_the_old_way: False
 top_k: 100
 
+only_test: False
+
 # pl_trainer
 pl_trainer:
   _target_: pytorch_lightning.Trainer

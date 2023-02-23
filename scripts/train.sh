@@ -4,24 +4,30 @@
 # checkmark font for fancy log
 CHECK_MARK="\033[0;32m\xE2\x9C\x94\033[0m"
 # usage text
-USAGE="$(basename "$0") [-h] [-l LANG_MODEL_NAME] [-d] [-p PRECISION] [-c] [-g DEVICES] [-n NODES] [-m GPU_MEM] [-s STRATEGY] [-o] OVERRIDES
+USAGE="$(basename "$0") [-h --help] [-l --language-model LANG_MODEL_NAME] [-d --debug] [-p --precision PRECISION]
+[-c --cpu] [-g --devices DEVICES] [-n --nodes NODES] [-m --gpu-mem GPU_MEM] [-s --strategy STRATEGY]
+[-o --offline] [-t --test] [--config-path CONFIG_PATH] [--checkpoint CHECKPOINT_PATH] OVERRIDES
 
 where:
-    -h            Show this help text
-    -l            Language model name (one of the models from HuggingFace)
-    -d            Run in debug mode (no GPU and wandb offline)
-    -p            Training precision, default 16.
-    -c            Use CPU instead of GPU.
-    -g            How many GPU to use, default 1. If 0, use CPU.
-    -n            How many nodes to use, default 1.
-    -m            Minimum GPU memory required in MB (default: 8000). If less that this,
-                  training will wait until there is enough space.
-    -s            Strategy to use for distributed training, default NULL.
-    -o            Run the experiment offline
-    -v            Print the config
-    OVERRIDES     Overrides for the experiment, in the form of key=value.
-                  For example, 'model_name=bert-base-uncased'
+    -h --help             Show this help text
+    -l --language-model   Language model name (one of the models from HuggingFace)
+    -d --debug            Run in debug mode (no GPU and wandb offline)
+    -p --precision        Training precision, default 16.
+    -c --cpu              Use CPU instead of GPU.
+    -g --devices          How many GPU to use, default 1. If 0, use CPU.
+    -n --nodes            How many nodes to use, default 1.
+    -m --gpu-mem          Minimum GPU memory required in MB (default: 8000). If less that this,
+                          training will wait until there is enough space.
+    -s --strategy         Strategy to use for distributed training, default NULL.
+    -o --offline          Run the experiment offline
+    -v --print            Print the config
+    -t --test             Run only the test phase
+    --config-path         Run a specific config file
+    --checkpoint          Run a specific checkpoint
+    OVERRIDES             Overrides for the experiment, in the form of key=value.
+                          For example, 'model_name=bert-base-uncased'.
 Example:
+  ./script/train.sh
   ./script/train.sh -l bert-base-cased
   ./script/train.sh -l bert-base-cased -m 10000
 "
@@ -30,24 +36,27 @@ Example:
 for arg in "$@"; do
   shift
   case "$arg" in
-    '--help')   set -- "$@" '-h'   ;;
-    '--language-model') set -- "$@" '-l'   ;;
-    '--debug')   set -- "$@" '-d'   ;;
-    '--precision')     set -- "$@" '-p'   ;;
-    '--cpu')     set -- "$@" '-c'   ;;
-    '--devices')     set -- "$@" '-g'   ;;
-    '--nodes')     set -- "$@" '-n'   ;;
-    '--gpu-mem')     set -- "$@" '-m'   ;;
-    '--strategy')     set -- "$@" '-s'   ;;
-    '--offline')     set -- "$@" '-o'   ;;
-    '--print')     set -- "$@" '-v'   ;;
-    *)          set -- "$@" "$arg" ;;
+  '--help') set -- "$@" '-h' ;;
+  '--language-model') set -- "$@" '-l' ;;
+  '--debug') set -- "$@" '-d' ;;
+  '--precision') set -- "$@" '-p' ;;
+  '--cpu') set -- "$@" '-c' ;;
+  '--devices') set -- "$@" '-g' ;;
+  '--nodes') set -- "$@" '-n' ;;
+  '--gpu-mem') set -- "$@" '-m' ;;
+  '--strategy') set -- "$@" '-s' ;;
+  '--offline') set -- "$@" '-o' ;;
+  '--print') set -- "$@" '-v' ;;
+  '--test') set -- "$@" '-t' ;;
+  '--config-path') set -- "$@" '-a' ;;
+  '--checkpoint') set -- "$@" '-k' ;;
+  *) set -- "$@" "$arg" ;;
   esac
 done
 
 # check for named params
 #while [ $OPTIND -le "$#" ]; do
-while getopts ":hl:dp:cg:n:m:s:ov" opt; do
+while getopts ":hl:dp:cg:n:m:s:ovta:k:" opt; do
   case $opt in
   h)
     printf "%s$USAGE" && exit 0
@@ -81,6 +90,15 @@ while getopts ":hl:dp:cg:n:m:s:ov" opt; do
     ;;
   v)
     PRINT_CONFIG="++print_config=True"
+    ;;
+  t)
+    ONLY_TEST="True"
+    ;;
+  a)
+    CONFIG_PATH="$OPTARG"
+    ;;
+  k)
+    CHECKPOINT_PATH="$OPTARG"
     ;;
   \?)
     echo "Invalid option -$OPTARG" >&2 && echo "$USAGE" && exit 0
@@ -148,6 +166,27 @@ fi
 if [ -z "$WANDB" ]; then
   # default value
   WANDB="online"
+fi
+
+# if -a is not specified, CONFIG_PATH is "null"
+if [ -z "$CONFIG_PATH" ]; then
+  CONFIG_PATH=""
+else
+  CONFIG_PATH="--config_path $CONFIG_PATH"
+fi
+
+# if -k is not specified, CHECKPOINT_PATH is "null"
+if [ -z "$CHECKPOINT_PATH" ]; then
+  CHECKPOINT_PATH=""
+else
+  OVERRIDES="$OVERRIDES evaluation.checkpoint_path=$CHECKPOINT_PATH"
+fi
+
+# if -t is not specified, ONLY_TEST is False
+if [ -z "$ONLY_TEST" ]; then
+  ONLY_TEST="False"
+else
+  OVERRIDES="$OVERRIDES train.only_test=True"
 fi
 
 # CHECK FOR BOOLEAN PARAMS
@@ -242,6 +281,7 @@ export HYDRA_FULL_ERROR=1
 
 if [ "$DEV_RUN" = "True" ]; then
   python src/run/train.py \
+    $CONFIG_PATH \
     "train.pl_trainer.fast_dev_run=$DEV_RUN" \
     "train.pl_trainer.devices=$DEVICES" \
     "train.pl_trainer.accelerator=$ACCELERATOR" \
@@ -255,6 +295,7 @@ if [ "$DEV_RUN" = "True" ]; then
     $OVERRIDES
 else
   python src/run/train.py \
+    $CONFIG_PATH \
     "train.pl_trainer.fast_dev_run=$DEV_RUN" \
     "train.pl_trainer.devices=$DEVICES" \
     "train.pl_trainer.accelerator=$ACCELERATOR" \
