@@ -9,7 +9,8 @@ def conll_2012_to_dpr(
     output_path: Union[str, os.PathLike],
     definitions_path: Optional[Union[str, os.PathLike]] = None,
     only_predicates: bool = False,
-    only_args: bool = False,
+    only_roles: bool = False,
+    argm_definitions_path: Optional[Union[str, os.PathLike]] = None,
 ) -> List[Dict[str, Any]]:
     # Read CoNLL 2012 file
     with open(conll_path, "r") as f:
@@ -20,6 +21,13 @@ def conll_2012_to_dpr(
         # Read definitions
         with open(definitions_path, "r") as f:
             definitions = json.load(f)
+
+    argm_definitions = {}
+    if argm_definitions_path is not None:
+        # Read definitions
+        with open(argm_definitions_path, "r") as f:
+            argm_definitions = json.load(f)
+
     # Output DPR file, a list of dictionaries with the following keys:
     # "question": "....",
     # "answers": ["...", "...", "..."],
@@ -38,7 +46,7 @@ def conll_2012_to_dpr(
                 print(f"Predicate {annotation['predicate']} not found in definitions")
                 continue
             predicate_definition = definitions[annotation["predicate"]]
-            if not only_args:
+            if not only_roles:
                 positive_ctxs.append(
                     {
                         "title": annotation["predicate"],
@@ -56,13 +64,24 @@ def conll_2012_to_dpr(
                     ):
                         continue
                     role = role[2:]
+                    role_text = predicate_definition["roleset"].get(role, role)
+                    if role in argm_definitions:
+                        role_text = argm_definitions[role]
                     positive_ctxs.append(
                         {
                             "title": role,
-                            "text": predicate_definition["roleset"].get(role, role),
+                            "text": role_text,
                             "passage_id": f"{sentence_id}_{predicate_index}_{role_index}",
                         }
                     )
+                # for argm_role, argm_def in argm_definitions.values():
+                #     positive_ctxs.append(
+                #         {
+                #             "title": argm_role,
+                #             "text": argm_def,
+                #             "passage_id": f"{sentence_id}_{predicate_index}_{role_index}",
+                #         }
+                #     )
         if len(positive_ctxs) == 0:
             continue
         dpr.append(
@@ -93,10 +112,20 @@ if __name__ == "__main__":
     parser.add_argument(
         "--only_predicates", action="store_true", help="Only predicates"
     )
-    parser.add_argument("--only_args", action="store_true", help="Only arguments")
+    parser.add_argument("--only_roles", action="store_true", help="Only arguments")
+    parser.add_argument(
+        "--argm_definitions",
+        type=str,
+        help="Path to output file",
+    )
     args = parser.parse_args()
 
     # Convert to DPR
     conll_2012_to_dpr(
-        args.input, args.output, args.definitions, args.only_predicates, args.only_args
+        args.input,
+        args.output,
+        args.definitions,
+        args.only_predicates,
+        args.only_roles,
+        args.argm_definitions,
     )

@@ -164,16 +164,18 @@ class DPRDataset(BaseDataset):
     ) -> Union[Dict[str, torch.Tensor], Tuple[torch.Tensor, torch.Tensor]]:
         return self.data[index]
 
+    @staticmethod
     def load_contexts(
-        self, path: Union[str, os.PathLike, List[str], List[os.PathLike]]
+        path: Union[str, os.PathLike, List[str], List[os.PathLike]]
     ) -> List[str]:
-        if isinstance(path, str):
-            path = [path]
-        contexts = []
+        if isinstance(path, (str, os.PathLike)):
+            path = [Path(path)]
+        contexts = set()
         for p in path:
             with open(p, "r") as f:
-                contexts.extend(f.readlines())
-        return contexts
+                for line in f:
+                    contexts.add(line.strip())
+        return list(contexts)
 
     def load(
         self,

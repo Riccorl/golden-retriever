@@ -49,7 +49,7 @@ done
 #while [ $OPTIND -le "$#" ]; do
 while getopts ":hl:dp:cg:n:m:s:ov" opt; do
   case $opt in
-  h|help)
+  h)
     printf "%s$USAGE" && exit 0
     ;;
   l)
@@ -87,13 +87,6 @@ while getopts ":hl:dp:cg:n:m:s:ov" opt; do
     ;;
   esac
 done
-
-# if LANG_MODEL_NAME is not specified, abort
-# if [ -z "$LANG_MODEL_NAME" ]; then
-#   printf "A language model name must be specified.\n\n"
-#   printf "%s$USAGE"
-#   exit 0
-# fi
 
 # shift for overrides
 shift $((OPTIND - 1))
