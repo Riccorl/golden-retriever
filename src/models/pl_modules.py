@@ -88,7 +88,7 @@ class GoldenRetrieverPLModule(pl.LightningModule):
             params=optimizer_grouped_parameters,
             _convert_="partial",
         )
-        if "lr_scheduler" not in self.hparams:
+        if "lr_scheduler" not in self.hparams or not self.hparams.lr_scheduler:
             return [optimizer]
 
         lr_scheduler = hydra.utils.instantiate(

@@ -34,11 +34,52 @@ golden-retriever
   | train.py                # main script for training the network
 | README.md
 | requirements.txt
+```
 
 ## Initializing the environment
 In order to set up the python interpreter we utilize [conda](https://docs.conda.io/projects/conda/en/latest/index.html)
 , the script `setup.sh` creates a conda environment and install pytorch
 and the dependencies in "requirements.txt".
+
+## How to run
+
+Train
+
+```bash
+bash scripts/train.sh
+```
+
+```bash
+bash scripts/train.sh -h
+train.sh [-h --help] [-l --language-model LANG_MODEL_NAME] [-d --debug] [-p --precision PRECISION]
+[-c --cpu] [-g --devices DEVICES] [-n --nodes NODES] [-m --gpu-mem GPU_MEM] [-s --strategy STRATEGY]
+[-o --offline] [-t --test] [--config-path CONFIG_PATH] [--checkpoint CHECKPOINT_PATH] OVERRIDES
+
+where:
+    -h --help             Show this help text
+    -l --language-model   Language model name (one of the models from HuggingFace)
+    -d --debug            Run in debug mode (no GPU and wandb offline)
+    -p --precision        Training precision, default 16.
+    -c --cpu              Use CPU instead of GPU.
+    -g --devices          How many GPU to use, default 1. If 0, use CPU.
+    -n --nodes            How many nodes to use, default 1.
+    -m --gpu-mem          Minimum GPU memory required in MB (default: 8000). If less that this,
+                          training will wait until there is enough space.
+    -s --strategy         Strategy to use for distributed training, default NULL.
+    -o --offline          Run the experiment offline
+    -v --print            Print the config
+    -t --test             Run only the test phase
+    --config-path         Run a specific config file
+    --checkpoint          Run a specific checkpoint
+    OVERRIDES             Overrides for the experiment, in the form of key=value.
+                          For example, 'model_name=bert-base-uncased'.
+Example:
+  ./script/train.sh
+  ./script/train.sh -l bert-base-cased
+  ./script/train.sh -l bert-base-cased -m 10000
+```
+
+
 
 ## FAQ
 **Q**: When I run any script using a Hydra config I can see that relative paths do not work. Why?
