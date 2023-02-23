@@ -1,5 +1,5 @@
 <h1 align="center">
-  PyTorch Lightning Template
+  Golden Retriever
 </h1>
 
 <p align="center">
@@ -9,51 +9,36 @@
   <a href="https://black.readthedocs.io/en/stable/"><img alt="Code style: black" src="https://img.shields.io/badge/code%20style-black-black.svg"></a>
 </p>
 
-<h3 align="center">
-  A simple template to bootstrap your PyTorch Lightning project
-</h3>
-
-This is a template to initialize [PyTorch](https://pytorch.org) projects that use as a backbone
-framework [PyTorch Lightning](https://www.pytorchlightning.ai). The project 
-is very simple and minimalistic and serves as a bootstrap in order to avoid rewriting the same
-boilerplate code every time a new project is created. Finally, in order to organize the configuration files 
-and all the hyperparameters we utilize [Hydra](https://hydra.cc), a framework from 
-Facebook Research built for "*elegantly configuring complex applications*".
-
 ## Repository Structure
-```
-nlp-template
+
+```text
+golden-retriever
 | conf                      # contains Hydra config files
   | data
+  | evaluation
+  | logging
+  | loss
   | model
+  | optimizer
+  | scheduler
   | train
-  root.yaml                 # hydra root config file
+  default.yaml              # hydra root config file
 | data                      # datasets should go here
 | experiments               # where the models are stored
+| scripts                   # setup and train scripts
 | src
-  | pl_data_modules.py      # base LightinigDataModule
-  | pl_modules.py           # base LightningModule
+  | callbacks               # where to put custom Lightning Callbacks
+  | data                    # contains base Dataset and LightinigDataModule
+  | models                  # contains base nn.Module and LightningModule
+  | utils                   # additional code you might need
   | train.py                # main script for training the network
 | README.md
 | requirements.txt
-| setup.sh                  # environment setup script 
-```
-The structure of the repository is very simplistic and involves mainly four
-components:
-- **pl_data_modules.py** where you can declare your LightningDataModules.
-- **pl_modules.py** where you can declare your LightningModules.
-- **train.py** the main script to start the training phase.
-- **conf** the directory containing the config files of Hydra.
 
 ## Initializing the environment
 In order to set up the python interpreter we utilize [conda](https://docs.conda.io/projects/conda/en/latest/index.html)
 , the script `setup.sh` creates a conda environment and install pytorch
 and the dependencies in "requirements.txt".
-
-
-## Using the repository
-To use this repository as a starting template for your projects, you can just click the green button "Use this template" at the top of this page. More on using GitHub repositories on the following [link](https://docs.github.com/en/github/creating-cloning-and-archiving-repositories/creating-a-repository-from-a-template#creating-a-repository-from-a-template).
-
 
 ## FAQ
 **Q**: When I run any script using a Hydra config I can see that relative paths do not work. Why?
@@ -100,4 +85,3 @@ other Lightning templates. We mention here these repositories:
   that serves as a skeleton for Seq2Seq projects, while at the same time offering a way of running 
   Bart based Seq2Seq models without writing a single line of code!
 it in the yaml files by doing that following: '${hydra:runtime.cwd}/data/train.tsv'.
-  

@@ -34,8 +34,9 @@ class TopKEvaluationCallback(pl.Callback):
     def load_contexts(
         path: Union[str, os.PathLike, List[str], List[os.PathLike]]
     ) -> List[str]:
+        parent_folder = Path(__file__).parent.parent.parent
         if isinstance(path, (str, os.PathLike)):
-            path = [Path(path)]
+            path = [parent_folder / path]
         contexts = set()
         for p in path:
             with open(p, "r") as f:
@@ -91,6 +92,9 @@ class TopKEvaluationCallback(pl.Callback):
                         context_inputs = trainer.datamodule.tokenizer(
                             batch, padding=True, return_tensors="pt"
                         )
+                        context_inputs = move_data_to_device(
+                            context_inputs, pl_module.device
+                        )
                         context_outs = context_encoder(**context_inputs)
                         for context_ids, e in zip(
                             context_inputs["input_ids"], context_outs
@@ -102,6 +106,26 @@ class TopKEvaluationCallback(pl.Callback):
                             context_index[i] = cleaned_context
                             i += 1
                         batch = []
+                    # leftover batch
+                    if len(batch) > 0:
+                        context_inputs = trainer.datamodule.tokenizer(
+                            batch, padding=True, return_tensors="pt"
+                        )
+                        context_inputs = move_data_to_device(
+                            context_inputs, pl_module.device
+                        )
+                        context_outs = context_encoder(**context_inputs)
+                        for context_ids, e in zip(
+                            context_inputs["input_ids"], context_outs
+                        ):
+                            cleaned_context = " ".join(
+                                map(str, [c for c in context_ids.tolist() if c != 0])
+                            )
+                            context_embeddings.append(e)
+                            context_index[i] = cleaned_context
+                            i += 1
+                        batch = []
+
             # otherwise, compute the embeddings on the fly from the dataloader
             else:
                 contexts = set()

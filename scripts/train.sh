@@ -172,21 +172,27 @@ fi
 if [ -z "$CONFIG_PATH" ]; then
   CONFIG_PATH=""
 else
-  CONFIG_PATH="--config_path $CONFIG_PATH"
+  # split the last part of the path
+  CONFIG_NAME=$(echo "$CONFIG_PATH" | rev | cut -d'/' -f1 | rev)
+  # remove the extension
+  CONFIG_NAME=$(echo "$CONFIG_NAME" | cut -d'.' -f1)
+  # get the path
+  CONFIG_PATH=$(echo "$CONFIG_PATH" | rev | cut -d'/' -f2- | rev)
+  CONFIG_PATH="--config-path $CONFIG_PATH --config-name $CONFIG_NAME"
 fi
 
 # if -k is not specified, CHECKPOINT_PATH is "null"
 if [ -z "$CHECKPOINT_PATH" ]; then
   CHECKPOINT_PATH=""
 else
-  OVERRIDES="$OVERRIDES evaluation.checkpoint_path=$CHECKPOINT_PATH"
+  OVERRIDES="$OVERRIDES +evaluation.checkpoint_path=$CHECKPOINT_PATH"
 fi
 
 # if -t is not specified, ONLY_TEST is False
 if [ -z "$ONLY_TEST" ]; then
   ONLY_TEST="False"
 else
-  OVERRIDES="$OVERRIDES train.only_test=True"
+  OVERRIDES="$OVERRIDES +train.only_test=True logging.log=null"
 fi
 
 # CHECK FOR BOOLEAN PARAMS
@@ -278,6 +284,7 @@ DIRPATH=$(dirname "$(dirname "$(readlink -f "${BASH_SOURCE:-$0}")")")/src
 export PYTHONPATH="$DIRPATH"
 
 export HYDRA_FULL_ERROR=1
+
 
 if [ "$DEV_RUN" = "True" ]; then
   python src/run/train.py \
