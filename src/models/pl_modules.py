@@ -6,6 +6,7 @@ import torch
 from omegaconf import DictConfig
 
 from data.labels import Labels
+from utils.model_inputs import ModelInputs
 
 
 class GoldenRetrieverPLModule(pl.LightningModule):
@@ -36,29 +37,29 @@ class GoldenRetrieverPLModule(pl.LightningModule):
         """
         return self.model(**kwargs)
 
-    def training_step(self, batch: dict, batch_idx: int) -> torch.Tensor:
+    def training_step(self, batch: ModelInputs, batch_idx: int) -> torch.Tensor:
         forward_output = self.forward(**{**batch, "return_loss": True})
         self.log(
             "loss",
             forward_output["loss"],
-            batch_size=batch["questions"]["input_ids"].size(0),
+            batch_size=batch.questions.input_ids.size(0),
         )
         return forward_output["loss"]
 
-    def validation_step(self, batch: dict, batch_idx: int) -> None:
+    def validation_step(self, batch: ModelInputs, batch_idx: int) -> None:
         forward_output = self.forward(**{**batch, "return_loss": True})
         self.log(
             "val_loss",
             forward_output["loss"],
-            batch_size=batch["questions"]["input_ids"].size(0),
+            batch_size=batch.questions.input_ids.size(0),
         )
 
-    def test_step(self, batch: dict, batch_idx: int) -> Any:
+    def test_step(self, batch: ModelInputs, batch_idx: int) -> Any:
         forward_output = self.forward(**{**batch, "return_loss": True})
         self.log(
             "test_loss",
             forward_output["loss"],
-            batch_size=batch["questions"]["input_ids"].size(0),
+            batch_size=batch.questions.input_ids.size(0),
         )
 
     def configure_optimizers(self):

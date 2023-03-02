@@ -4,6 +4,7 @@ from collections import UserDict
 from typing import Any, Union
 
 import torch
+from lightning_fabric.utilities import move_data_to_device
 
 from src.utils.logging import get_console_logger
 
@@ -50,13 +51,5 @@ class ModelInputs(UserDict):
             :class:`tokenizers.ModelInputs`: The same instance of :class:`~tokenizers.ModelInputs`
             after modification.
         """
-        if isinstance(device, (str, torch.device, int)):
-            self.data = {
-                k: v.to(device=device) if hasattr(v, "to") else v
-                for k, v in self.data.items()
-            }
-        else:
-            logger.log(
-                f"Attempting to cast to another type, {str(device)}. This is not supported."
-            )
+        self.data = move_data_to_device(self.data, device)
         return self

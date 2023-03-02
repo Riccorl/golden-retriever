@@ -83,9 +83,11 @@ class GoldenRetriever(torch.nn.Module):
 
     def forward(
         self,
-        questions: Dict[str, torch.Tensor],
-        contexts: Dict[str, torch.Tensor],
+        questions: Dict[str, torch.Tensor] = None,
+        contexts: Dict[str, torch.Tensor] = None,
         labels: Optional[torch.Tensor] = None,
+        question_encodings: Optional[torch.Tensor] = None,
+        contexts_encodings: Optional[torch.Tensor] = None,
         return_loss: bool = False,
         *args,
         **kwargs,
@@ -102,12 +104,23 @@ class GoldenRetriever(torch.nn.Module):
                 The labels of the sentences.
             return_loss (`bool`):
                 Whether to compute the predictions.
+            question_encodings (`torch.Tensor`):
+                The encodings of the questions.
+            contexts_encodings (`torch.Tensor`):
+                The encodings of the contexts.
 
         Returns:
             obj:`torch.Tensor`: The outputs of the model.
         """
-        question_encodings = self.question_encoder(**questions)
-        contexts_encodings = self.context_encoder(**contexts)
+        if questions is None and question_encodings is None:
+            raise ValueError("Either `questions` or `question_encodings` must be provided")
+        if contexts is None and contexts_encodings is None:
+            raise ValueError("Either `contexts` or `contexts_encodings` must be provided")
+
+        if question_encodings is None:
+            question_encodings = self.question_encoder(**questions)
+        if contexts_encodings is None:
+            contexts_encodings = self.context_encoder(**contexts)
         logits = torch.matmul(question_encodings, contexts_encodings.T)
 
         output = {"logits": logits}

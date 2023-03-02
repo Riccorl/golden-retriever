@@ -1,12 +1,8 @@
 # from pytorch_lightning import Callback, LightningModule
-import os
-from collections import defaultdict
-from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, Optional, Tuple, Union
 
 import pytorch_lightning as pl
 import torch
-from lightning_fabric.utilities.apply_func import move_data_to_device
 from torch.utils.data import DataLoader
 
 from utils.logging import get_console_logger
@@ -21,7 +17,6 @@ class TopKEvaluationCallback(pl.Callback):
         self,
         k: int = 100,
         report_intervals: Optional[int] = None,
-        contexts_path: Union[List[str], os.PathLike] = None,
         batch_size: int = 32,
         *args,
         **kwargs,
@@ -29,22 +24,7 @@ class TopKEvaluationCallback(pl.Callback):
         super().__init__()
         self.k = k
         self.report_intervals = report_intervals
-        self.contexts = self.load_contexts(contexts_path) if contexts_path else None
         self.batch_size = batch_size
-
-    @staticmethod
-    def load_contexts(
-        path: Union[str, os.PathLike, List[str], List[os.PathLike]]
-    ) -> List[str]:
-        parent_folder = Path(__file__).parent.parent.parent
-        if isinstance(path, (str, os.PathLike)):
-            path = [parent_folder / path]
-        contexts = defaultdict(set())
-        for i, p in enumerate(path):
-            with open(p, "r") as f:
-                for line in f:
-                    contexts[i].add(line.strip())
-        return {k: list(v) for k, v in contexts.items()}
 
     @torch.no_grad()
     def __call__(
@@ -70,46 +50,44 @@ class TopKEvaluationCallback(pl.Callback):
             if stage == "validation"
             else trainer.test_dataloaders
         )
-
-        # retrieve the question and context encoders
-        question_encoder = pl_module.model.question_encoder
-        question_encoder.eval()
-        context_encoder = pl_module.model.context_encoder
-        context_encoder.eval()
+        datasets = (
+            trainer.datamodule.val_datasets
+            if stage == "validation"
+            else trainer.datamodule.test_datasets
+        )
 
         # compute the context embeddings index for each dataloader
         for dataloader_idx, dataloader in enumerate(dataloaders):
             logger.log(f"Computing context embeddings for dataloader {dataloader_idx}")
-            if self.contexts is not None:
-                collate_fn_func = lambda x: {
-                    # this is a hack to normalize the batch structure
-                    "contexts": trainer.datamodule.tokenizer(
-                        x, padding=True, return_tensors="pt"
-                    )
-                }
+            if datasets[dataloader_idx].contexts is not None:
                 context_dataloader = DataLoader(
-                    self.contexts,
+                    datasets[dataloader_idx].contexts,
                     batch_size=self.batch_size,
                     shuffle=False,
                     num_workers=0,
                     pin_memory=True,
-                    collate_fn=collate_fn_func,
+                    collate_fn=lambda x: {
+                        # this is a hack to normalize the batch structure
+                        "contexts": trainer.datamodule.tokenizer(
+                            x, padding=True, return_tensors="pt"
+                        )
+                    },
                 )
             else:
                 context_dataloader = dataloader
 
             context_embeddings, context_index = self.compute_context_embeddings(
-                context_encoder, context_dataloader, pl_module.device
+                pl_module.model.context_encoder, context_dataloader, pl_module.device
             )
 
             # now compute the question embeddings and compute the top-k accuracy
             logger.log(f"Computing recall@{self.k} for dataloader {dataloader_idx}")
             hits, total = 0, 0
             for batch in dataloader:
-                batch = move_data_to_device(batch, pl_module.device)
-                question_embeddings = question_encoder(**batch["questions"])
-                # compute the similarity between the question and all the context embeddings
-                similarity = torch.matmul(question_embeddings, context_embeddings.T)
+                batch = batch.to(pl_module.device)
+                similarity = pl_module.model(
+                    batch.questions, contexts_encodings=context_embeddings
+                )
                 # get the top-k indices
                 top_ks = torch.topk(
                     similarity, k=min(self.k, similarity.shape[-1]), dim=1
@@ -151,9 +129,9 @@ class TopKEvaluationCallback(pl.Callback):
         already_seen = set()
         i = 0
         for batch in dataloader:
-            batch = move_data_to_device(batch, device)
-            context_outs = context_encoder(**batch["contexts"])
-            for context_ids, e in zip(batch["contexts"]["input_ids"], context_outs):
+            batch = batch.to(device)
+            context_outs = context_encoder(**batch.contexts)
+            for context_ids, e in zip(batch.contexts.input_ids, context_outs):
                 cleaned_context = " ".join(
                     map(str, [c for c in context_ids.tolist() if c != 0])
                 )

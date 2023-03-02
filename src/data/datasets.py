@@ -4,7 +4,7 @@ import random
 import time
 from functools import partial
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Sequence, Tuple, Union
+from typing import Any, Dict, Iterator, List, Sequence, Tuple, Union, Optional
 
 import torch
 import transformers as tr
@@ -12,6 +12,7 @@ from rich.progress import track
 from torch.utils.data import Dataset, IterableDataset
 
 from utils.logging import get_console_logger
+from utils.model_inputs import ModelInputs
 
 logger = get_console_logger()
 
@@ -123,6 +124,7 @@ class DPRDataset(BaseDataset):
         shuffle_negative_contexts: bool = False,
         in_batch_positives_augmentation: bool = True,
         tokenizer: tr.PreTrainedTokenizer = None,
+        contexts_path: Union[str, os.PathLike] = None,
         **kwargs,
     ):
         super().__init__(name, path, **kwargs)
@@ -134,6 +136,11 @@ class DPRDataset(BaseDataset):
         self.max_context_length = max_context_length
         self.shuffle_negative_contexts = shuffle_negative_contexts
         self.in_batch_positives_augmentation = in_batch_positives_augmentation
+        self.contexts: Optional[List[str]] = None
+        # read contexts from file if provided
+        if contexts_path:
+            with open(contexts_path, "r") as f:
+                self.contexts = [line.strip() for line in f.readlines()]
 
         self.padding_ops = {
             "input_ids": partial(
@@ -377,9 +384,9 @@ class DPRDataset(BaseDataset):
                             augmented_labels[i, p_idx] = 1
 
         model_inputs = {
-            "questions": questions,
-            "contexts": contexts,
+            "questions": ModelInputs(questions),
+            "contexts": ModelInputs(contexts),
             "labels": augmented_labels if augmented_labels is not None else labels,
             "labels_for_metrics": labels,
         }
-        return model_inputs
+        return ModelInputs(model_inputs)
