@@ -118,6 +118,8 @@ class DPRDataset(BaseDataset):
         max_positives: int = -1,
         max_negatives: int = 0,
         max_hard_negatives: int = 0,
+        max_question_length: int = 256,
+        max_context_length: int = 128,
         shuffle_negative_contexts: bool = False,
         in_batch_positives_augmentation: bool = True,
         tokenizer: tr.PreTrainedTokenizer = None,
@@ -128,6 +130,8 @@ class DPRDataset(BaseDataset):
         self.max_positives = max_positives
         self.max_negatives = max_negatives
         self.max_hard_negatives = max_hard_negatives
+        self.max_question_length = max_question_length
+        self.max_context_length = max_context_length
         self.shuffle_negative_contexts = shuffle_negative_contexts
         self.in_batch_positives_augmentation = in_batch_positives_augmentation
 
@@ -229,19 +233,30 @@ class DPRDataset(BaseDataset):
         max_positives: int,
         max_negatives: int,
         max_hard_negatives: int,
+        max_question_length: int = 256,
+        max_context_length: int = 128,
     ) -> List[Dict]:
         data = []
 
         for sample in track(samples, description="Pre-processing samples"):
-            question = tokenizer(sample["question"])
-            positive_ctxs = [tokenizer(p["text"]) for p in sample["positive_ctxs"]]
+            question = tokenizer(
+                sample["question"], max_length=max_question_length, truncation=True
+            )
+            positive_ctxs = [
+                tokenizer(p["text"], max_length=max_context_length, truncation=True)
+                for p in sample["positive_ctxs"]
+            ]
             if max_positives != -1:
                 positive_ctxs = positive_ctxs[:max_positives]
-            negative_ctxs = [tokenizer(n["text"]) for n in sample["negative_ctxs"]]
+            negative_ctxs = [
+                tokenizer(n["text"], max_length=max_context_length, truncation=True)
+                for n in sample["negative_ctxs"]
+            ]
             if max_negatives != -1:
                 negative_ctxs = negative_ctxs[:max_negatives]
             hard_negative_ctxs = [
-                tokenizer(h["text"]) for h in sample["hard_negative_ctxs"]
+                tokenizer(h["text"], max_length=max_context_length, truncation=True)
+                for h in sample["hard_negative_ctxs"]
             ]
             if max_hard_negatives != -1:
                 hard_negative_ctxs = hard_negative_ctxs[:max_hard_negatives]
@@ -336,12 +351,12 @@ class DPRDataset(BaseDataset):
             questions["input_ids"].shape[0], contexts["input_ids"].shape[0]
         )
         positive_index_end = [sample["positive_index_end"] for sample in batch]
-        last_end = 0
+        last_start = 0
         for i, end in enumerate(positive_index_end):
-            start = 0 if i == 0 else last_end
-            end = end if i == 0 else last_end + end
+            start = 0 if i == 0 else last_start + len(batch[i - 1]["context"])
+            end = end if i == 0 else start + end
             labels[i, start:end] = 1
-            last_end = end
+            last_start = start
 
         augmented_labels = None
         if self.in_batch_positives_augmentation:

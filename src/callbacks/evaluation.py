@@ -1,13 +1,15 @@
 # from pytorch_lightning import Callback, LightningModule
+from collections import defaultdict
 import os
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 import pytorch_lightning as pl
 import torch
 from lightning_fabric.utilities.apply_func import move_data_to_device
 
 from utils.logging import get_console_logger
+from torch.utils.data import DataLoader, Dataset
 
 # from faiss.indexer import FaissIndexer
 
@@ -24,10 +26,12 @@ class TopKEvaluationCallback(pl.Callback):
         *args,
         **kwargs,
     ):
-        super().__init__(*args, **kwargs)
+        super().__init__()
         self.k = k
         self.report_intervals = report_intervals
-        self.contexts = self.load_contexts(contexts_path)
+        self.contexts = (
+            self.load_contexts(contexts_path) if contexts_path else None
+        )
         self.batch_size = batch_size
 
     @staticmethod
@@ -37,12 +41,12 @@ class TopKEvaluationCallback(pl.Callback):
         parent_folder = Path(__file__).parent.parent.parent
         if isinstance(path, (str, os.PathLike)):
             path = [parent_folder / path]
-        contexts = set()
-        for p in path:
+        contexts = defaultdict(set())
+        for i, p in enumerate(path):
             with open(p, "r") as f:
                 for line in f:
-                    contexts.add(line.strip())
-        return list(contexts)
+                    contexts[i].add(line.strip())
+        return {k: list(v) for k, v in contexts.items()}
 
     @torch.no_grad()
     def __call__(
@@ -54,6 +58,9 @@ class TopKEvaluationCallback(pl.Callback):
         **kwargs,
     ) -> dict:
         logger.log(f"Computing recall@{self.k}")
+
+        # metrics to return
+        metrics = {}
 
         if stage not in ["validation", "test"]:
             raise ValueError(
@@ -72,92 +79,41 @@ class TopKEvaluationCallback(pl.Callback):
         context_encoder = pl_module.model.context_encoder
         context_encoder.eval()
 
-        # metrics to return
-        metrics = {}
-
         # compute the context embeddings index for each dataloader
         for dataloader_idx, dataloader in enumerate(dataloaders):
-            # compute the context embeddings
-            context_embeddings = []
-            context_index = {}
-            i = 0
-
-            # if there is a list of contexts, use that
+            logger.log(f"Computing context embeddings for dataloader {dataloader_idx}")
             if self.contexts is not None:
-                # batch the contexts
-                batch = []
-                for context in self.contexts:
-                    batch.append(context)
-                    if len(batch) == self.batch_size:
-                        context_inputs = trainer.datamodule.tokenizer(
-                            batch, padding=True, return_tensors="pt"
-                        )
-                        context_inputs = move_data_to_device(
-                            context_inputs, pl_module.device
-                        )
-                        context_outs = context_encoder(**context_inputs)
-                        for context_ids, e in zip(
-                            context_inputs["input_ids"], context_outs
-                        ):
-                            cleaned_context = " ".join(
-                                map(str, [c for c in context_ids.tolist() if c != 0])
-                            )
-                            context_embeddings.append(e)
-                            context_index[i] = cleaned_context
-                            i += 1
-                        batch = []
-                    # leftover batch
-                    if len(batch) > 0:
-                        context_inputs = trainer.datamodule.tokenizer(
-                            batch, padding=True, return_tensors="pt"
-                        )
-                        context_inputs = move_data_to_device(
-                            context_inputs, pl_module.device
-                        )
-                        context_outs = context_encoder(**context_inputs)
-                        for context_ids, e in zip(
-                            context_inputs["input_ids"], context_outs
-                        ):
-                            cleaned_context = " ".join(
-                                map(str, [c for c in context_ids.tolist() if c != 0])
-                            )
-                            context_embeddings.append(e)
-                            context_index[i] = cleaned_context
-                            i += 1
-                        batch = []
-
-            # otherwise, compute the embeddings on the fly from the dataloader
+                collate_fn_func = lambda x: {
+                    # this is a hack to normalize the batch structure
+                    "contexts": trainer.datamodule.tokenizer(
+                        x, padding=True, return_tensors="pt"
+                    )
+                }
+                context_dataloader = DataLoader(
+                    self.contexts,
+                    batch_size=self.batch_size,
+                    shuffle=False,
+                    num_workers=0,
+                    pin_memory=True,
+                    collate_fn=collate_fn_func,
+                )
             else:
-                contexts = set()
-                for batch in dataloader:
-                    batch = move_data_to_device(batch, pl_module.device)
-                    context_outs = context_encoder(**batch["contexts"])
-                    for context_ids, e in zip(
-                        batch["contexts"]["input_ids"], context_outs
-                    ):
-                        cleaned_context = " ".join(
-                            map(str, [c for c in context_ids.tolist() if c != 0])
-                        )
-                        if cleaned_context not in contexts:
-                            contexts.add(cleaned_context)
-                            context_embeddings.append(e)
-                            context_index[i] = cleaned_context
-                            i += 1
+                context_dataloader = dataloader
 
-            context_embeddings = torch.stack(context_embeddings, dim=0)
-            # faiss_indexer = FaissIndexer(context_embeddings, normalize=True)
+            context_embeddings, context_index = self.compute_context_embeddings(
+                context_encoder, context_dataloader, pl_module.device
+            )
 
             # now compute the question embeddings and compute the top-k accuracy
+            logger.log(f"Computing recall@{self.k} for dataloader {dataloader_idx}")
             hits, total = 0, 0
-            # for batch in tqdm(dataloader, desc="Computing question scores"):
             for batch in dataloader:
                 batch = move_data_to_device(batch, pl_module.device)
                 question_embeddings = question_encoder(**batch["questions"])
                 # compute the similarity between the question and all the context embeddings
                 similarity = torch.matmul(question_embeddings, context_embeddings.T)
                 # get the top-k indices
-                top_ks = torch.topk(similarity, k=self.k, dim=1).indices
-                # top_ks = faiss_indexer.search(question_encoder(**batch["questions"]), k=self.k)
+                top_ks = torch.topk(similarity, k=min(self.k, similarity.shape[-1]), dim=1).indices
                 # compute recall at k
                 for sample_idx, top_k in enumerate(top_ks):
                     labels = batch["labels_for_metrics"][sample_idx]
@@ -182,6 +138,32 @@ class TopKEvaluationCallback(pl.Callback):
             metrics[f"recall@{self.k}_{dataloader_idx}"] = recall_at_k
         metrics[f"recall@{self.k}"] = sum(metrics.values()) / len(metrics)
         return metrics
+
+    @staticmethod
+    @torch.no_grad()
+    def compute_context_embeddings(
+        context_encoder: torch.nn.Module,
+        dataloader: DataLoader,
+        device: Union[str, torch.device],
+    ) -> Tuple[torch.Tensor, Dict[int, str]]:
+        context_embeddings = []
+        context_index = {}
+        already_seen = set()
+        i = 0
+        for batch in dataloader:
+            batch = move_data_to_device(batch, device)
+            context_outs = context_encoder(**batch["contexts"])
+            for context_ids, e in zip(batch["contexts"]["input_ids"], context_outs):
+                cleaned_context = " ".join(
+                    map(str, [c for c in context_ids.tolist() if c != 0])
+                )
+                if cleaned_context not in already_seen:
+                    already_seen.add(cleaned_context)
+                    context_embeddings.append(e)
+                    context_index[i] = cleaned_context
+                    i += 1
+        context_embeddings = torch.stack(context_embeddings, dim=0)
+        return context_embeddings, context_index
 
     def on_validation_epoch_end(
         self, trainer: pl.Trainer, pl_module: pl.LightningModule

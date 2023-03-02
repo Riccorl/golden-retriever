@@ -47,3 +47,4 @@ other_callbacks:
   - _target_: callbacks.evaluation.TopKEvaluationCallback
     k: ${train.top_k}
     contexts_path: null
+    batch_size: 128

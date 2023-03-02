@@ -16,18 +16,19 @@ def train(
     doc_dir: Union[str, os.PathLike],
     train_filename: Union[str, os.PathLike],
     dev_filename: Union[str, os.PathLike],
+    test_filename: Union[str, os.PathLike],
     save_dir: Union[str, os.PathLike],
-    query_model: str = "facebook/dpr-question_encoder-single-nq-base",
-    passage_model: str = "facebook/dpr-ctx_encoder-single-nq-base",
+    query_model: str = "sentence-transformers/all-MiniLM-L6-v2",
+    passage_model: str = "sentence-transformers/all-MiniLM-L6-v2",
     max_seq_len_query: int = 256,
-    max_seq_len_passage: int = 256,
-    max_epochs: int = 1,
+    max_seq_len_passage: int = 128,
+    max_epochs: int = 5,
     batch_size: int = 16,
     grad_acc_steps: int = 8,
-    evaluate_every: int = 3000,
-    embed_title: bool = True,
+    evaluate_every: int = 500,
+    embed_title: bool = False,
     num_positives: int = 1,
-    num_hard_negatives: int = 0,
+    num_hard_negatives: int = 3,
 ):
     # Initialize DPR model
     retriever = DensePassageRetriever(
@@ -36,7 +37,6 @@ def train(
         passage_embedding_model=passage_model,
         max_seq_len_query=max_seq_len_query,
         max_seq_len_passage=max_seq_len_passage,
-        batch_size=batch_size,
     )
 
     # Start training our model and save it when it is finished
@@ -44,7 +44,7 @@ def train(
         data_dir=doc_dir,
         train_filename=train_filename,
         dev_filename=dev_filename,
-        test_filename=dev_filename,
+        test_filename=test_filename,
         n_epochs=max_epochs,
         batch_size=batch_size,
         grad_acc_steps=grad_acc_steps,
@@ -76,6 +76,13 @@ if __name__ == "__main__":
         help="Filename of development data",
     )
     arg_parser.add_argument(
+        "--test_filename",
+        type=str,
+        default="test.json",
+        help="Filename of development data",
+    )
+    
+    arg_parser.add_argument(
         "--save_dir",
         type=str,
         default="experiments/hystack",
@@ -84,13 +91,13 @@ if __name__ == "__main__":
     arg_parser.add_argument(
         "--query_model",
         type=str,
-        default="facebook/dpr-question_encoder-single-nq-base",
+        default="sentence-transformers/all-MiniLM-L6-v2",
         help="Name of query model",
     )
     arg_parser.add_argument(
         "--passage_model",
         type=str,
-        default="facebook/dpr-ctx_encoder-single-nq-base",
+        default="sentence-transformers/all-MiniLM-L6-v2",
         help="Name of passage model",
     )
     arg_parser.add_argument(
@@ -114,7 +121,7 @@ if __name__ == "__main__":
     arg_parser.add_argument(
         "--evaluate_every",
         type=int,
-        default=3000,
+        default=500,
         help="Evaluate model every n steps",
     )
     arg_parser.add_argument(
@@ -140,6 +147,7 @@ if __name__ == "__main__":
         doc_dir=args.doc_dir,
         train_filename=args.train_filename,
         dev_filename=args.dev_filename,
+        test_filename=args.test_filename,
         save_dir=args.save_dir,
         query_model=args.query_model,
         passage_model=args.passage_model,

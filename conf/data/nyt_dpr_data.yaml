@@ -1,4 +1,6 @@
-max_positives: 1
+max_positives: -1
+max_negatives: 0
+max_hard_negatives: 0
 in_batch_positives_augmentation: False
 
 datamodule:
@@ -10,6 +12,8 @@ datamodule:
       name: 'train'
       split_contexts: True
       max_positives: ${data.max_positives}
+      max_negatives: ${data.max_negatives}
+      max_hard_negatives: ${data.max_hard_negatives}
       in_batch_positives_augmentation: ${data.in_batch_positives_augmentation}
       path:
         - 'data/dpr-like/nyt/train.json'
@@ -19,6 +23,8 @@ datamodule:
         name: 'val'
         split_contexts: True
         max_positives: ${data.max_positives}
+        max_negatives: ${data.max_negatives}
+        max_hard_negatives: ${data.max_hard_negatives}
         in_batch_positives_augmentation: ${data.in_batch_positives_augmentation}
         path:
           - 'data/dpr-like/nyt/dev.json'
@@ -28,14 +34,16 @@ datamodule:
         name: 'test'
         split_contexts: True
         max_positives: ${data.max_positives}
+        max_negatives: ${data.max_negatives}
+        max_hard_negatives: ${data.max_hard_negatives}
         in_batch_positives_augmentation: ${data.in_batch_positives_augmentation}
         path:
           - 'data/dpr-like/nyt/test.json'
 
   batch_sizes:
-    train: 32
-    val: 32
-    test: 32
+    train: 4
+    val: 128
+    test: 128
 
   num_workers:
     train: 4

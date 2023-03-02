@@ -116,7 +116,7 @@ if [ "$PRINT_CONFIG" ]; then
 fi
 
 if [ "$LANG_MODEL_NAME" ]; then
-  OVERRIDES="$OVERRIDES model_name=$LANG_MODEL_NAME"
+  OVERRIDES="$OVERRIDES model.language_model=$LANG_MODEL_NAME"
 fi
 
 # PRELIMINARIES

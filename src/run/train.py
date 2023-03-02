@@ -91,9 +91,16 @@ def train(conf: omegaconf.DictConfig) -> None:
             conf.model.pl_module.lr_scheduler.num_training_steps = num_training_steps
             # set the number of warmup steps as 10% of the total number of training steps
             if conf.model.pl_module.lr_scheduler.num_warmup_steps is None:
-                conf.model.pl_module.lr_scheduler.num_warmup_steps = int(
-                    conf.model.pl_module.lr_scheduler.num_training_steps * 0.1
-                )
+                if (
+                    "warmup_steps_ratio" in conf.model.pl_module
+                    and conf.model.pl_module.warmup_steps_ratio is not None
+                ):
+                    conf.model.pl_module.lr_scheduler.num_warmup_steps = int(
+                        conf.model.pl_module.lr_scheduler.num_training_steps
+                        * conf.model.pl_module.warmup_steps_ratio
+                    )
+                else:
+                    conf.model.pl_module.lr_scheduler.num_warmup_steps = 0
             logger.log(
                 f"Number of warmup steps: {conf.model.pl_module.lr_scheduler.num_training_steps}"
             )

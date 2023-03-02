@@ -13,6 +13,7 @@ class SentenceEncoder(torch.nn.Module):
         language_model: Union[
             str, tr.PreTrainedModel
         ] = "sentence-transformers/all-MiniLM-6-v2",
+        pooling_strategy: str = "mean",
         *args,
         **kwargs,
     ):
@@ -21,16 +22,20 @@ class SentenceEncoder(torch.nn.Module):
             self.language_model = tr.AutoModel.from_pretrained(language_model)
         else:
             self.language_model = language_model
+        self.pooling_strategy = pooling_strategy
 
     def forward(
         self,
         input_ids: torch.Tensor,
         attention_mask: torch.Tensor,
         token_type_ids: Optional[torch.Tensor] = None,
-        pooling_strategy: str = "mean",
+        pooling_strategy: Optional[str] = None,
         *args,
         **kwargs,
     ) -> torch.Tensor:
+        if pooling_strategy is None:
+            pooling_strategy = self.pooling_strategy
+
         model_kwargs = {"input_ids": input_ids, "attention_mask": attention_mask}
         if token_type_ids is not None:
             model_kwargs["token_type_ids"] = token_type_ids
@@ -108,9 +113,13 @@ class GoldenRetriever(torch.nn.Module):
         output = {"logits": logits}
 
         if return_loss and labels is not None:
+            
             if isinstance(self.loss_type, torch.nn.NLLLoss):
                 labels = labels.argmax(dim=1)
                 logits = F.log_softmax(logits, dim=1)
+                if len(question_encodings.size()) > 1:
+                    logits = logits.view(question_encodings.size(0), -1)
+
             output["loss"] = self.loss_type(logits, labels)
 
         return output
