@@ -113,7 +113,6 @@ class GoldenRetriever(torch.nn.Module):
         output = {"logits": logits}
 
         if return_loss and labels is not None:
-            
             if isinstance(self.loss_type, torch.nn.NLLLoss):
                 labels = labels.argmax(dim=1)
                 logits = F.log_softmax(logits, dim=1)

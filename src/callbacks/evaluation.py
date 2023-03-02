@@ -1,15 +1,15 @@
 # from pytorch_lightning import Callback, LightningModule
-from collections import defaultdict
 import os
+from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
 import pytorch_lightning as pl
 import torch
 from lightning_fabric.utilities.apply_func import move_data_to_device
+from torch.utils.data import DataLoader
 
 from utils.logging import get_console_logger
-from torch.utils.data import DataLoader, Dataset
 
 # from faiss.indexer import FaissIndexer
 
@@ -29,9 +29,7 @@ class TopKEvaluationCallback(pl.Callback):
         super().__init__()
         self.k = k
         self.report_intervals = report_intervals
-        self.contexts = (
-            self.load_contexts(contexts_path) if contexts_path else None
-        )
+        self.contexts = self.load_contexts(contexts_path) if contexts_path else None
         self.batch_size = batch_size
 
     @staticmethod
@@ -113,7 +111,9 @@ class TopKEvaluationCallback(pl.Callback):
                 # compute the similarity between the question and all the context embeddings
                 similarity = torch.matmul(question_embeddings, context_embeddings.T)
                 # get the top-k indices
-                top_ks = torch.topk(similarity, k=min(self.k, similarity.shape[-1]), dim=1).indices
+                top_ks = torch.topk(
+                    similarity, k=min(self.k, similarity.shape[-1]), dim=1
+                ).indices
                 # compute recall at k
                 for sample_idx, top_k in enumerate(top_ks):
                     labels = batch["labels_for_metrics"][sample_idx]

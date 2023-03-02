@@ -81,7 +81,7 @@ if __name__ == "__main__":
         default="test.json",
         help="Filename of development data",
     )
-    
+
     arg_parser.add_argument(
         "--save_dir",
         type=str,
