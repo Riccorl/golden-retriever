@@ -15,7 +15,7 @@ datamodule:
       - _target_: data.datasets.DPRDataset
         name: 'val'
         split_contexts: True
-        contexts_path: ${contexts_path}
+        contexts_path: ${data.contexts_path}
         path:
           - 'data/dpr-like/srl/ontonotes/ontonotes.dev.args.json'
 
@@ -23,7 +23,7 @@ datamodule:
       - _target_: data.datasets.DPRDataset
         name: 'test'
         split_contexts: True
-        contexts_path: ${contexts_path}
+        contexts_path: ${data.contexts_path}
         path:
           - 'data/dpr-like/srl/ontonotes/ontonotes.test.args.json'
 

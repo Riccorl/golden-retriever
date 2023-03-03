@@ -46,4 +46,4 @@ model_checkpoint_callback:
 other_callbacks:
   - _target_: callbacks.evaluation.TopKEvaluationCallback
     k: ${train.top_k}
-    batch_size: 128
+    batch_size: 64

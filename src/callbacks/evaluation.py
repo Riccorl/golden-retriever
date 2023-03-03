@@ -4,6 +4,7 @@ from typing import Dict, Optional, Tuple, Union
 import pytorch_lightning as pl
 import torch
 from torch.utils.data import DataLoader
+from utils.model_inputs import ModelInputs
 
 from utils.logging import get_console_logger
 
@@ -66,12 +67,12 @@ class TopKEvaluationCallback(pl.Callback):
                     shuffle=False,
                     num_workers=0,
                     pin_memory=True,
-                    collate_fn=lambda x: {
+                    collate_fn=lambda x: ModelInputs({
                         # this is a hack to normalize the batch structure
                         "contexts": trainer.datamodule.tokenizer(
                             x, padding=True, return_tensors="pt"
                         )
-                    },
+                    }),
                 )
             else:
                 context_dataloader = dataloader
@@ -85,9 +86,10 @@ class TopKEvaluationCallback(pl.Callback):
             hits, total = 0, 0
             for batch in dataloader:
                 batch = batch.to(pl_module.device)
-                similarity = pl_module.model(
+                model_outputs = pl_module.model(
                     batch.questions, contexts_encodings=context_embeddings
                 )
+                similarity = model_outputs["logits"]
                 # get the top-k indices
                 top_ks = torch.topk(
                     similarity, k=min(self.k, similarity.shape[-1]), dim=1

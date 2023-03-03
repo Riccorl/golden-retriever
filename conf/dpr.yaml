@@ -4,17 +4,15 @@ hydra:
     dir: ./experiments/${model_name}/${now:%Y-%m-%d}/${now:%H-%M-%S}
 
 model_name: ${model.language_model}  # used to name the model in wandb
-project_name: golden-retriever  # used to name the project in wandb
+project_name: golden-retriever-nyt  # used to name the project in wandb
 
 defaults:
   - _self_
   - train: default_train
   - model: default_model
-  - data: default_data
+  - data: nyt_dpr_data
   - evaluation: default_evaluation
   - logging: wandb_logging
   - override hydra/job_logging: colorlog
   - override hydra/hydra_logging: colorlog
 
-model.pl_module.model.loss_type:
-    _target_: torch.nn.NLLLoss

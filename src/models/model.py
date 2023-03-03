@@ -135,3 +135,25 @@ class GoldenRetriever(torch.nn.Module):
             output["loss"] = self.loss_type(logits, labels)
 
         return output
+
+    def build_indexer(self, input_ids, attention_mask, token_type_ids=None):
+        """
+        Build an indexer for the model.
+
+        Args:
+            input_ids (`torch.Tensor`):
+                The input ids of the sentences.
+            attention_mask (`torch.Tensor`):
+                The attention mask of the sentences.
+            token_type_ids (`torch.Tensor`):
+                The token type ids of the sentences.
+
+        Returns:
+            obj:`torch.Tensor`: The indexer of the model.
+        """
+        return self.context_encoder(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            token_type_ids=token_type_ids,
+            pooling_strategy="mean",
+        )

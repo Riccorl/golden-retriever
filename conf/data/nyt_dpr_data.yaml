@@ -1,7 +1,7 @@
 max_positives: -1
 max_negatives: 0
-max_hard_negatives: 0
-in_batch_positives_augmentation: False
+max_hard_negatives: 5
+in_batch_positives_augmentation: True
 contexts_path: "data/dpr-like/nyt/definitions.txt"
 
 datamodule:
@@ -16,7 +16,6 @@ datamodule:
       max_negatives: ${data.max_negatives}
       max_hard_negatives: ${data.max_hard_negatives}
       in_batch_positives_augmentation: ${data.in_batch_positives_augmentation}
-      contexts_path: ${contexts_path}
       path:
         - 'data/dpr-like/nyt/train.json'
 
@@ -28,7 +27,7 @@ datamodule:
         max_negatives: ${data.max_negatives}
         max_hard_negatives: ${data.max_hard_negatives}
         in_batch_positives_augmentation: ${data.in_batch_positives_augmentation}
-        contexts_path: ${contexts_path}
+        contexts_path: ${data.contexts_path}
         path:
           - 'data/dpr-like/nyt/dev.json'
 
@@ -40,7 +39,7 @@ datamodule:
         max_negatives: ${data.max_negatives}
         max_hard_negatives: ${data.max_hard_negatives}
         in_batch_positives_augmentation: ${data.in_batch_positives_augmentation}
-        contexts_path: ${contexts_path}
+        contexts_path: ${data.contexts_path}
         path:
           - 'data/dpr-like/nyt/test.json'
 

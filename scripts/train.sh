@@ -178,6 +178,8 @@ else
   CONFIG_NAME=$(echo "$CONFIG_NAME" | cut -d'.' -f1)
   # get the path
   CONFIG_PATH=$(echo "$CONFIG_PATH" | rev | cut -d'/' -f2- | rev)
+  # add the absolute path to the actual project directory to the config path
+  CONFIG_PATH=$(realpath "$CONFIG_PATH")
   CONFIG_PATH="--config-path $CONFIG_PATH --config-name $CONFIG_NAME"
 fi
 
@@ -240,6 +242,8 @@ cat <<EOF
 Configuration:
 -------------------------------------------------------------------
 Language model name:              $LANG_MODEL_NAME
+Config path:                      $CONFIG_PATH
+Model name:                       $MODEL_NAME
 Run in debug mode:                $DEV_RUN
 Requested VRAM:                   $GPU_MEM MB
 Available VRAM:                   $FREE_MEM MB
