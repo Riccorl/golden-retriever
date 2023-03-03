@@ -16,3 +16,4 @@ defaults:
   - override hydra/job_logging: colorlog
   - override hydra/hydra_logging: colorlog
 
+train.top_k: 5

@@ -186,25 +186,18 @@ class DPRDataset(BaseDataset):
         else:
             paths = [self.project_folder / paths]
 
-        tmp_data = []
         # read the data and put it in a placeholder list
         for path in paths:
             if not path.exists():
                 raise ValueError(f"{path} does not exist")
 
-            # logger.log(
-            #     f"Loading [bold cyan]{self.name}[/bold cyan] data from [bold]{path}[/bold]"
-            # )
-            # json_data = json.load(open(path, "r"))
-            # tmp_data += json_data
-            # The data is a list of dictionaries, each dictionary is a sample
-            # Each sample has the following keys:
-            #   - "question": the question
-            #   - "answers": a list of answers
-            #   - "positive_ctxs": a list of positive contexts
-            #   - "negative_ctxs": a list of negative contexts
-            #   - "hard_negative_ctxs": a list of hard negative contexts
-
+        # The data is a list of dictionaries, each dictionary is a sample
+        # Each sample has the following keys:
+        #   - "question": the question
+        #   - "answers": a list of answers
+        #   - "positive_ctxs": a list of positive contexts
+        #   - "negative_ctxs": a list of negative contexts
+        #   - "hard_negative_ctxs": a list of hard negative contexts
         # use the huggingface dataset library to load the data, by default it will load the
         # data in a dict with the key being "train"
         data = load_dataset("json", data_files=[str(p) for p in paths])["train"]
@@ -215,19 +208,10 @@ class DPRDataset(BaseDataset):
             # Pre-process the data
             if shuffle:
                 # shuffle the data
-                # random.shuffle(tmp_data)
                 data = data.shuffle(seed=42)
 
             # # measure how long the preprocessing takes
             start = time.time()
-            # fn = partial(
-            #     DPRDataset.process_sample,
-            #     tokenizer=tokenizer,
-            #     max_positives=self.max_positives,
-            #     max_negatives=self.max_negatives,
-            #     max_hard_negatives=self.max_hard_negatives,
-            # )
-            # data = fn(tmp_data)
             data = data.map(
                 partial(
                     DPRDataset.process_sample,
@@ -244,14 +228,8 @@ class DPRDataset(BaseDataset):
                 ],
                 keep_in_memory=True,
                 load_from_cache_file=True,
-                num_proc=psutil.cpu_count(logical=False),
-                # num_proc=1,
+                num_proc=psutil.cpu_count(),
             )
-            # num_cores = psutil.cpu_count(logical=False)
-            # chunks = [tmp_data[i::num_cores] for i in range(num_cores)]
-            # with multiprocessing.Pool(processes=num_cores) as pool:
-            #     results = pool.map(fn, chunks)
-            # data = [item for sublist in results for item in sublist]
             end = time.time()
             logger.log(
                 f"Pre-processing [bold cyan]{self.name}[/bold cyan] "
@@ -261,104 +239,43 @@ class DPRDataset(BaseDataset):
 
     @staticmethod
     def process_sample(
-        samples: List[Dict],
+        sample: Dict,
         tokenizer: tr.PreTrainedTokenizer,
         max_positives: int,
         max_negatives: int,
         max_hard_negatives: int,
         max_question_length: int = 256,
         max_context_length: int = 128,
-    ) -> List[Dict]:
-        data = []
-
-        # questions = tokenizer(
-        #     samples["question"], max_length=max_question_length, truncation=True
-        # )
-        # positive_ctxs = [
-        #     [
-        #         tokenizer(p["text"], max_length=max_context_length, truncation=True)
-        #         for p in positives
-        #     ]
-        #     for positives in samples["positive_ctxs"]
-        # ]
-        # if max_positives != -1:
-        #     positive_ctxs = [positives[:max_positives] for positives in positive_ctxs]
-        # negative_ctxs = [
-        #     [
-        #         tokenizer(n["text"], max_length=max_context_length, truncation=True)
-        #         for n in negatives
-        #     ]
-        #     for negatives in samples["negative_ctxs"]
-        # ]
-        # if max_negatives != -1:
-        #     negative_ctxs = [negatives[:max_negatives] for negatives in negative_ctxs]
-        # hard_negative_ctxs = [
-        #     [
-        #         tokenizer(n["text"], max_length=max_context_length, truncation=True)
-        #         for n in hard_negatives
-        #     ]
-        #     for hard_negatives in samples["hard_negative_ctxs"]
-        # ]
-        # if max_hard_negatives != -1:
-        #     hard_negative_ctxs = [
-        #         hard_negatives[:max_hard_negatives]
-        #         for hard_negatives in hard_negative_ctxs
-        #     ]
-        # contexts = []
-        # for i in range(len(samples)):
-        #     contexts_to_add = positive_ctxs[i]
-        #     if i < len(negative_ctxs):
-        #         contexts_to_add += negative_ctxs[i]
-        #     if i < len(hard_negative_ctxs):
-        #         contexts_to_add += hard_negative_ctxs[i]
-        #     contexts.append(contexts_to_add)
-
-        # data = {
-        #     "question": questions,
-        #     "context": contexts,
-        #     "positive_ctxs": positive_ctxs,
-        #     "negative_ctxs": negative_ctxs,
-        #     "hard_negative_ctxs": hard_negative_ctxs,
-        # }
-
-        # for sample in track(samples, description="Pre-processing samples"):
+    ) -> Dict:
         question = tokenizer(
-            samples["question"], max_length=max_question_length, truncation=True
+            sample["question"], max_length=max_question_length, truncation=True
         )
         positive_ctxs = [
             tokenizer(p["text"], max_length=max_context_length, truncation=True)
-            for p in samples["positive_ctxs"]
+            for p in sample["positive_ctxs"]
         ]
         if max_positives != -1:
             positive_ctxs = positive_ctxs[:max_positives]
         negative_ctxs = [
             tokenizer(n["text"], max_length=max_context_length, truncation=True)
-            for n in samples["negative_ctxs"]
+            for n in sample["negative_ctxs"]
         ]
         if max_negatives != -1:
             negative_ctxs = negative_ctxs[:max_negatives]
         hard_negative_ctxs = [
             tokenizer(h["text"], max_length=max_context_length, truncation=True)
-            for h in samples["hard_negative_ctxs"]
+            for h in sample["hard_negative_ctxs"]
         ]
         if max_hard_negatives != -1:
             hard_negative_ctxs = hard_negative_ctxs[:max_hard_negatives]
         context = positive_ctxs + negative_ctxs + hard_negative_ctxs
-        # data.append(
-        #     {
-        #         "question": question,
-        #         "context": context,
-        #         "positives": set([p["text"] for p in samples["positive_ctxs"]]),
-        #         "positive_index_end": len(positive_ctxs),
-        #     }
-        # )
-        # return data
-        return {
-                "question": question,
-                "context": context,
-                "positives": set([p["text"] for p in samples["positive_ctxs"]]),
-                "positive_index_end": len(positive_ctxs),
-            }
+        output = {
+            "question": question,
+            "context": context,
+            "positives": set([p["text"] for p in sample["positive_ctxs"]]),
+            "positive_index_end": len(positive_ctxs),
+        }
+        return output
 
     @staticmethod
     def pad_sequence(
