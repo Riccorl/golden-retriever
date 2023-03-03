@@ -126,7 +126,7 @@ def train(conf: omegaconf.DictConfig) -> None:
 
         # callbacks declaration
     callbacks_store = [
-        LearningRateMonitor(),
+        LearningRateMonitor(logging_interval="step"),
         RichProgressBar(
             theme=RichProgressBarTheme(
                 progress_bar="#802433",
