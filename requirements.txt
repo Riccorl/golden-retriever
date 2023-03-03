@@ -8,4 +8,5 @@ black[d]
 #
 # nlp-dataset-readers
 # farm-haystack
-faiss
+faiss-gpu
+datasets
