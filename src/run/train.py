@@ -8,7 +8,7 @@ import pytorch_lightning as pl
 import torch
 from omegaconf import OmegaConf
 from pytorch_lightning import Trainer
-from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
+from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint, LearningRateMonitor
 from pytorch_lightning.callbacks.progress.rich_progress import (
     RichProgressBar,
     RichProgressBarTheme,
@@ -126,6 +126,7 @@ def train(conf: omegaconf.DictConfig) -> None:
 
         # callbacks declaration
     callbacks_store = [
+        LearningRateMonitor(),
         RichProgressBar(
             theme=RichProgressBarTheme(
                 progress_bar="#802433",
