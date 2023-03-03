@@ -8,12 +8,10 @@ project_name: golden-retriever-nyt  # used to name the project in wandb
 
 defaults:
   - _self_
-  - train: default_train
+  - train: nyt_train
   - model: default_model
   - data: nyt_dpr_data
   - evaluation: default_evaluation
   - logging: wandb_logging
   - override hydra/job_logging: colorlog
   - override hydra/hydra_logging: colorlog
-
-train.top_k: 5

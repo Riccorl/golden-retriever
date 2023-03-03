@@ -9,7 +9,10 @@ import torch
 from omegaconf import OmegaConf
 from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
-from pytorch_lightning.callbacks.progress.rich_progress import RichProgressBar
+from pytorch_lightning.callbacks.progress.rich_progress import (
+    RichProgressBar,
+    RichProgressBarTheme,
+)
 from pytorch_lightning.loggers import WandbLogger
 from rich.pretty import pprint
 
@@ -122,7 +125,15 @@ def train(conf: omegaconf.DictConfig) -> None:
         (experiment_path / "hparams.yaml").write_text(yaml_conf)
 
         # callbacks declaration
-    callbacks_store = [RichProgressBar()]
+    callbacks_store = [
+        RichProgressBar(
+            theme=RichProgressBarTheme(
+                progress_bar="#802433",
+                progress_bar_finished="#802433",
+                progress_bar_pulse="#802433",
+            )
+        )
+    ]
 
     early_stopping_callback: Optional[EarlyStopping] = None
     if conf.train.early_stopping_callback is not None:

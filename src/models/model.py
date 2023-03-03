@@ -73,13 +73,19 @@ class GoldenRetriever(torch.nn.Module):
         if labels is not None:
             self.labels = labels
 
+        # question encoder model
         self.question_encoder = question_encoder
-
         if not context_encoder:
+            # if no context encoder is provided, s
+            # hare the weights of the question encoder
             context_encoder = question_encoder
+        # context encoder model
         self.context_encoder = context_encoder
-
+        # loss function
         self.loss_type = loss_type
+
+        # indexer stuff
+        self.indexer = None
 
     def forward(
         self,
@@ -113,9 +119,13 @@ class GoldenRetriever(torch.nn.Module):
             obj:`torch.Tensor`: The outputs of the model.
         """
         if questions is None and question_encodings is None:
-            raise ValueError("Either `questions` or `question_encodings` must be provided")
+            raise ValueError(
+                "Either `questions` or `question_encodings` must be provided"
+            )
         if contexts is None and contexts_encodings is None:
-            raise ValueError("Either `contexts` or `contexts_encodings` must be provided")
+            raise ValueError(
+                "Either `contexts` or `contexts_encodings` must be provided"
+            )
 
         if question_encodings is None:
             question_encodings = self.question_encoder(**questions)
@@ -135,25 +145,3 @@ class GoldenRetriever(torch.nn.Module):
             output["loss"] = self.loss_type(logits, labels)
 
         return output
-
-    def build_indexer(self, input_ids, attention_mask, token_type_ids=None):
-        """
-        Build an indexer for the model.
-
-        Args:
-            input_ids (`torch.Tensor`):
-                The input ids of the sentences.
-            attention_mask (`torch.Tensor`):
-                The attention mask of the sentences.
-            token_type_ids (`torch.Tensor`):
-                The token type ids of the sentences.
-
-        Returns:
-            obj:`torch.Tensor`: The indexer of the model.
-        """
-        return self.context_encoder(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            token_type_ids=token_type_ids,
-            pooling_strategy="mean",
-        )

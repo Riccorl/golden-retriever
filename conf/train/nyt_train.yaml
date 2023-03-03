@@ -1,0 +1,138 @@
+# reproducibility
+seed: 42
+
+export: False
+float32_matmul_precision: "medium"
+set_determinism_the_old_way: False
+top_k: 5
+
+only_test: False
+
+# pl_trainer
+pl_trainer:
+  _target_: pytorch_lightning.Trainer
+  accelerator: gpu
+  devices: 1
+  num_nodes: 1
+  strategy: null
+  accumulate_grad_batches: 1
+  gradient_clip_val: 1.0
+  val_check_interval: 0.5  # you can specify an int "n" here => validation every "n" steps
+  max_epochs: 40
+  deterministic: True
+  fast_dev_run: False
+  precision: 32
+  resume_from_checkpoint: null
+
+# early stopping callback
+# "early_stopping_callback: null" will disable early stopping
+early_stopping_callback:
+  _target_: pytorch_lightning.callbacks.EarlyStopping
+  monitor: val_recall@${train.top_k}
+  mode: max
+  patience: 15
+
+# model_checkpoint_callback
+# "model_checkpoint_callback: null" will disable model checkpointing
+model_checkpoint_callback:
+  _target_: pytorch_lightning.callbacks.ModelCheckpoint
+  monitor: val_recall@${train.top_k}
+  mode: max
+  verbose: True
+  save_top_k: 1
+  filename: 'checkpoint-val_recall@${train.top_k}_{val_recall@${train.top_k}:.4f}-epoch_{epoch:02d}'
+  auto_insert_metric_name: False
+
+other_callbacks:
+  - _target_: callbacks.evaluation.NYTTopKEvaluationCallback
+    label_mapping:
+      /people/person/nationality:
+        - the country that a person holds citizenship in
+        - a person's citizenship country
+        - the country a person holds citizenship in
+      /sports/sports_team/location:
+        - the place where a sports team is headquartered
+        - the location where a sports team is based
+        - the headquarters location of a sports team
+      /location/country/administrative_divisions:
+        - the subdivisions within a country
+        - divisions within a country
+        - the country's administrative territorial entity
+      /business/company/major_shareholders:
+        - the shareholders that own a significant portion of a company
+        - shareholders owning a significant portion of a company
+        - the shareholders of a company
+      /people/ethnicity/people:
+        - the country of origin for an ethnic group
+        - origin country of an ethnic group
+        - the country of origin of an ethnic group
+      /people/ethnicity/geographic_distribution:
+        - the geographical spread of an ethnic group
+        - geographical spread of an ethnic group
+        - the geographical distribution of an ethnic group
+      /business/company_shareholder/major_shareholder_of:
+        - a major shareholder in a company
+        - a company's major shareholder
+        - a company's major shareholders
+      /location/location/contains:
+        - a location that encloses another location
+        - a location located within another location
+        - a location enclosed in another location
+      /business/company/founders:
+        - the people who started a company
+        - founders of a company
+        - the individuals who established a company
+      /business/person/company:
+        - the current employer of a person
+        - a person's current employer
+        - an individual's current place of employment
+      /business/company/advisors:
+        - advisors for a company
+        - a company's advisors
+        - individuals who provide guidance to a company
+      /people/deceased_person/place_of_death:
+        - the location where a deceased person passed away
+        - a deceased person's place of death
+        - the location of death of a deceased person
+      /business/company/industry:
+        - the field in which a company operates
+        - a company's industry
+        - the sector in which a company operates
+      /people/person/ethnicity:
+        - the ethnic background of a person
+        - a person's ethnicity
+        - an individual's ethnic background
+      /people/person/place_of_birth:
+        - the birth place of a person
+        - a person's place of birth
+        - the location where a person was born
+      /location/administrative_division/country:
+        - the country that an administrative division belongs to
+        - country of an administrative division
+        - the country where an administrative division is located
+      /people/person/place_lived:
+        - the places where a person has lived
+        - a person's residence
+        - the locations where an individual has lived
+      /sports/sports_team_location/teams:
+        - the sports teams located in a specific location
+        - sports teams based in a location
+        - the teams based in a location
+      /people/person/children:
+        - the child of a person
+        - a person's child
+        - an individual's offspring
+      /people/person/religion:
+        - the religion of a person
+        - a person's religion
+        - an individual's religious beliefs
+      /location/neighborhood/neighborhood_of:
+        - the location that a neighborhood is located in
+        - neighborhood of a location
+        - the location where a neighborhood is situated
+      /location/country/capital:
+        - the capital city of a country
+        - capital of a country
+        - the city that serves as the administrative
+    k: ${train.top_k}
+    batch_size: 64
