@@ -8,7 +8,11 @@ import pytorch_lightning as pl
 import torch
 from omegaconf import OmegaConf
 from pytorch_lightning import Trainer
-from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint, LearningRateMonitor
+from pytorch_lightning.callbacks import (
+    EarlyStopping,
+    ModelCheckpoint,
+    LearningRateMonitor,
+)
 from pytorch_lightning.callbacks.progress.rich_progress import (
     RichProgressBar,
     RichProgressBarTheme,
@@ -113,6 +117,17 @@ def train(conf: omegaconf.DictConfig) -> None:
             conf.model.pl_module, _recursive_=False
         )
 
+    # callbacks declaration
+    callbacks_store = [
+        RichProgressBar(
+            theme=RichProgressBarTheme(
+                progress_bar="#802433",
+                progress_bar_finished="#802433",
+                progress_bar_pulse="#802433",
+            )
+        ),
+    ]
+
     experiment_logger: Optional[WandbLogger] = None
     experiment_path: Optional[Path] = None
     if conf.logging.log:
@@ -123,18 +138,8 @@ def train(conf: omegaconf.DictConfig) -> None:
         # Store the YaML config separately into the wandb dir
         yaml_conf: str = OmegaConf.to_yaml(cfg=conf)
         (experiment_path / "hparams.yaml").write_text(yaml_conf)
-
-        # callbacks declaration
-    callbacks_store = [
-        LearningRateMonitor(),
-        RichProgressBar(
-            theme=RichProgressBarTheme(
-                progress_bar="#802433",
-                progress_bar_finished="#802433",
-                progress_bar_pulse="#802433",
-            )
-        )
-    ]
+        # Add a Learning Rate Monitor callback to log the learning rate
+        callbacks_store.append(LearningRateMonitor(logging_interval="step"))
 
     early_stopping_callback: Optional[EarlyStopping] = None
     if conf.train.early_stopping_callback is not None:

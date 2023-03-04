@@ -47,3 +47,9 @@ other_callbacks:
   - _target_: callbacks.evaluation.TopKEvaluationCallback
     k: ${train.top_k}
     batch_size: 64
+  - _target_: callbacks.data_augmentation.NegativeAugmentationCallback
+    metric_to_monitor: val_recall@${train.top_k}
+    threshold: 0.86
+    max_negatives: 3
+    batch_size: 64
+  

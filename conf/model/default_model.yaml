@@ -20,5 +20,8 @@ pl_module:
     lr: 1e-5
     weight_decay: 0.0
   lr_scheduler: null
+    #  _target_: transformers.get_linear_schedule_with_warmup
+    #  num_warmup_steps: null
+    #  num_training_steps: null
   grouped_parameters: False
   warmup_steps_ratio: 0.1

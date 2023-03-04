@@ -4,30 +4,59 @@
 # checkmark font for fancy log
 CHECK_MARK="\033[0;32m\xE2\x9C\x94\033[0m"
 # usage text
-USAGE="$(basename "$0") [-h] [-l LANG_MODEL_NAME] [-d] [-p PRECISION] [-c] [-g DEVICES] [-n NODES] [-m GPU_MEM] [-s STRATEGY] [-o] OVERRIDES
+USAGE="$(basename "$0") [-h --help] [-l --language-model LANG_MODEL_NAME] [-d --debug] [-p --precision PRECISION]
+[-c --cpu] [-g --devices DEVICES] [-n --nodes NODES] [-m --gpu-mem GPU_MEM] [-s --strategy STRATEGY]
+[-o --offline] [-t --test] [--config-path CONFIG_PATH] [--checkpoint CHECKPOINT_PATH] OVERRIDES
 
 where:
-    -h            Show this help text
-    -l            Language model name (one of the models from HuggingFace)
-    -d            Run in debug mode (no GPU and wandb offline)
-    -p            Training precision, default 16.
-    -c            Use CPU instead of GPU.
-    -g            How many GPU to use, default 1. If 0, use CPU.
-    -n            How many nodes to use, default 1.
-    -m            Minimum GPU memory required in MB (default: 8000). If less that this,
-                  training will wait until there is enough space.
-    -s            Strategy to use for distributed training, default NULL.
-    -o            Run the experiment offline
-    OVERRIDES     Overrides for the experiment, in the form of key=value.
-                  For example, 'model_name=bert-base-uncased'
+    -h --help             Show this help text
+    -l --language-model   Language model name (one of the models from HuggingFace)
+    -d --debug            Run in debug mode (no GPU and wandb offline)
+    -p --precision        Training precision, default 16.
+    -c --cpu              Use CPU instead of GPU.
+    -g --devices          How many GPU to use, default 1. If 0, use CPU.
+    -n --nodes            How many nodes to use, default 1.
+    -m --gpu-mem          Minimum GPU memory required in MB (default: 8000). If less that this,
+                          training will wait until there is enough space.
+    -s --strategy         Strategy to use for distributed training, default NULL.
+    -o --offline          Run the experiment offline
+    -v --print            Print the config
+    -t --test             Run only the test phase
+    --config-path         Run a specific config file
+    --checkpoint          Run a specific checkpoint
+    OVERRIDES             Overrides for the experiment, in the form of key=value.
+                          For example, 'model_name=bert-base-uncased'.
 Example:
+  ./script/train.sh
   ./script/train.sh -l bert-base-cased
   ./script/train.sh -l bert-base-cased -m 10000
 "
 
+# Transform long options to short ones
+for arg in "$@"; do
+  shift
+  case "$arg" in
+  '--help') set -- "$@" '-h' ;;
+  '--language-model') set -- "$@" '-l' ;;
+  '--debug') set -- "$@" '-d' ;;
+  '--precision') set -- "$@" '-p' ;;
+  '--cpu') set -- "$@" '-c' ;;
+  '--devices') set -- "$@" '-g' ;;
+  '--nodes') set -- "$@" '-n' ;;
+  '--gpu-mem') set -- "$@" '-m' ;;
+  '--strategy') set -- "$@" '-s' ;;
+  '--offline') set -- "$@" '-o' ;;
+  '--print') set -- "$@" '-v' ;;
+  '--test') set -- "$@" '-t' ;;
+  '--config-path') set -- "$@" '-a' ;;
+  '--checkpoint') set -- "$@" '-k' ;;
+  *) set -- "$@" "$arg" ;;
+  esac
+done
+
 # check for named params
 #while [ $OPTIND -le "$#" ]; do
-while getopts ":hl:dp:cg:n:m:s:o" opt; do
+while getopts ":hl:dp:cg:n:m:s:ovta:k:" opt; do
   case $opt in
   h)
     printf "%s$USAGE" && exit 0
@@ -59,23 +88,36 @@ while getopts ":hl:dp:cg:n:m:s:o" opt; do
   o)
     WANDB="offline"
     ;;
+  v)
+    PRINT_CONFIG="++print_config=True"
+    ;;
+  t)
+    ONLY_TEST="True"
+    ;;
+  a)
+    CONFIG_PATH="$OPTARG"
+    ;;
+  k)
+    CHECKPOINT_PATH="$OPTARG"
+    ;;
   \?)
     echo "Invalid option -$OPTARG" >&2 && echo "$USAGE" && exit 0
     ;;
   esac
 done
 
-# if LANG_MODEL_NAME is not specified, abort
-if [ -z "$LANG_MODEL_NAME" ]; then
-  printf "A language model name must be specified.\n\n"
-  printf "%s$USAGE"
-  exit 0
-fi
-
 # shift for overrides
 shift $((OPTIND - 1))
 # split overrides into key=value pairs
 OVERRIDES=$(echo "$@" | sed -e 's/ /\n/g')
+
+if [ "$PRINT_CONFIG" ]; then
+  OVERRIDES="$OVERRIDES $PRINT_CONFIG"
+fi
+
+if [ "$LANG_MODEL_NAME" ]; then
+  OVERRIDES="$OVERRIDES model.language_model=$LANG_MODEL_NAME"
+fi
 
 # PRELIMINARIES
 CONDA_BASE=$(conda info --base)
@@ -126,6 +168,35 @@ if [ -z "$WANDB" ]; then
   WANDB="online"
 fi
 
+# if -a is not specified, CONFIG_PATH is "null"
+if [ -z "$CONFIG_PATH" ]; then
+  CONFIG_PATH=""
+else
+  # split the last part of the path
+  CONFIG_NAME=$(echo "$CONFIG_PATH" | rev | cut -d'/' -f1 | rev)
+  # remove the extension
+  CONFIG_NAME=$(echo "$CONFIG_NAME" | cut -d'.' -f1)
+  # get the path
+  CONFIG_PATH=$(echo "$CONFIG_PATH" | rev | cut -d'/' -f2- | rev)
+  # add the absolute path to the actual project directory to the config path
+  CONFIG_PATH=$(realpath "$CONFIG_PATH")
+  CONFIG_PATH="--config-path $CONFIG_PATH --config-name $CONFIG_NAME"
+fi
+
+# if -k is not specified, CHECKPOINT_PATH is "null"
+if [ -z "$CHECKPOINT_PATH" ]; then
+  CHECKPOINT_PATH=""
+else
+  OVERRIDES="$OVERRIDES +evaluation.checkpoint_path=$CHECKPOINT_PATH"
+fi
+
+# if -t is not specified, ONLY_TEST is False
+if [ -z "$ONLY_TEST" ]; then
+  ONLY_TEST="False"
+else
+  OVERRIDES="$OVERRIDES +train.only_test=True logging.log=null"
+fi
+
 # CHECK FOR BOOLEAN PARAMS
 # if -d then GPU is not required and no output dir
 if [ "$DEV_RUN" = "True" ]; then
@@ -171,6 +242,8 @@ cat <<EOF
 Configuration:
 -------------------------------------------------------------------
 Language model name:              $LANG_MODEL_NAME
+Config path:                      $CONFIG_PATH
+Model name:                       $MODEL_NAME
 Run in debug mode:                $DEV_RUN
 Requested VRAM:                   $GPU_MEM MB
 Available VRAM:                   $FREE_MEM MB
@@ -209,16 +282,17 @@ echo -e "$GPU_RAM_MESSAGE${CHECK_MARK} Starting.\n"
 
 # if you use the `GenerativeDataset` class
 # you may want to set `TOKENIZERS_PARALLELISM` to `false`
-#export TOKENIZERS_PARALLELISM=false
+export TOKENIZERS_PARALLELISM=false
 
 DIRPATH=$(dirname "$(dirname "$(readlink -f "${BASH_SOURCE:-$0}")")")/src
 export PYTHONPATH="$DIRPATH"
 
 export HYDRA_FULL_ERROR=1
 
+
 if [ "$DEV_RUN" = "True" ]; then
-  python src/bin/train.py \
-    "model.model.language_model=$LANG_MODEL_NAME" \
+  python src/run/train.py \
+    $CONFIG_PATH \
     "train.pl_trainer.fast_dev_run=$DEV_RUN" \
     "train.pl_trainer.devices=$DEVICES" \
     "train.pl_trainer.accelerator=$ACCELERATOR" \
@@ -231,8 +305,8 @@ if [ "$DEV_RUN" = "True" ]; then
     "hydra/hydra_logging=disabled" \
     $OVERRIDES
 else
-  python src/bin/train.py \
-    "model.model.language_model=$LANG_MODEL_NAME" \
+  python src/run/train.py \
+    $CONFIG_PATH \
     "train.pl_trainer.fast_dev_run=$DEV_RUN" \
     "train.pl_trainer.devices=$DEVICES" \
     "train.pl_trainer.accelerator=$ACCELERATOR" \

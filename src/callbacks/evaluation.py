@@ -1,4 +1,3 @@
-# from pytorch_lightning import Callback, LightningModule
 from typing import Dict, List, Optional, Set, Tuple, Union
 
 import pytorch_lightning as pl
@@ -8,7 +7,6 @@ from utils.model_inputs import ModelInputs
 
 from utils.logging import get_console_logger
 
-from tqdm import tqdm_notebook as tqdm
 # from faiss.indexer import FaissIndexer
 
 logger = get_console_logger()
@@ -112,7 +110,7 @@ class TopKEvaluationCallback(EvaluationCallback):
             # now compute the question embeddings and compute the top-k accuracy
             logger.log(f"Computing recall@{self.k} for dataloader {dataloader_idx}")
             hits, total = 0, 0
-            for batch in tqdm(dataloader):
+            for batch in dataloader:
                 batch = batch.to(pl_module.device)
                 model_outputs = pl_module.model(
                     batch.questions, contexts_encodings=context_embeddings
@@ -159,6 +157,8 @@ class TopKEvaluationCallback(EvaluationCallback):
         context_index: Dict[int, str] = {}
         # Create an empty set to keep track of the contexts that have already been seen
         already_seen: Set[str] = set()
+        # index to keep track of the contexts
+        i: int = 0
         # Iterate through each batch in the dataloader
         for batch in dataloader:
             # Move the batch to the device
@@ -175,7 +175,8 @@ class TopKEvaluationCallback(EvaluationCallback):
                 if cleaned_context not in already_seen:
                     already_seen.add(cleaned_context)
                     context_embeddings.append(e)
-                    context_index[len(context_embeddings) - 1] = cleaned_context
+                    context_index[i] = cleaned_context
+                    i += 1
         # Stack the context embeddings into a tensor and return it along with the context index
         context_embeddings = torch.stack(context_embeddings, dim=0)
         return context_embeddings, context_index
@@ -258,7 +259,9 @@ class NYTTopKEvaluationCallback(TopKEvaluationCallback):
                             str,
                             [
                                 c
-                                for c in trainer.datamodule.tokenizer(description)["input_ids"]
+                                for c in trainer.datamodule.tokenizer(description)[
+                                    "input_ids"
+                                ]
                                 if c != 0
                             ],
                         )

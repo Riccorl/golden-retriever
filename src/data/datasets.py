@@ -345,6 +345,14 @@ class DPRDataset(BaseDataset):
     def collate_fn(self, batch: Any, *args, **kwargs) -> Any:
         questions = [sample["question"] for sample in batch]
         contexts = [sample["context"] for sample in batch]
+        if "augmented_negative_contexts" in batch[0]:
+            # add augmented negative contexts to contexts
+            augmented_negative_contexts = [
+                sample["augmented_negative_contexts"] for sample in batch
+            ]
+            contexts = [
+                c + a for c, a in zip(contexts, augmented_negative_contexts)
+            ]
 
         questions = self.convert_to_batch(questions)
         # first flat the list of list of contexts
@@ -383,6 +391,7 @@ class DPRDataset(BaseDataset):
                             augmented_labels[i, p_idx] = 1
 
         model_inputs = {
+            "ids": [int(sample["id"]) for sample in batch],
             "questions": ModelInputs(questions),
             "contexts": ModelInputs(contexts),
             "labels": augmented_labels if augmented_labels is not None else labels,
