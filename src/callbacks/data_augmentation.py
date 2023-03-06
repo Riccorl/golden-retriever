@@ -44,6 +44,8 @@ class NegativeAugmentationCallback(pl.Callback):
         dataloaders = trainer.val_dataloaders
         datasets = trainer.datamodule.val_datasets
 
+        train_dataset = trainer.datamodule.train_dataset
+
         # compute the context embeddings index for each dataloader
         for dataloader_idx, dataloader in enumerate(dataloaders):
             logger.log(f"Computing context embeddings for dataloader {dataloader_idx}")
@@ -130,7 +132,7 @@ class NegativeAugmentationCallback(pl.Callback):
                         augmented_negative_contexts[sample_idx_in_dataset][
                             "token_type_ids"
                         ].append([0] * len(context_id))
-            dataset_dict = datasets[dataloader_idx].data.to_dict()
+            dataset_dict = train_dataset.data.to_dict()
             dataset_dict["augmented_contexts"] = []
             # add the augmented contexts to the dataset
             for sample_idx in dataset_dict["id"]:
@@ -140,7 +142,7 @@ class NegativeAugmentationCallback(pl.Callback):
                         augmented_negative_contexts[sample_idx]
                     )
             # create a new dataset
-            datasets[dataloader_idx].data = Dataset.from_dict(dataset_dict)
+            train_dataset.data = Dataset.from_dict(dataset_dict)
 
     @staticmethod
     @torch.no_grad()

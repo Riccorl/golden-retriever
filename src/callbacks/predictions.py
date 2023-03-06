@@ -1,4 +1,6 @@
-from typing import Dict, List, Optional, Set, Tuple, Union
+import json
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import pytorch_lightning as pl
 import torch
@@ -15,16 +17,48 @@ logger = get_console_logger()
 class PredictionCallback(pl.Callback):
     def __init__(
         self,
-        k: int = 100,
-        report_intervals: Optional[int] = None,
         batch_size: int = 32,
+        output_dir: Optional[Path] = None,
         *args,
         **kwargs,
     ):
         super().__init__()
+        self.batch_size = batch_size
+        self.output_dir = output_dir
+
+    @torch.no_grad()
+    def __call__(
+        self,
+        trainer: pl.Trainer,
+        pl_module: pl.LightningModule,
+        stage: str,
+        *args,
+        **kwargs,
+    ) -> Any:
+        # it should return the predictions
+        raise NotImplementedError
+
+    def on_validation_epoch_end(
+        self, trainer: pl.Trainer, pl_module: pl.LightningModule
+    ):
+        self(trainer, pl_module, "validation")
+
+    def on_test_epoch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule):
+        self(trainer, pl_module, "test")
+
+class GoldenRetrieverPredictionCallback(PredictionCallback):
+    def __init__(
+        self,
+        k: int = 100,
+        report_intervals: Optional[int] = None,
+        batch_size: int = 32,
+        output_dir: Optional[Path] = None,
+        *args,
+        **kwargs,
+    ):
+        super().__init__(batch_size, output_dir, *args, **kwargs)
         self.k = k
         self.report_intervals = report_intervals
-        self.batch_size = batch_size
 
     @torch.no_grad()
     def __call__(
@@ -35,10 +69,7 @@ class PredictionCallback(pl.Callback):
         *args,
         **kwargs,
     ) -> dict:
-        logger.log(f"Computing recall@{self.k}")
-
-        # metrics to return
-        metrics = {}
+        logger.log(f"Computing predictions for stage {stage}")
 
         if stage not in ["validation", "test"]:
             raise ValueError(
@@ -56,6 +87,8 @@ class PredictionCallback(pl.Callback):
             else trainer.datamodule.test_datasets
         )
 
+        tokenizer = trainer.datamodule.tokenizer
+
         # compute the context embeddings index for each dataloader
         for dataloader_idx, dataloader in enumerate(dataloaders):
             logger.log(f"Computing context embeddings for dataloader {dataloader_idx}")
@@ -69,9 +102,7 @@ class PredictionCallback(pl.Callback):
                     collate_fn=lambda x: ModelInputs(
                         {
                             # this is a hack to normalize the batch structure
-                            "contexts": trainer.datamodule.tokenizer(
-                                x, padding=True, return_tensors="pt"
-                            )
+                            "contexts": tokenizer(x, padding=True, return_tensors="pt")
                         }
                     ),
                 )
@@ -83,8 +114,8 @@ class PredictionCallback(pl.Callback):
             )
 
             # now compute the question embeddings and compute the top-k accuracy
-            logger.log(f"Computing recall@{self.k} for dataloader {dataloader_idx}")
-            hits, total = 0, 0
+            logger.log(f"Computing predictions for dataloader {dataloader_idx}")
+            predictions = []
             for batch in dataloader:
                 batch = batch.to(pl_module.device)
                 model_outputs = pl_module.model(
@@ -111,8 +142,59 @@ class PredictionCallback(pl.Callback):
                         context_index[context_idx] for context_idx in top_k.tolist()
                     ]
                     # compute the recall at k
-                    hits += len(set(top_k_context_ids) & set(positive_context_ids))
-                    total += len(set(positive_context_ids))
+                    positives = set(top_k_context_ids) & set(positive_context_ids)
+                    negatives = set(top_k_context_ids) - set(positive_context_ids)
+                    # convert the context ids to text
+                    positives = [
+                        tokenizer.decode(
+                            list(map(int, context_id.split(" "))),
+                            skip_special_tokens=True,
+                        )
+                        for context_id in positives
+                    ]
+                    negatives = [
+                        tokenizer.decode(
+                            list(map(int, context_id.split(" "))),
+                            skip_special_tokens=True,
+                        )
+                        for context_id in negatives
+                    ]
+                    # convert top-k to text too
+                    top_k_contexts = [
+                        tokenizer.decode(
+                            list(map(int, context_id.split(" "))),
+                            skip_special_tokens=True,
+                        )
+                        for context_id in top_k_context_ids
+                    ]
+                    predictions.append(
+                        {
+                            "question": tokenizer.decode(
+                                batch["questions"]["input_ids"][sample_idx],
+                                skip_special_tokens=True,
+                            ),
+                            "top_k_contexts": top_k_contexts,
+                            "correct_contexts": positives,
+                            "wrong_contexts": negatives,
+                        }
+                    )
+        # write the predictions to a file inside the experiment folder
+        if self.output_dir is None and trainer.logger is None:
+            raise ValueError(
+                "You need to specify an output directory or a logger to save the predictions."
+            )
+
+        if self.output_dir is not None:
+            prediction_folder = self.output_dir
+        else:
+            prediction_folder = Path(trainer.logger.experiment.dir) / "predictions"
+            prediction_folder.mkdir(exist_ok=True)
+        prediction_file = (
+            prediction_folder / f"{stage}_dataloader_{dataloader_idx}.json"
+        )
+        logger.log(f"Writing predictions to {prediction_file}")
+        with open(prediction_file, "w") as f:
+            json.dump(predictions, f, indent=2)
 
     @staticmethod
     @torch.no_grad()
@@ -149,4 +231,3 @@ class PredictionCallback(pl.Callback):
         # Stack the context embeddings into a tensor and return it along with the context index
         context_embeddings = torch.stack(context_embeddings, dim=0)
         return context_embeddings, context_index
-

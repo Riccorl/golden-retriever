@@ -389,10 +389,11 @@ class DPRDataset(BaseDataset):
                             augmented_labels[i, p_idx] = 1
 
         model_inputs = {
-            "ids": [int(sample["id"]) for sample in batch],
             "questions": ModelInputs(questions),
             "contexts": ModelInputs(contexts),
             "labels": augmented_labels if augmented_labels is not None else labels,
             "labels_for_metrics": labels,
         }
+        if "id" in batch[0]:
+            model_inputs["ids"] = [sample["id"] for sample in batch]
         return ModelInputs(model_inputs)
