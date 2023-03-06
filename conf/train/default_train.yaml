@@ -43,14 +43,15 @@ model_checkpoint_callback:
   filename: 'checkpoint-val_recall@${train.top_k}_{val_recall@${train.top_k}:.4f}-epoch_{epoch:02d}'
   auto_insert_metric_name: False
 
-other_callbacks:
-  - _target_: callbacks.predictions.GoldenRetrieverPredictionCallback
+prediction_callback:
+  _target_: callbacks.custom_callbacks.GoldenRetrieverPredictionCallback
+  k: ${train.top_k}
+  batch_size: 64
+  other_callbacks:
+  - _target_: callbacks.custom_callbacks.TopKEvaluationCallback
     k: ${train.top_k}
     batch_size: 64
-  - _target_: callbacks.evaluation.TopKEvaluationCallback
-    k: ${train.top_k}
-    batch_size: 64
-  - _target_: callbacks.data_augmentation.NegativeAugmentationCallback
+  - _target_: callbacks.custom_callbacks.NegativeAugmentationCallback
     metric_to_monitor: val_recall@${train.top_k}
     threshold: 0.87
     max_negatives: 5

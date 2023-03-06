@@ -156,9 +156,12 @@ def train(conf: omegaconf.DictConfig) -> None:
         )
         callbacks_store.append(model_checkpoint_callback)
 
-    if conf.train.other_callbacks is not None:
-        for callback in conf.train.other_callbacks:
-            callbacks_store.append(hydra.utils.instantiate(callback))
+    if (
+        "prediction_callback" in conf.train
+        and conf.train.prediction_callback is not None
+    ):
+        # for callback in conf.train.other_callbacks:
+        callbacks_store.append(hydra.utils.instantiate(conf.train.prediction_callback))
 
     # trainer
     logger.log(f"Instantiating the Trainer")
