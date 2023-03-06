@@ -316,6 +316,93 @@ class TopKEvaluationCallback(NLPTemplateCallback):
         return metrics
 
 
+class NYTTopKEvaluationCallback(TopKEvaluationCallback):
+    def __init__(
+        self,
+        label_mapping: Dict[str, List[str]],
+        k: int = 100,
+        report_intervals: Optional[int] = None,
+        batch_size: int = 32,
+        *args,
+        **kwargs,
+    ):
+        super().__init__(k, report_intervals, batch_size, *args, **kwargs)
+        self.label_mapping = label_mapping
+
+    @torch.no_grad()
+    def __call__(
+        self,
+        trainer: pl.Trainer,
+        pl_module: pl.LightningModule,
+        stage: Union[str, Stage],
+        predictions: Dict,
+        *args,
+        **kwargs,
+    ) -> dict:
+        logger.log(f"Computing recall@{self.k}")
+
+        # metrics to return
+        metrics = {}
+
+        # metrics to return
+        metrics = {}
+
+        if stage not in [Stage.VALIDATION, Stage.TEST]:
+            raise ValueError(
+                f"Stage {stage} not supported, only `validation` and `test` are supported."
+            )
+
+        for dataloader_idx, samples in predictions.items():
+            # shitty hack to get the label mapping normalized to the contexts
+            label_mapping = {
+                label: [
+                    " ".join(
+                        map(
+                            str,
+                            [
+                                c
+                                for c in trainer.datamodule.tokenizer(description)[
+                                    "input_ids"
+                                ]
+                                if c != 0
+                            ],
+                        )
+                    )
+                    for description in descriptions
+                ]
+                for label, descriptions in self.label_mapping.items()
+            }
+            # now compute the question embeddings and compute the top-k accuracy
+            logger.log(f"Computing recall@{self.k} for dataloader {dataloader_idx}")
+            hits, total = 0, 0
+            for sample in samples:
+                gold_contexts_ids = sample["gold_contexts"]
+                gold_labels = [
+                    label
+                    for label, descriptions in label_mapping.items()
+                    if set(descriptions) & set(gold_contexts_ids)
+                ]
+                # get the top_k context ids
+                top_k_context_ids = sample["predictions"]
+                top_k_labels = [
+                    label
+                    for label, descriptions in label_mapping.items()
+                    if set(descriptions) & set(top_k_context_ids)
+                ]
+                # compute the recall at k
+                hits += len(set(top_k_labels) & set(gold_labels))
+                total += len(set(gold_labels))
+
+            # compute the mean recall at k
+            recall_at_k = hits / total
+            metrics[f"recall@{self.k}_{dataloader_idx}"] = recall_at_k
+        metrics[f"recall@{self.k}"] = sum(metrics.values()) / len(metrics)
+
+        metrics = {f"{Stage.VALIDATION.value}_{k}": v for k, v in metrics.items()}
+        pl_module.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
+        return metrics
+
+
 class NegativeAugmentationCallback(NLPTemplateCallback):
     def __init__(
         self,
