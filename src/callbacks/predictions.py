@@ -1,5 +1,3 @@
-from collections import defaultdict
-from itertools import groupby
 from typing import Dict, List, Optional, Set, Tuple, Union
 
 import pytorch_lightning as pl
@@ -9,40 +7,54 @@ from utils.model_inputs import ModelInputs
 
 from utils.logging import get_console_logger
 
-from datasets import Dataset
-
 # from faiss.indexer import FaissIndexer
 
 logger = get_console_logger()
 
 
-class NegativeAugmentationCallback(pl.Callback):
+class PredictionCallback(pl.Callback):
     def __init__(
         self,
-        metric_to_monitor: str = "val_loss",
-        threshold: float = 0.8,
-        max_negatives: int = 3,
+        k: int = 100,
+        report_intervals: Optional[int] = None,
         batch_size: int = 32,
+        *args,
+        **kwargs,
     ):
-        self.metric_to_monitor = metric_to_monitor
-        self.threshold = threshold
-        self.max_negatives = max_negatives
+        super().__init__()
+        self.k = k
+        self.report_intervals = report_intervals
         self.batch_size = batch_size
 
-    def on_validation_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule):
-        if self.metric_to_monitor not in trainer.logged_metrics:
-            raise ValueError(
-                f"Metric {self.metric_to_monitor} not found in trainer.logged_metrics"
-            )
-        if trainer.logged_metrics[self.metric_to_monitor] < self.threshold:
-            return
+    @torch.no_grad()
+    def __call__(
+        self,
+        trainer: pl.Trainer,
+        pl_module: pl.LightningModule,
+        stage: str,
+        *args,
+        **kwargs,
+    ) -> dict:
+        logger.log(f"Computing recall@{self.k}")
 
-        logger.log(
-            f"Metric {self.metric_to_monitor} is above threshold {self.threshold}. Augmenting the dataset."
+        # metrics to return
+        metrics = {}
+
+        if stage not in ["validation", "test"]:
+            raise ValueError(
+                f"Stage {stage} not supported, only `validation` and `test` are supported."
+            )
+
+        dataloaders = (
+            trainer.val_dataloaders
+            if stage == "validation"
+            else trainer.test_dataloaders
         )
-        # get the dataloaders and datasets
-        dataloaders = trainer.val_dataloaders
-        datasets = trainer.datamodule.val_datasets
+        datasets = (
+            trainer.datamodule.val_datasets
+            if stage == "validation"
+            else trainer.datamodule.test_datasets
+        )
 
         # compute the context embeddings index for each dataloader
         for dataloader_idx, dataloader in enumerate(dataloaders):
@@ -67,19 +79,12 @@ class NegativeAugmentationCallback(pl.Callback):
                 context_dataloader = dataloader
 
             context_embeddings, context_index = self.compute_context_embeddings(
-                pl_module.model.context_encoder,
-                context_dataloader,
-                pl_module.device,
+                pl_module.model.context_encoder, context_dataloader, pl_module.device
             )
 
             # now compute the question embeddings and compute the top-k accuracy
-            logger.log(
-                f"Augmenting dataloader {dataloader_idx} with the top {self.max_negatives} negatives"
-            )
-
-            # create a defaultdict of defaultdicts to store the augmented contexts
-            augmented_negative_contexts = defaultdict(lambda: defaultdict(list))
-
+            logger.log(f"Computing recall@{self.k} for dataloader {dataloader_idx}")
+            hits, total = 0, 0
             for batch in dataloader:
                 batch = batch.to(pl_module.device)
                 model_outputs = pl_module.model(
@@ -87,7 +92,9 @@ class NegativeAugmentationCallback(pl.Callback):
                 )
                 similarity = model_outputs["logits"]
                 # get the top-k indices
-                top_ks = torch.topk(similarity, k=similarity.shape[-1], dim=1).indices
+                top_ks = torch.topk(
+                    similarity, k=min(self.k, similarity.shape[-1]), dim=1
+                ).indices
                 # compute recall at k
                 for sample_idx, top_k in enumerate(top_ks):
                     labels = batch["labels_for_metrics"][sample_idx]
@@ -103,44 +110,9 @@ class NegativeAugmentationCallback(pl.Callback):
                     top_k_context_ids = [
                         context_index[context_idx] for context_idx in top_k.tolist()
                     ]
-                    # get the ids of the max_negatives wrong contexts with highest similarity
-                    # wrong_context_ids = set(top_k_context_ids) - set(positive_context_ids)
-                    wrong_context_ids = [
-                        context_id
-                        for context_id in top_k_context_ids
-                        if context_id not in positive_context_ids
-                    ][: self.max_negatives]
-
-                    # get at most max_negatives wrong contexts
-                    # wrong_context_ids = list(wrong_context_ids)[: self.max_negatives]
-                    # convert the context ids to a list of ints
-                    wrong_context_ids = [
-                        [int(c) for c in context_id.split(" ")]
-                        for context_id in wrong_context_ids
-                    ]
-                    # add the wrong contexts to the dataset sample
-                    sample_idx_in_dataset = batch["ids"][sample_idx]
-                    for context_id in wrong_context_ids:
-                        augmented_negative_contexts[sample_idx_in_dataset][
-                            "input_ids"
-                        ].append(context_id)
-                        augmented_negative_contexts[sample_idx_in_dataset][
-                            "attention_mask"
-                        ].append([1] * len(context_id))
-                        augmented_negative_contexts[sample_idx_in_dataset][
-                            "token_type_ids"
-                        ].append([0] * len(context_id))
-            dataset_dict = datasets[dataloader_idx].data.to_dict()
-            dataset_dict["augmented_contexts"] = []
-            # add the augmented contexts to the dataset
-            for sample_idx in dataset_dict["id"]:
-                sample_idx = int(sample_idx)
-                if sample_idx in augmented_negative_contexts:
-                    dataset_dict["augmented_contexts"].append(
-                        augmented_negative_contexts[sample_idx]
-                    )
-            # create a new dataset
-            datasets[dataloader_idx].data = Dataset.from_dict(dataset_dict)
+                    # compute the recall at k
+                    hits += len(set(top_k_context_ids) & set(positive_context_ids))
+                    total += len(set(positive_context_ids))
 
     @staticmethod
     @torch.no_grad()
@@ -177,3 +149,4 @@ class NegativeAugmentationCallback(pl.Callback):
         # Stack the context embeddings into a tensor and return it along with the context index
         context_embeddings = torch.stack(context_embeddings, dim=0)
         return context_embeddings, context_index
+

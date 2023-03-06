@@ -350,9 +350,7 @@ class DPRDataset(BaseDataset):
             augmented_negative_contexts = [
                 sample["augmented_negative_contexts"] for sample in batch
             ]
-            contexts = [
-                c + a for c, a in zip(contexts, augmented_negative_contexts)
-            ]
+            contexts = [c + a for c, a in zip(contexts, augmented_negative_contexts)]
 
         questions = self.convert_to_batch(questions)
         # first flat the list of list of contexts
