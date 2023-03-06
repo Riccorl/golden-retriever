@@ -184,10 +184,14 @@ def train(conf: omegaconf.DictConfig) -> None:
         best_pl_module = pl_module
     else:
         # load best model for testing
-        if model_checkpoint_callback:
+        if conf.evaluation.checkpoint_path:
+            best_model_path = conf.evaluation.checkpoint_path
+        elif model_checkpoint_callback:
             best_model_path = model_checkpoint_callback.best_model_path
         else:
-            best_model_path = conf.evaluation.checkpoint_path
+            raise ValueError(
+                "Either `checkpoint_path` or `model_checkpoint_callback` should be specified in the evaluation configuration"
+            )
         logger.log(f"Loading best model from {best_model_path}")
         best_pl_module = GoldenRetrieverPLModule.load_from_checkpoint(best_model_path)
 

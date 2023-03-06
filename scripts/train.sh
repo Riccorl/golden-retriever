@@ -194,7 +194,8 @@ fi
 if [ -z "$ONLY_TEST" ]; then
   ONLY_TEST="False"
 else
-  OVERRIDES="$OVERRIDES +train.only_test=True logging.log=null"
+  OVERRIDES="$OVERRIDES ++train.only_test=True logging.log=null"
+  WANDB="offline"
 fi
 
 # CHECK FOR BOOLEAN PARAMS

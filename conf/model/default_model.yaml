@@ -14,7 +14,7 @@ pl_module:
       # pooling_strategy: "mean"
     loss_type:
       _target_: models.losses.MultiLabelNCELoss
-      reduction: "sum"
+      reduction: "mean"
   optimizer:
     _target_: torch.optim.RAdam
     lr: 1e-5

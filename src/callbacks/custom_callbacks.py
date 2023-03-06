@@ -158,7 +158,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
 
             # save to file
             if self.output_dir is not None:
-                prediction_folder = self.output_dir
+                prediction_folder = Path(self.output_dir)
             else:
                 prediction_folder = Path(trainer.logger.experiment.dir) / "predictions"
                 prediction_folder.mkdir(exist_ok=True)
@@ -311,7 +311,7 @@ class TopKEvaluationCallback(NLPTemplateCallback):
             metrics[f"recall@{self.k}_{dataloader_idx}"] = recall_at_k
         metrics[f"recall@{self.k}"] = sum(metrics.values()) / len(metrics)
 
-        metrics = {f"{Stage.VALIDATION.value}_{k}": v for k, v in metrics.items()}
+        metrics = {f"{stage.value}_{k}": v for k, v in metrics.items()}
         pl_module.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
         return metrics
 
@@ -372,6 +372,12 @@ class NYTTopKEvaluationCallback(TopKEvaluationCallback):
                 ]
                 for label, descriptions in self.label_mapping.items()
             }
+            # invert the label mapping
+            inverted_label_mapping = {
+                description: label
+                for label, descriptions in label_mapping.items()
+                for description in descriptions
+            }
             # now compute the question embeddings and compute the top-k accuracy
             logger.log(f"Computing recall@{self.k} for dataloader {dataloader_idx}")
             hits, total = 0, 0
@@ -385,11 +391,14 @@ class NYTTopKEvaluationCallback(TopKEvaluationCallback):
                 # get the top_k context ids
                 top_k_context_ids = sample["predictions"]
                 top_k_labels = [
-                    label
-                    for label, descriptions in label_mapping.items()
-                    if set(descriptions) & set(top_k_context_ids)
+                    inverted_label_mapping[context_id]
+                    for
+                    context_id in top_k_context_ids
                 ]
-                # compute the recall at k
+                # remove duplicates and preserve the order
+                top_k_labels = list(dict.fromkeys(top_k_labels))
+                top_k_labels = top_k_labels[: self.k]
+                # compute
                 hits += len(set(top_k_labels) & set(gold_labels))
                 total += len(set(gold_labels))
 
@@ -398,7 +407,7 @@ class NYTTopKEvaluationCallback(TopKEvaluationCallback):
             metrics[f"recall@{self.k}_{dataloader_idx}"] = recall_at_k
         metrics[f"recall@{self.k}"] = sum(metrics.values()) / len(metrics)
 
-        metrics = {f"{Stage.VALIDATION.value}_{k}": v for k, v in metrics.items()}
+        metrics = {f"{stage.value}_{k}": v for k, v in metrics.items()}
         pl_module.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
         return metrics
 
@@ -451,7 +460,7 @@ class NegativeAugmentationCallback(NLPTemplateCallback):
                 f"Stage {stage} not supported, only `validation` and `test` are supported."
             )
 
-        for dataloader_idx, samples in predictions:
+        for dataloader_idx, samples in predictions.items():
             # create a defaultdict of defaultdicts to store the augmented contexts
             augmented_negative_contexts = defaultdict(lambda: defaultdict(list))
             for sample in samples:

@@ -4,7 +4,7 @@ seed: 42
 export: False
 float32_matmul_precision: "medium"
 set_determinism_the_old_way: False
-top_k: 5
+top_k: 100
 
 only_test: False
 
@@ -137,6 +137,14 @@ prediction_callback:
         /location/country/capital:
           - the capital city of a country
           - capital of a country
-          - the city that serves as the administrative
-      k: ${train.top_k}
+          - the city that serves as the administrative center of a country
+        /business/company/place_founded:
+          - the location where a company was established
+          - location of a company's formation
+          - the place where a company was founded
+        /people/person/profession:
+          - the occupation of a person
+          - a person's profession
+          - an individual's chosen career
+      k: 5
       batch_size: 64
