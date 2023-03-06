@@ -48,7 +48,7 @@ prediction_callback:
   k: ${train.top_k}
   batch_size: 64
   other_callbacks:
-    - _target_: callbacks.evaluation.NYTTopKEvaluationCallback
+    - _target_: callbacks.custom_callbacks.NYTTopKEvaluationCallback
       label_mapping:
         /people/person/nationality:
           - the country that a person holds citizenship in
