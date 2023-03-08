@@ -4,16 +4,16 @@ hydra:
     dir: ./experiments/${model_name}/${now:%Y-%m-%d}/${now:%H-%M-%S}
 
 model_name: ${model.language_model}  # used to name the model in wandb
-project_name: golden-retriever-nyt  # used to name the project in wandb
+project_name: golden-retriever  # used to name the project in wandb
 
 defaults:
   - _self_
-  - train: nyt_train
+  - train: ontonotes_predicates
   - model: golden_retriever
-  - loss: nll_loss
+  - loss: nce_loss
   - optimizer: radam
   - scheduler: null
-  - data: nyt_dpr_data
+  - data: ontonotes_predicates
   - evaluation: default_evaluation
   - logging: wandb_logging
   - override hydra/job_logging: colorlog
