@@ -12,16 +12,8 @@ pl_module:
       _target_: models.model.SentenceEncoder
       language_model: ${model.language_model}
       pooling_strategy: "mean"
-    loss_type:
-      _target_: models.losses.MultiLabelNCELoss
-      reduction: "sum"
-  optimizer:
-    _target_: torch.optim.RAdam
-    lr: 1e-5
-    weight_decay: 0.0
-  lr_scheduler: null
-    #  _target_: transformers.get_linear_schedule_with_warmup
-    #  num_warmup_steps: null
-    #  num_training_steps: null
+    loss_type: ${loss}
+  optimizer: ${optimizer}
+  lr_scheduler: ${scheduler}
   grouped_parameters: False
   warmup_steps_ratio: 0.1

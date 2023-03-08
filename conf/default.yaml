@@ -10,6 +10,9 @@ defaults:
   - _self_
   - train: default_train
   - model: default_model
+  - loss: nce_loss
+  - optimizer: radam
+  - scheduler: null
   - data: default_data
   - evaluation: default_evaluation
   - logging: wandb_logging

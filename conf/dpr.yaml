@@ -10,6 +10,9 @@ defaults:
   - _self_
   - train: nyt_train
   - model: default_model
+  - loss: nll_loss
+  - optimizer: radam
+  - scheduler: null
   - data: nyt_dpr_data
   - evaluation: default_evaluation
   - logging: wandb_logging
