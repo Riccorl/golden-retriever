@@ -35,12 +35,14 @@ class NLPTemplateCallback:
 class PredictionCallback(pl.Callback):
     def __init__(
         self,
-        stages: Set[Union[str, Stage]] = {Stage.VALIDATION, Stage.TEST},
+        stages: Set[Union[str, Stage]] = None,
         other_callbacks: Optional[List[DictConfig]] = None,
         *args,
         **kwargs,
     ):
         super().__init__()
+        if stages is None:
+            stages = {Stage.VALIDATION, Stage.TEST}
         self.stages = [Stage(stage) for stage in stages]
         self.other_callbacks = other_callbacks or []
         for i, callback in enumerate(self.other_callbacks):

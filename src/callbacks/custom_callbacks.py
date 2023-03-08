@@ -28,7 +28,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         report_intervals: Optional[int] = None,
         batch_size: int = 32,
         output_dir: Optional[Path] = None,
-        stages: Set[Union[str, Stage]] = {Stage.VALIDATION, Stage.TEST},
+        stages: Set[Union[str, Stage]] = None,
         other_callbacks: Optional[List[DictConfig]] = None,
         dataset: Optional[DictConfig] = None,
         *args,
