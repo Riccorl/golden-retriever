@@ -2,6 +2,8 @@ import enum
 import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
+import hydra
+from omegaconf import DictConfig
 
 import pytorch_lightning as pl
 import torch
@@ -37,12 +39,19 @@ class NLPTemplateCallback:
 class PredictionCallback(pl.Callback):
     def __init__(
         self,
-        other_callbacks: Optional[List[NLPTemplateCallback]] = None,
+        stages: Set[Union[str, Stage]] = {Stage.VALIDATION, Stage.TEST},
+        other_callbacks: Optional[List[DictConfig]] = None,
         *args,
         **kwargs,
     ):
         super().__init__()
+        self.stages = [Stage(stage) for stage in stages]
         self.other_callbacks = other_callbacks or []
+        for i, callback in enumerate(self.other_callbacks):
+            if isinstance(callback, DictConfig):
+                self.other_callbacks[i] = hydra.utils.instantiate(
+                    callback, _recursive_=False
+                )
 
     @torch.no_grad()
     def __call__(

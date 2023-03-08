@@ -1,8 +1,11 @@
+from functools import partial
 import json
 import os
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
+import hydra
+from omegaconf import DictConfig
 
 import pytorch_lightning as pl
 import torch
@@ -11,6 +14,7 @@ from datasets import Dataset
 from torch.utils.data import DataLoader
 
 from callbacks.base import NLPTemplateCallback, PredictionCallback, Stage
+from data.datasets import BaseDataset
 from utils.logging import get_console_logger
 from utils.model_inputs import ModelInputs
 
@@ -26,15 +30,18 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         report_intervals: Optional[int] = None,
         batch_size: int = 32,
         output_dir: Optional[Path] = None,
-        other_callbacks: Optional[List[NLPTemplateCallback]] = None,
+        stages: Set[Union[str, Stage]] = {Stage.VALIDATION, Stage.TEST},
+        other_callbacks: Optional[List[DictConfig]] = None,
+        dataset: Optional[DictConfig] = None,
         *args,
         **kwargs,
     ):
-        super().__init__(other_callbacks)
+        super().__init__(stages, other_callbacks)
         self.k = k
         self.report_intervals = report_intervals
         self.batch_size = batch_size
         self.output_dir = output_dir
+        self.dataset = dataset
 
     @torch.no_grad()
     def __call__(
@@ -45,35 +52,52 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         *args,
         **kwargs,
     ) -> dict:
-        logger.log(f"Computing predictions for stage {stage}")
+        logger.log(f"Computing predictions for stage {stage.value}")
 
-        if stage not in [Stage.VALIDATION, Stage.TEST]:
+        if stage not in self.stages:
             raise ValueError(
-                f"Stage {stage} not supported, only `validation` and `test` are supported."
+                f"Stage {stage} not supported, only {self.stages} are supported"
             )
-
-        # get the dataloaders and datasets
-        dataloaders = (
-            trainer.val_dataloaders
-            if stage == Stage.VALIDATION
-            else trainer.test_dataloaders
-        )
-        data_sets = (
-            trainer.datamodule.val_datasets
-            if stage == Stage.VALIDATION
-            else trainer.datamodule.test_datasets
-        )
 
         # get the tokenizer
         tokenizer = trainer.datamodule.tokenizer
 
+        if self.dataset is not None:
+            # get dataset config
+            datasets = [self.dataset]
+            dataloaders = [
+                DataLoader(
+                    datasets[0],
+                    batch_size=self.batch_size,
+                    shuffle=False,
+                    num_workers=0,
+                    pin_memory=True,
+                    collate_fn=partial(datasets[0].collate_fn, tokenizer=tokenizer),
+                )
+            ]
+        else:
+            # get the dataloaders and datasets
+            datasets = (
+                trainer.datamodule.val_datasets
+                if stage == Stage.VALIDATION
+                else trainer.datamodule.test_datasets
+            )
+
+            dataloaders = (
+                trainer.val_dataloaders
+                if stage == Stage.VALIDATION
+                else trainer.test_dataloaders
+            )
+
         dataloader_samples = {}
         # compute the context embeddings index for each dataloader
         for dataloader_idx, dataloader in enumerate(dataloaders):
-            logger.log(f"Computing context embeddings for dataloader {dataloader_idx}")
-            if data_sets[dataloader_idx].contexts is not None:
+            logger.log(
+                f"Computing context embeddings for dataset {datasets[dataloader_idx].name}"
+            )
+            if datasets[dataloader_idx].contexts is not None:
                 context_dataloader = DataLoader(
-                    data_sets[dataloader_idx].contexts,
+                    datasets[dataloader_idx].contexts,
                     batch_size=self.batch_size,
                     shuffle=False,
                     num_workers=0,
@@ -93,8 +117,26 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
             )
 
             # now compute the question embeddings and compute the top-k accuracy
-            logger.log(f"Computing predictions for dataloader {dataloader_idx}")
+            logger.log(
+                f"Computing predictions for dataset {datasets[dataloader_idx].name}"
+            )
             samples_with_predictions = []
+
+            # batch = []
+            # for sample in datasets[dataloader_idx]:
+            #     batch.append(sample)
+            #     if len(batch) == self.batch_size:
+            #         batch = datasets[dataloader_idx].collate(batch)
+            #         batch = batch.to(pl_module.device)
+            #         model_outputs = pl_module.model(
+            #             batch.questions, contexts_encodings=context_embeddings
+            #         )
+            #         similarity = model_outputs["logits"]
+            #         # get the top-k indices
+            #         top_ks = torch.topk(
+            #             similarity, k=min(self.k, similarity.shape[-1]), dim=1
+            #         ).indices
+
             for batch in dataloader:
                 batch = batch.to(pl_module.device)
                 model_outputs = pl_module.model(
@@ -163,7 +205,8 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                 prediction_folder = Path(trainer.logger.experiment.dir) / "predictions"
                 prediction_folder.mkdir(exist_ok=True)
             predictions_path = (
-                prediction_folder / f"{stage.value}_dataloader_{dataloader_idx}.json"
+                prediction_folder
+                / f"{datasets[dataloader_idx].name}_{dataloader_idx}.json"
             )
             self.save_predictions_to_file(
                 samples_with_predictions, predictions_path, tokenizer
@@ -178,38 +221,33 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         predictions_path: Union[str, os.PathLike],
         tokenizer: tr.PreTrainedTokenizer,
     ):
+        logger.log(f"Writing predictions to {predictions_path}")
         predictions = []
         for sample in samples:
-            # convert the context ids to text
-            correct_predictions = [
-                tokenizer.decode(
-                    list(map(int, context_id.split(" "))),
-                    skip_special_tokens=True,
-                )
-                for context_id in sample["correct_predictions"]
-            ]
-            wrong_predictions = [
-                tokenizer.decode(
-                    list(map(int, context_id.split(" "))),
-                    skip_special_tokens=True,
-                )
-                for context_id in sample["wrong_predictions"]
-            ]
-            # convert top-k to text too
-            top_k_contexts = [
-                tokenizer.decode(
-                    list(map(int, context_id.split(" "))),
-                    skip_special_tokens=True,
-                )
-                for context_id in sample["predictions"]
-            ]
-            gold_contexts = [
-                tokenizer.decode(
-                    list(map(int, context_id.split(" "))),
-                    skip_special_tokens=True,
-                )
-                for context_id in sample["gold_contexts"]
-            ]
+            # convert the corrext context ids to text
+            correct_predictions = tokenizer.batch_decode(
+                [
+                    list(map(int, context_id.split(" ")))
+                    for context_id in sample["correct_predictions"]
+                ],
+                skip_special_tokens=True,
+            )
+            # convert top-k to text
+            top_k_contexts = tokenizer.batch_decode(
+                [
+                    list(map(int, context_id.split(" ")))
+                    for context_id in sample["predictions"]
+                ],
+                skip_special_tokens=True,
+            )
+            # convert gold contexts to text
+            gold_contexts = tokenizer.batch_decode(
+                [
+                    list(map(int, context_id.split(" ")))
+                    for context_id in sample["gold_contexts"]
+                ],
+                skip_special_tokens=True,
+            )
             predictions.append(
                 {
                     "question": tokenizer.decode(
@@ -219,12 +257,10 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                     "gold_contexts": gold_contexts,
                     "top_k_contexts": top_k_contexts,
                     "correct_predictions": correct_predictions,
-                    "wrong_predictions": wrong_predictions,
                 }
             )
         predictions_path = Path(predictions_path)
         predictions_path.parent.mkdir(exist_ok=True)
-        logger.log(f"Writing predictions to {predictions_path}")
         with open(predictions_path, "w") as f:
             json.dump(predictions, f, indent=2)
 
@@ -263,6 +299,109 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         # Stack the context embeddings into a tensor and return it along with the context index
         context_embeddings = torch.stack(context_embeddings, dim=0)
         return context_embeddings, context_index
+
+
+class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
+    def __init__(
+        self,
+        k: int = 100,
+        report_intervals: Optional[int] = None,
+        metric_to_monitor: str = "val_loss",
+        threshold: float = 0.8,
+        max_negatives: int = 3,
+        batch_size: int = 32,
+        output_dir: Optional[Path] = None,
+        stages: Set[Union[str, Stage]] = {Stage.VALIDATION, Stage.TEST},
+        other_callbacks: Optional[List[DictConfig]] = None,
+        dataset: Optional[DictConfig] = None,
+        *args,
+        **kwargs,
+    ):
+        super().__init__(
+            k=k,
+            report_intervals=report_intervals,
+            batch_size=batch_size,
+            output_dir=output_dir,
+            stages=stages,
+            other_callbacks=other_callbacks,
+            dataset=dataset,
+            *args,
+            **kwargs,
+        )
+        self.metric_to_monitor = metric_to_monitor
+        self.threshold = threshold
+        self.max_negatives = max_negatives
+
+    @torch.no_grad()
+    def __call__(
+        self,
+        trainer: pl.Trainer,
+        pl_module: pl.LightningModule,
+        stage: Union[str, Stage],
+        *args,
+        **kwargs,
+    ) -> dict:
+        if stage not in self.stages:
+            return
+
+        if self.metric_to_monitor not in trainer.logged_metrics:
+            raise ValueError(
+                f"Metric {self.metric_to_monitor} not found in trainer.logged_metrics"
+                f"Available metrics: {trainer.logged_metrics.keys()}"
+            )
+        if trainer.logged_metrics[self.metric_to_monitor] < self.threshold:
+            return
+
+        logger.log(
+            f"Metric {self.metric_to_monitor} is above threshold {self.threshold}. Augmenting the dataset."
+        )
+
+        predictions = super().__call__(trainer, pl_module, stage, *args, **kwargs)
+        for dataloader_idx, samples in predictions.items():
+            # create a defaultdict of defaultdicts to store the augmented contexts
+            augmented_negative_contexts = defaultdict(lambda: defaultdict(list))
+            for sample in samples:
+                top_k_context_ids = sample["predictions"]
+                gold_context_ids = sample["gold_contexts"]
+                # get the ids of the max_negatives wrong contexts with highest similarity
+                # wrong_context_ids = set(top_k_context_ids) - set(positive_context_ids)
+                wrong_context_ids = [
+                    context_id
+                    for context_id in top_k_context_ids
+                    if context_id not in gold_context_ids
+                ][: self.max_negatives]
+
+                # get at most max_negatives wrong contexts
+                # wrong_context_ids = list(wrong_context_ids)[: self.max_negatives]
+                # convert the context ids to a list of ints
+                wrong_context_ids = [
+                    [int(c) for c in context_id.split(" ")]
+                    for context_id in wrong_context_ids
+                ]
+                # add the wrong contexts to the dataset sample
+                sample_idx_in_dataset = sample["ids"]
+                for context_id in wrong_context_ids:
+                    augmented_negative_contexts[sample_idx_in_dataset][
+                        "input_ids"
+                    ].append(context_id)
+                    augmented_negative_contexts[sample_idx_in_dataset][
+                        "attention_mask"
+                    ].append([1] * len(context_id))
+                    augmented_negative_contexts[sample_idx_in_dataset][
+                        "token_type_ids"
+                    ].append([0] * len(context_id))
+
+            dataset_dict = trainer.datamodule.train_dataset.data.to_dict()
+            dataset_dict["augmented_contexts"] = []
+            # add the augmented contexts to the dataset
+            for sample_idx in dataset_dict["id"]:
+                if sample_idx in augmented_negative_contexts:
+                    dataset_dict["augmented_contexts"].append(
+                        augmented_negative_contexts[sample_idx]
+                    )
+            # create a new dataset
+            trainer.datamodule.train_dataset.data = Dataset.from_dict(dataset_dict)
+        return predictions
 
 
 class TopKEvaluationCallback(NLPTemplateCallback):
@@ -392,8 +531,7 @@ class NYTTopKEvaluationCallback(TopKEvaluationCallback):
                 top_k_context_ids = sample["predictions"]
                 top_k_labels = [
                     inverted_label_mapping[context_id]
-                    for
-                    context_id in top_k_context_ids
+                    for context_id in top_k_context_ids
                 ]
                 # remove duplicates and preserve the order
                 top_k_labels = list(dict.fromkeys(top_k_labels))
@@ -410,98 +548,3 @@ class NYTTopKEvaluationCallback(TopKEvaluationCallback):
         metrics = {f"{stage.value}_{k}": v for k, v in metrics.items()}
         pl_module.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
         return metrics
-
-
-class NegativeAugmentationCallback(NLPTemplateCallback):
-    def __init__(
-        self,
-        metric_to_monitor: str = "val_loss",
-        threshold: float = 0.8,
-        max_negatives: int = 3,
-        batch_size: int = 32,
-        stages: Optional[List[Union[str, Stage]]] = [Stage.VALIDATION],
-        *args,
-        **kwargs,
-    ):
-        super().__init__()
-        self.metric_to_monitor = metric_to_monitor
-        self.threshold = threshold
-        self.max_negatives = max_negatives
-        self.batch_size = batch_size
-        self.stages = stages
-
-    @torch.no_grad()
-    def __call__(
-        self,
-        trainer: pl.Trainer,
-        pl_module: pl.LightningModule,
-        stage: Union[str, Stage],
-        predictions: Dict,
-        *args,
-        **kwargs,
-    ) -> dict:
-        if stage not in self.stages:
-            return
-
-        if self.metric_to_monitor not in trainer.logged_metrics:
-            raise ValueError(
-                f"Metric {self.metric_to_monitor} not found in trainer.logged_metrics"
-                f"Available metrics: {trainer.logged_metrics.keys()}"
-            )
-        if trainer.logged_metrics[self.metric_to_monitor] < self.threshold:
-            return
-
-        logger.log(
-            f"Metric {self.metric_to_monitor} is above threshold {self.threshold}. Augmenting the dataset."
-        )
-
-        if stage not in [Stage.VALIDATION, Stage.TEST]:
-            raise ValueError(
-                f"Stage {stage} not supported, only `validation` and `test` are supported."
-            )
-
-        for dataloader_idx, samples in predictions.items():
-            # create a defaultdict of defaultdicts to store the augmented contexts
-            augmented_negative_contexts = defaultdict(lambda: defaultdict(list))
-            for sample in samples:
-                top_k_context_ids = sample["predictions"]
-                gold_context_ids = sample["gold_contexts"]
-                # get the ids of the max_negatives wrong contexts with highest similarity
-                # wrong_context_ids = set(top_k_context_ids) - set(positive_context_ids)
-                wrong_context_ids = [
-                    context_id
-                    for context_id in top_k_context_ids
-                    if context_id not in gold_context_ids
-                ][: self.max_negatives]
-
-                # get at most max_negatives wrong contexts
-                # wrong_context_ids = list(wrong_context_ids)[: self.max_negatives]
-                # convert the context ids to a list of ints
-                wrong_context_ids = [
-                    [int(c) for c in context_id.split(" ")]
-                    for context_id in wrong_context_ids
-                ]
-                # add the wrong contexts to the dataset sample
-                sample_idx_in_dataset = sample["ids"]
-                for context_id in wrong_context_ids:
-                    augmented_negative_contexts[sample_idx_in_dataset][
-                        "input_ids"
-                    ].append(context_id)
-                    augmented_negative_contexts[sample_idx_in_dataset][
-                        "attention_mask"
-                    ].append([1] * len(context_id))
-                    augmented_negative_contexts[sample_idx_in_dataset][
-                        "token_type_ids"
-                    ].append([0] * len(context_id))
-
-            dataset_dict = trainer.datamodule.train_dataset.data.to_dict()
-            dataset_dict["augmented_contexts"] = []
-            # add the augmented contexts to the dataset
-            for sample_idx in dataset_dict["id"]:
-                sample_idx = int(sample_idx)
-                if sample_idx in augmented_negative_contexts:
-                    dataset_dict["augmented_contexts"].append(
-                        augmented_negative_contexts[sample_idx]
-                    )
-            # create a new dataset
-            trainer.datamodule.train_dataset.data = Dataset.from_dict(dataset_dict)

@@ -8,13 +8,13 @@ pl_module:
       _target_: models.model.SentenceEncoder
       language_model: ${model.language_model}
       pooling_strategy: "mean"
-    context_encoder: null
-      # _target_: models.model.SentenceEncoder
-      # language_model: ${model.language_model}
-      # pooling_strategy: "mean"
+    context_encoder:
+      _target_: models.model.SentenceEncoder
+      language_model: ${model.language_model}
+      pooling_strategy: "mean"
     loss_type:
       _target_: models.losses.MultiLabelNCELoss
-      reduction: "mean"
+      reduction: "sum"
   optimizer:
     _target_: torch.optim.RAdam
     lr: 1e-5

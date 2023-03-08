@@ -125,7 +125,7 @@ class DPRDataset(BaseDataset):
         max_context_length: int = 128,
         shuffle_negative_contexts: bool = False,
         in_batch_positives_augmentation: bool = True,
-        tokenizer: tr.PreTrainedTokenizer = None,
+        tokenizer: Optional[Union[str, tr.PreTrainedTokenizer]] = None,
         contexts_path: Union[str, os.PathLike] = None,
         **kwargs,
     ):
@@ -144,21 +144,27 @@ class DPRDataset(BaseDataset):
             with open(self.project_folder / contexts_path, "r") as f:
                 self.contexts = [line.strip() for line in f.readlines()]
 
-        self.padding_ops = {
-            "input_ids": partial(
-                self.pad_sequence,
-                value=tokenizer.pad_token_id,
-            ),
-            # value is None because: (read `pad_sequence` doc)
-            "attention_mask": partial(self.pad_sequence, value=0),
-            "token_type_ids": partial(
-                self.pad_sequence,
-                value=tokenizer.pad_token_type_id,
-            ),
-        }
+        self.tokenizer = tokenizer
+        if self.tokenizer is None:
+            self.padding_ops = {}
+        else:
+            if isinstance(self.tokenizer, str):
+                self.tokenizer = tr.AutoTokenizer.from_pretrained(self.tokenizer)
+            self.padding_ops = {
+                "input_ids": partial(
+                    self.pad_sequence,
+                    value=self.tokenizer.pad_token_id,
+                ),
+                # value is None because: (read `pad_sequence` doc)
+                "attention_mask": partial(self.pad_sequence, value=0),
+                "token_type_ids": partial(
+                    self.pad_sequence,
+                    value=self.tokenizer.pad_token_type_id,
+                ),
+            }
 
         self.data = self.load(
-            path, tokenizer=tokenizer, pre_process=pre_process, shuffle=shuffle
+            path, tokenizer=self.tokenizer, pre_process=pre_process, shuffle=shuffle
         )
 
     def __len__(self) -> int:
