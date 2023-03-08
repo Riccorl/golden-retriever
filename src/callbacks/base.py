@@ -1,16 +1,12 @@
 import enum
-import json
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
-import hydra
-from omegaconf import DictConfig
+from typing import Any, Dict, List, Optional, Set, Union
 
+import hydra
 import pytorch_lightning as pl
 import torch
-from torch.utils.data import DataLoader
+from omegaconf import DictConfig
 
 from utils.logging import get_console_logger
-from utils.model_inputs import ModelInputs
 
 # from faiss.indexer import FaissIndexer
 

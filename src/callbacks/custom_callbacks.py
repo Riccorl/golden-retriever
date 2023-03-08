@@ -1,20 +1,18 @@
-from functools import partial
 import json
 import os
 from collections import defaultdict
+from functools import partial
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
-import hydra
-from omegaconf import DictConfig
+from typing import Dict, List, Optional, Set, Tuple, Union
 
 import pytorch_lightning as pl
 import torch
 import transformers as tr
 from datasets import Dataset
+from omegaconf import DictConfig
 from torch.utils.data import DataLoader
 
 from callbacks.base import NLPTemplateCallback, PredictionCallback, Stage
-from data.datasets import BaseDataset
 from utils.logging import get_console_logger
 from utils.model_inputs import ModelInputs
 

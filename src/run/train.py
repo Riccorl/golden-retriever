@@ -161,9 +161,7 @@ def train(conf: omegaconf.DictConfig) -> None:
         and conf.train.prediction_callbacks is not None
     ):
         for callback in conf.train.prediction_callbacks:
-            callbacks_store.append(
-                hydra.utils.instantiate(callback)
-            )
+            callbacks_store.append(hydra.utils.instantiate(callback))
 
     # trainer
     logger.log(f"Instantiating the Trainer")

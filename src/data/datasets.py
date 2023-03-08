@@ -1,18 +1,15 @@
-import json
 import os
-import random
 import time
 from functools import partial
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Sequence, Tuple, Union, Optional
-import psutil
 
+import psutil
 import torch
 import transformers as tr
-from rich.progress import track
 from torch.utils.data import Dataset, IterableDataset
-from datasets import load_dataset
 
+from datasets import load_dataset
 from utils.logging import get_console_logger
 from utils.model_inputs import ModelInputs
 
