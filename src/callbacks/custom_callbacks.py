@@ -5,14 +5,17 @@ from functools import partial
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple, Union
 
+import hydra
 import pytorch_lightning as pl
 import torch
 import transformers as tr
 from datasets import Dataset
 from omegaconf import DictConfig
+from torch import Tensor
 from torch.utils.data import DataLoader
 
 from callbacks.base import NLPTemplateCallback, PredictionCallback, Stage
+from data.datasets import BaseDataset
 from utils.logging import get_console_logger
 from utils.model_inputs import ModelInputs
 
@@ -30,7 +33,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         output_dir: Optional[Path] = None,
         stages: Set[Union[str, Stage]] = None,
         other_callbacks: Optional[List[DictConfig]] = None,
-        dataset: Optional[DictConfig] = None,
+        dataset: Optional[Union[DictConfig, BaseDataset]] = None,
         *args,
         **kwargs,
     ):
@@ -61,7 +64,9 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         tokenizer = trainer.datamodule.tokenizer
 
         if self.dataset is not None:
-            # get dataset config
+            # get dataset
+            if isinstance(self.dataset, DictConfig):
+                self.dataset = hydra.utils.instantiate(self.dataset, _recursive_=False)
             datasets = [self.dataset]
             dataloaders = [
                 DataLoader(
@@ -120,6 +125,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
             )
             samples_with_predictions = []
 
+            # TODO: use a new dataloader
             # batch = []
             # for sample in datasets[dataloader_idx]:
             #     batch.append(sample)
@@ -219,6 +225,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         predictions_path: Union[str, os.PathLike],
         tokenizer: tr.PreTrainedTokenizer,
     ):
+        # TODO: move saving logic to the dataset class
         logger.log(f"Writing predictions to {predictions_path}")
         predictions = []
         for sample in samples:
@@ -268,7 +275,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         context_encoder: torch.nn.Module,
         dataloader: DataLoader,
         device: Union[str, torch.device],
-    ) -> Tuple[torch.Tensor, Dict[int, str]]:
+    ) -> tuple[list[Tensor], dict[int, str]]:
         # Create empty lists to store the context embeddings and context index
         context_embeddings: List[torch.Tensor] = []
         context_index: Dict[int, str] = {}
@@ -309,7 +316,7 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
         max_negatives: int = 3,
         batch_size: int = 32,
         output_dir: Optional[Path] = None,
-        stages: Set[Union[str, Stage]] = {Stage.VALIDATION, Stage.TEST},
+        stages: Set[Union[str, Stage]] = None,
         other_callbacks: Optional[List[DictConfig]] = None,
         dataset: Optional[DictConfig] = None,
         *args,
@@ -340,7 +347,7 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
         **kwargs,
     ) -> dict:
         if stage not in self.stages:
-            return
+            return {}
 
         if self.metric_to_monitor not in trainer.logged_metrics:
             raise ValueError(
@@ -348,7 +355,7 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
                 f"Available metrics: {trainer.logged_metrics.keys()}"
             )
         if trainer.logged_metrics[self.metric_to_monitor] < self.threshold:
-            return
+            return {}
 
         logger.log(
             f"Metric {self.metric_to_monitor} is above threshold {self.threshold}. Augmenting the dataset."

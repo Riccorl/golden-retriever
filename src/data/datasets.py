@@ -7,9 +7,9 @@ from typing import Any, Dict, Iterator, List, Sequence, Tuple, Union, Optional
 import psutil
 import torch
 import transformers as tr
+from datasets import load_dataset
 from torch.utils.data import Dataset, IterableDataset
 
-from datasets import load_dataset
 from utils.logging import get_console_logger
 from utils.model_inputs import ModelInputs
 
@@ -202,7 +202,7 @@ class DPRDataset(BaseDataset):
         #   - "negative_ctxs": a list of negative contexts
         #   - "hard_negative_ctxs": a list of hard negative contexts
         # use the huggingface dataset library to load the data, by default it will load the
-        # data in a dict with the key being "train"
+        # data in a dict with the key being "train". datasets needs str paths and not Path
         data = load_dataset("json", data_files=[str(p) for p in paths])["train"]
 
         if pre_process:

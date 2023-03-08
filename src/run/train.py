@@ -64,7 +64,7 @@ def train(conf: omegaconf.DictConfig) -> None:
     # force setup to get labels initialized for the model
     pl_data_module.prepare_data()
     # main module declaration
-    pl_module: GoldenRetrieverPLModule = None
+    pl_module: Optional[GoldenRetrieverPLModule] = None
 
     if not conf.train.only_test:
         pl_data_module.setup("fit")
