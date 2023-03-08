@@ -1,7 +1,7 @@
-max_positives: -1
+max_positives: 1
 max_negatives: 0
-max_hard_negatives: 0
-in_batch_positives_augmentation: True
+max_hard_negatives: 3
+in_batch_positives_augmentation: False
 contexts_path: "data/dpr-like/nyt/definitions.txt"
 
 datamodule:
@@ -44,7 +44,7 @@ datamodule:
           - 'data/dpr-like/nyt/test.json'
 
   batch_sizes:
-    train: 4
+    train: 64
     val: 64
     test: 64
 
