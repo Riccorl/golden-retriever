@@ -108,7 +108,13 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                     collate_fn=lambda x: ModelInputs(
                         {
                             # this is a hack to normalize the batch structure
-                            "contexts": tokenizer(x, padding=True, return_tensors="pt")
+                            "contexts": tokenizer(
+                                x,
+                                padding=True,
+                                return_tensors="pt",
+                                truncation=True,
+                                max_length=128, # TODO: use same as in config
+                            )
                         }
                     ),
                 )
