@@ -50,7 +50,6 @@ bash scripts/train.sh
 ```
 
 ```bash
-bash scripts/train.sh -h
 train.sh [-h --help] [-l --language-model LANG_MODEL_NAME] [-d --debug] [-p --precision PRECISION]
 [-c --cpu] [-g --devices DEVICES] [-n --nodes NODES] [-m --gpu-mem GPU_MEM] [-s --strategy STRATEGY]
 [-o --offline] [-t --test] [--config-path CONFIG_PATH] [--checkpoint CHECKPOINT_PATH] OVERRIDES
@@ -75,8 +74,10 @@ where:
                           For example, 'model_name=bert-base-uncased'.
 Example:
   ./script/train.sh
+  ./script/train.sh --config-path conf/custom_config.yaml
   ./script/train.sh -l bert-base-cased
   ./script/train.sh -l bert-base-cased -m 10000
+
 ```
 
 
