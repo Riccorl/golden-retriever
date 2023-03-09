@@ -8,24 +8,27 @@ datamodule:
       _target_: data.datasets.DPRDataset
       name: 'train'
       split_contexts: True
+      max_context_length: 256
       path:
-        - 'data/dpr-like/srl/ontonotes/ontonotes.train.predicates.json'
+        - 'data/dpr-like/srl/ontonotes/ontonotes.train.pairs.json'
 
     val:
       - _target_: data.datasets.DPRDataset
         name: 'val'
         split_contexts: True
+        max_context_length: 256
         contexts_path: ${data.contexts_path}
         path:
-          - 'data/dpr-like/srl/ontonotes/ontonotes.dev.predicates.json'
+          - 'data/dpr-like/srl/ontonotes/ontonotes.dev.pairs.json'
 
     test:
       - _target_: data.datasets.DPRDataset
         name: 'test'
         split_contexts: True
+        max_context_length: 256
         contexts_path: ${data.contexts_path}
         path:
-          - 'data/dpr-like/srl/ontonotes/ontonotes.test.predicates.json'
+          - 'data/dpr-like/srl/ontonotes/ontonotes.test.pairs.json'
 
   batch_sizes:
     train: 4

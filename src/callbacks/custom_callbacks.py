@@ -113,7 +113,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                                 padding=True,
                                 return_tensors="pt",
                                 truncation=True,
-                                max_length=128, # TODO: use same as in config
+                                max_length=datasets[dataloader_idx].max_context_length,
                             )
                         }
                     ),
