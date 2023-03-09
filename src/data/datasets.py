@@ -1,3 +1,4 @@
+import json
 import os
 import time
 from functools import partial
@@ -348,6 +349,7 @@ class DPRDataset(BaseDataset):
     def collate_fn(self, batch: Any, *args, **kwargs) -> Any:
         questions = [sample["question"] for sample in batch]
         contexts = [sample["context"] for sample in batch]
+        positives = [sample["positives"] for sample in batch],
         if "augmented_negative_contexts" in batch[0]:
             # add augmented negative contexts to contexts
             augmented_negative_contexts = [
@@ -396,7 +398,39 @@ class DPRDataset(BaseDataset):
             "contexts": ModelInputs(contexts),
             "labels": augmented_labels if augmented_labels is not None else labels,
             "labels_for_metrics": labels,
+            "positives": positives,
         }
         if "id" in batch[0]:
             model_inputs["ids"] = [sample["id"] for sample in batch]
         return ModelInputs(model_inputs)
+
+    def save_data(self, samples: Any, path: Union[str, os.PathLike]) -> None:
+        """
+        Save the samples to a file.
+
+        Args:
+            samples (:obj:`List`):
+                List of samples to save.
+            path (:obj:`str`):
+                Path to the file where to save the samples.
+        """
+
+        for sample in samples:
+            sample["question"] = self.tokenizer.decode(sample["question"]["input_ids"])
+            sample["context"] = self.tokenizer.decode(sample["question"]["input_ids"])
+
+        with open(path, "w") as f:
+            for sample in samples:
+                f.write(json.dumps(sample) + "\n")
+
+    def update_data(self, name: str, column: List[Any]):
+        """
+        Update the data with the given column.
+
+        Args:
+            name (:obj:`str`):
+                Name of the column to update.
+            column (:obj:`List[Any]`):
+                List of values to update.
+        """
+        self.data.add_column(name=name, column=column)

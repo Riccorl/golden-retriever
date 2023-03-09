@@ -1,10 +1,12 @@
-from typing import Dict, Optional, Union
+from typing import Callable, Dict, List, Optional, Set, Tuple, Union
 
 import torch
 import torch.nn.functional as F
+from torch.utils.data import DataLoader
 import transformers as tr
 
 from data.labels import Labels
+from utils.model_inputs import ModelInputs
 
 
 class SentenceEncoder(torch.nn.Module):
@@ -85,7 +87,9 @@ class GoldenRetriever(torch.nn.Module):
         self.loss_type = loss_type
 
         # indexer stuff
-        self.indexer = None
+        self._context_embeddings: Optional[torch.Tensor] = None
+        self._context_index: Optional[Dict[str, int]] = None
+        self._reverse_context_index: Optional[Dict[int, str]] = None
 
     def forward(
         self,
@@ -145,3 +149,158 @@ class GoldenRetriever(torch.nn.Module):
             output["loss"] = self.loss_type(logits, labels)
 
         return output
+
+    def index(
+        self,
+        contexts: List[str],
+        batch_size: int = 32,
+        num_workers: int = 0,
+        collate_fn: Optional[Callable] = None,
+        force_reindex: bool = False,
+    ):
+        """
+        Index the contexts for later retrieval.
+
+        Args:
+            contexts (`List[str]`):
+                The contexts to index.
+            batch_size (`int`):
+                The batch size to use for the indexing.
+            num_workers (`int`):
+                The number of workers to use for the indexing.
+            collate_fn (`Callable`):
+                The collate function to use for the indexing.
+            force_reindex (`bool`):
+                Whether to force reindexing even if the contexts are already indexed.
+        """
+        if self._context_embeddings is not None and not force_reindex:
+            return
+
+        if collate_fn is None:
+            tokenizer = tr.AutoTokenizer.from_pretrained(
+                self.context_encoder.language_model.pretrained_model_name_or_path
+            )
+            collate_fn = lambda x: ModelInputs(
+                {
+                    tokenizer(
+                        x,
+                        padding=True,
+                        return_tensors="pt",
+                        truncation=True,
+                        max_length=self.model.max_length,
+                    )
+                }
+            )
+        dataloader = DataLoader(
+            contexts,
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=num_workers,
+            pin_memory=True,
+            collate_fn=collate_fn,
+        )
+        # Create empty lists to store the context embeddings and context index
+        context_embeddings: List[torch.Tensor] = []
+        # Iterate through each batch in the dataloader
+        for batch in dataloader:
+            # Move the batch to the device
+            batch = batch.to(next(self.parameters()).device)
+            # Compute the context embeddings
+            context_outs = self.context_encoder(**batch)
+            # Append the context embeddings to the list
+            context_embeddings.extend([c for c in context_outs])
+
+        # Stack the context embeddings into a tensor and return it along with the context index
+        self._context_embeddings = torch.stack(context_embeddings, dim=0)
+        # Create a dictionary mapping the context index to the context
+        self._context_index = {i: context for i, context in enumerate(contexts)}
+        # reverse the context index
+        self._reverse_context_index = {v: k for k, v in self._context_index.items()}
+
+    def retrieve(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: Optional[torch.Tensor] = None,
+        token_type_ids: Optional[torch.Tensor] = None,
+        k: int = 5,
+    ) -> Tuple[List[List[str]], List[List[int]]]:
+        """
+        Retrieve the contexts for the questions.
+
+        Args:
+            questions (`List[str]`):
+                The questions to retrieve the contexts for.
+            k (`int`):
+                The number of contexts to retrieve for each question.
+            batch_size (`int`):
+                The batch size to use for the retrieval.
+            num_workers (`int`):
+                The number of workers to use for the retrieval.
+            collate_fn (`Callable`):
+                The collate function to use for the retrieval.
+
+        Returns:
+            `Tuple[List[List[str]], List[List[int]]]`: The retrieved contexts and their indices.
+        """
+        if self._context_embeddings is None:
+            raise ValueError(
+                "The contexts must be indexed before they can be retrieved."
+            )
+        model_inputs = {"input_ids": input_ids}
+        if attention_mask is not None:
+            model_inputs["attention_mask"] = attention_mask
+        if token_type_ids is not None:
+            model_inputs["token_type_ids"] = token_type_ids
+        model_inputs = {"questions": model_inputs, "contexts_encodings": self._context_embeddings}
+        similarity = self(**model_inputs)["logits"]
+        # Retrieve the indices of the top k context embeddings
+        top_k = torch.topk(similarity, k=min(k, similarity.shape[-1]), dim=1).indices
+        # get int values
+        top_k = top_k.cpu().numpy().tolist()
+        # Retrieve the contexts corresponding to the indices
+        contexts = [
+            [self._context_index[i] for i in indices] for indices in top_k
+        ]
+        return contexts, top_k
+
+    def get_index_from_context(self, context: str) -> int:
+        """
+        Get the index of the context.
+
+        Args:
+            context (`str`):
+                The context to get the index for.
+
+        Returns:
+            `int`: The index of the context.
+        """
+        if self._context_embeddings is None:
+            raise ValueError(
+                "The contexts must be indexed before they can be retrieved."
+            )
+        if context not in self._reverse_context_index:
+            raise ValueError(
+                f"The context '{context}' is not in the index. Please index the context before retrieving it."
+            )
+        return self._reverse_context_index[context]
+
+    def get_context_from_index(self, index: int) -> str:
+        """
+        Get the context from the index.
+
+        Args:
+            index (`int`):
+                The index of the context.
+
+        Returns:
+            `str`: The context.
+        """
+        if self._context_embeddings is None:
+            raise ValueError(
+                "The contexts must be indexed before they can be retrieved."
+            )
+        if index not in self._context_index:
+            raise ValueError(
+                f"The index '{index}' is not in the index. Please index the context before retrieving it."
+            )
+        return self._context_index[index]

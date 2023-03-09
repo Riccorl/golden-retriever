@@ -1,4 +1,4 @@
-max_positives: 1
+max_positives: -1
 max_negatives: 0
 max_hard_negatives: 3
 in_batch_positives_augmentation: False

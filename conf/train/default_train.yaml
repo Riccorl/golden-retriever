@@ -3,7 +3,7 @@ seed: 42
 
 export: False
 float32_matmul_precision: "medium"
-set_determinism_the_old_way: False
+# set_determinism_the_old_way: False
 top_k: 100
 
 only_test: False
@@ -19,7 +19,7 @@ pl_trainer:
   gradient_clip_val: 1.0
   val_check_interval: 0.2  # you can specify an int "n" here => validation every "n" steps
   max_epochs: 40
-  deterministic: True
+  deterministic: warn
   fast_dev_run: False
   precision: 16
   resume_from_checkpoint: null

@@ -9,6 +9,7 @@ import hydra
 import pytorch_lightning as pl
 import torch
 import transformers as tr
+import datasets
 from datasets import Dataset
 from omegaconf import DictConfig
 from torch import Tensor
@@ -30,6 +31,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         k: int = 100,
         report_intervals: Optional[int] = None,
         batch_size: int = 32,
+        num_workers: int = 0,
         output_dir: Optional[Path] = None,
         stages: Set[Union[str, Stage]] = None,
         other_callbacks: Optional[List[DictConfig]] = None,
@@ -41,6 +43,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         self.k = k
         self.report_intervals = report_intervals
         self.batch_size = batch_size
+        self.num_workers = num_workers
         self.output_dir = output_dir
         self.dataset = dataset
 
@@ -63,6 +66,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         # get the tokenizer
         tokenizer = trainer.datamodule.tokenizer
 
+        # if a dataset is provided, use it
         if self.dataset is not None:
             # get dataset
             if isinstance(self.dataset, DictConfig):
@@ -79,237 +83,167 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                 )
             ]
         else:
-            # get the dataloaders and datasets
+            # get the dataloaders and datasets from the datamodule
             datasets = (
                 trainer.datamodule.val_datasets
                 if stage == Stage.VALIDATION
                 else trainer.datamodule.test_datasets
             )
-
             dataloaders = (
                 trainer.val_dataloaders
                 if stage == Stage.VALIDATION
                 else trainer.test_dataloaders
             )
 
-        dataloader_samples = {}
+        # set the model to eval mode
+        pl_module.eval()
+        # get the retriever
+        retriever = pl_module.model
+
+        # here we will store the samples with predictions for each dataloader
+        dataloader_predictions = {}
         # compute the context embeddings index for each dataloader
         for dataloader_idx, dataloader in enumerate(dataloaders):
             logger.log(
                 f"Computing context embeddings for dataset {datasets[dataloader_idx].name}"
             )
-            if datasets[dataloader_idx].contexts is not None:
-                context_dataloader = DataLoader(
-                    datasets[dataloader_idx].contexts,
-                    batch_size=self.batch_size,
-                    shuffle=False,
-                    num_workers=0,
-                    pin_memory=True,
-                    collate_fn=lambda x: ModelInputs(
-                        {
-                            # this is a hack to normalize the batch structure
-                            "contexts": tokenizer(
-                                x,
-                                padding=True,
-                                return_tensors="pt",
-                                truncation=True,
-                                max_length=datasets[dataloader_idx].max_context_length,
-                            )
-                        }
-                    ),
+            if datasets[dataloader_idx].contexts is None:
+                logger.log(
+                    f"Contexts not found in dataset {datasets[dataloader_idx].name}, computing them from the dataloaders"
                 )
+                # get the contexts from the all the dataloader context ids
+                contexts = set()  # set to avoid duplicates
+                for batch in trainer.train_dataloader:
+                    contexts.update(
+                        [
+                            " ".join(
+                                map(str, [c for c in context_ids.tolist() if c != 0])
+                            )
+                            for context_ids in batch.contexts.input_ids
+                        ]
+                    )
+                for d in trainer.val_dataloaders:
+                    for batch in d:
+                        contexts.update(
+                            [
+                                " ".join(
+                                    map(
+                                        str, [c for c in context_ids.tolist() if c != 0]
+                                    )
+                                )
+                                for context_ids in batch.contexts.input_ids
+                            ]
+                        )
+                for d in trainer.test_dataloaders:
+                    for batch in d:
+                        contexts.update(
+                            [
+                                " ".join(
+                                    map(
+                                        str, [c for c in context_ids.tolist() if c != 0]
+                                    )
+                                )
+                                for context_ids in batch.contexts.input_ids
+                            ]
+                        )
+                contexts = list(contexts)
             else:
-                context_dataloader = dataloader
+                contexts = datasets[dataloader_idx].contexts
 
-            context_embeddings, context_index = self.compute_context_embeddings(
-                pl_module.model.context_encoder, context_dataloader, pl_module.device
+            collate_fn = lambda x: ModelInputs(
+                tokenizer(
+                    x,
+                    truncation=True,
+                    padding=True,
+                    max_length=datasets[dataloader_idx].max_context_length,
+                    return_tensors="pt",
+                )
+            )
+            retriever.index(
+                contexts,
+                batch_size=self.batch_size,
+                num_workers=self.num_workers,
+                collate_fn=collate_fn,
+                force_reindex=True,
             )
 
             # now compute the question embeddings and compute the top-k accuracy
             logger.log(
                 f"Computing predictions for dataset {datasets[dataloader_idx].name}"
             )
-            samples_with_predictions = []
-
-            # TODO: use a new dataloader
-            # batch = []
-            # for sample in datasets[dataloader_idx]:
-            #     batch.append(sample)
-            #     if len(batch) == self.batch_size:
-            #         batch = datasets[dataloader_idx].collate(batch)
-            #         batch = batch.to(pl_module.device)
-            #         model_outputs = pl_module.model(
-            #             batch.questions, contexts_encodings=context_embeddings
-            #         )
-            #         similarity = model_outputs["logits"]
-            #         # get the top-k indices
-            #         top_ks = torch.topk(
-            #             similarity, k=min(self.k, similarity.shape[-1]), dim=1
-            #         ).indices
-
+            predictions = []
             for batch in dataloader:
                 batch = batch.to(pl_module.device)
-                model_outputs = pl_module.model(
-                    batch.questions, contexts_encodings=context_embeddings
-                )
-                similarity = model_outputs["logits"]
                 # get the top-k indices
-                top_ks = torch.topk(
-                    similarity, k=min(self.k, similarity.shape[-1]), dim=1
-                ).indices
+                retrieved_contexts, retrieved_indices = retriever.retrieve(
+                    **batch.questions, k=self.k
+                )
                 # compute recall at k
-                for sample_idx, top_k in enumerate(top_ks):
+                for sample_idx, retrieved_index in enumerate(retrieved_indices):
                     labels = batch.labels_for_metrics[sample_idx]
-                    # get the positive context ids
-                    gold_context_ids = [
-                        " ".join(map(str, [c for c in context_ids.tolist() if c != 0]))
-                        for context_ids, label in zip(batch.contexts.input_ids, labels)
-                        if label == 1
+                    # get the positive contexts
+                    gold_contexts = batch.positives[sample_idx]
+                    # get the index of the gold contexts in the retrieved contexts
+                    gold_context_indices = [
+                        retriever.get_index_from_context(context)
+                        for context in gold_contexts
                     ]
-                    # get the top_k context ids
-                    top_k_context_ids = [
-                        context_index[context_idx] for context_idx in top_k.tolist()
-                    ]
-
-                    correct_predictions_ids = set(top_k_context_ids) & set(
-                        gold_context_ids
-                    )
-                    wrong_predictions_ids = set(top_k_context_ids) - set(
-                        gold_context_ids
-                    )
-
-                    # unnest the batch
-                    sample_dict = {}
-                    for k, v in batch.items():
-                        if isinstance(v, ModelInputs):
-                            sample_dict[k] = {
-                                inner_k: inner_v[sample_idx]
-                                for inner_k, inner_v in v.items()
-                            }
-                        elif isinstance(v, (list, tuple, torch.Tensor)):
-                            sample_dict[k] = v[sample_idx]
-                        else:
-                            sample_dict[k] = v
-
-                    sample_dict.update(
+                    # correct predictions are the contexts that are in the top-k and are gold
+                    correct_indices = set(gold_context_indices) & set(retrieved_index)
+                    # wrong predictions are the contexts that are in the top-k and are not gold
+                    wrong_indices = set(retrieved_index) - set(gold_context_indices)
+                    # add the predictions to the list
+                    predictions.append(
                         {
-                            "gold_contexts": gold_context_ids,
-                            "predictions": top_k_context_ids,
-                            "correct_predictions": correct_predictions_ids,
-                            "wrong_predictions": wrong_predictions_ids,
+                            "gold": gold_contexts,
+                            "predictions": retrieved_contexts[sample_idx],
+                            "correct": [
+                                retriever.get_context_from_index(i)
+                                for i in correct_indices
+                            ],
+                            "wrong": [
+                                retriever.get_context_from_index(i)
+                                for i in wrong_indices
+                            ],
                         }
                     )
-                    samples_with_predictions.append(sample_dict)
+            dataloader_predictions[dataloader_idx] = predictions
 
-            dataloader_samples[dataloader_idx] = samples_with_predictions
+            # update the dataset with the predictions
+            datasets[dataloader_idx].update_data(
+                "gold", [p["gold"] for p in predictions]
+            )
+            datasets[dataloader_idx].update_data(
+                "predictions", [p["predictions"] for p in predictions]
+            )
+            datasets[dataloader_idx].update_data(
+                "correct", [p["correct"] for p in predictions]
+            )
+            datasets[dataloader_idx].update_data(
+                "wrong", [p["wrong"] for p in predictions]
+            )
+
             # write the predictions to a file inside the experiment folder
             if self.output_dir is None and trainer.logger is None:
-                raise ValueError(
+                logger.log(
                     "You need to specify an output directory or a logger to save the predictions."
                 )
-
-            # save to file
-            if self.output_dir is not None:
-                prediction_folder = Path(self.output_dir)
-            else:
-                prediction_folder = Path(trainer.logger.experiment.dir) / "predictions"
-                prediction_folder.mkdir(exist_ok=True)
-            predictions_path = (
-                prediction_folder
-                / f"{datasets[dataloader_idx].name}_{dataloader_idx}.json"
-            )
-            self.save_predictions_to_file(
-                samples_with_predictions, predictions_path, tokenizer
-            )
+                # save to file
+                if self.output_dir is not None:
+                    prediction_folder = Path(self.output_dir)
+                else:
+                    prediction_folder = (
+                        Path(trainer.logger.experiment.dir) / "predictions"
+                    )
+                    prediction_folder.mkdir(exist_ok=True)
+                predictions_path = (
+                    prediction_folder
+                    / f"{datasets[dataloader_idx].name}_{dataloader_idx}.json"
+                )
+                datasets[dataloader_idx].save_samples(predictions_path)
 
         # return the predictions
-        return dataloader_samples
-
-    @staticmethod
-    def save_predictions_to_file(
-        samples: List[Dict],
-        predictions_path: Union[str, os.PathLike],
-        tokenizer: tr.PreTrainedTokenizer,
-    ):
-        # TODO: move saving logic to the dataset class
-        logger.log(f"Writing predictions to {predictions_path}")
-        predictions = []
-        for sample in samples:
-            # convert the corrext context ids to text
-            correct_predictions = tokenizer.batch_decode(
-                [
-                    list(map(int, context_id.split(" ")))
-                    for context_id in sample["correct_predictions"]
-                ],
-                skip_special_tokens=True,
-            )
-            # convert top-k to text
-            top_k_contexts = tokenizer.batch_decode(
-                [
-                    list(map(int, context_id.split(" ")))
-                    for context_id in sample["predictions"]
-                ],
-                skip_special_tokens=True,
-            )
-            # convert gold contexts to text
-            gold_contexts = tokenizer.batch_decode(
-                [
-                    list(map(int, context_id.split(" ")))
-                    for context_id in sample["gold_contexts"]
-                ],
-                skip_special_tokens=True,
-            )
-            predictions.append(
-                {
-                    "question": tokenizer.decode(
-                        sample["questions"]["input_ids"],
-                        skip_special_tokens=True,
-                    ),
-                    "gold_contexts": gold_contexts,
-                    "top_k_contexts": top_k_contexts,
-                    "correct_predictions": correct_predictions,
-                }
-            )
-        predictions_path = Path(predictions_path)
-        predictions_path.parent.mkdir(exist_ok=True)
-        with open(predictions_path, "w") as f:
-            json.dump(predictions, f, indent=2)
-
-    @staticmethod
-    @torch.no_grad()
-    def compute_context_embeddings(
-        context_encoder: torch.nn.Module,
-        dataloader: DataLoader,
-        device: Union[str, torch.device],
-    ) -> tuple[list[Tensor], dict[int, str]]:
-        # Create empty lists to store the context embeddings and context index
-        context_embeddings: List[torch.Tensor] = []
-        context_index: Dict[int, str] = {}
-        # Create an empty set to keep track of the contexts that have already been seen
-        already_seen: Set[str] = set()
-        # index to keep track of the contexts
-        i: int = 0
-        # Iterate through each batch in the dataloader
-        for batch in dataloader:
-            # Move the batch to the device
-            batch = batch.to(device)
-            # Compute the context embeddings
-            context_outs = context_encoder(**batch.contexts)
-            # Loop through each context in the batch
-            for context_ids, e in zip(batch.contexts.input_ids, context_outs):
-                # Clean up the context by removing any 0s
-                cleaned_context = " ".join(
-                    map(str, [c for c in context_ids.tolist() if c != 0])
-                )
-                # If the cleaned context has not been seen, add it to the empty lists and set
-                if cleaned_context not in already_seen:
-                    already_seen.add(cleaned_context)
-                    context_embeddings.append(e)
-                    context_index[i] = cleaned_context
-                    i += 1
-        # Stack the context embeddings into a tensor and return it along with the context index
-        context_embeddings = torch.stack(context_embeddings, dim=0)
-        return context_embeddings, context_index
+        return dataloader_predictions
 
 
 class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
@@ -372,46 +306,53 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
             # create a defaultdict of defaultdicts to store the augmented contexts
             augmented_negative_contexts = defaultdict(lambda: defaultdict(list))
             for sample in samples:
-                top_k_context_ids = sample["predictions"]
-                gold_context_ids = sample["gold_contexts"]
+                top_k_contexts = sample["predictions"]
+                gold_contexts = sample["gold"]
                 # get the ids of the max_negatives wrong contexts with highest similarity
-                # wrong_context_ids = set(top_k_context_ids) - set(positive_context_ids)
-                wrong_context_ids = [
+                wrong_contexts = [
                     context_id
-                    for context_id in top_k_context_ids
-                    if context_id not in gold_context_ids
+                    for context_id in top_k_contexts
+                    if context_id not in gold_contexts
                 ][: self.max_negatives]
-
-                # get at most max_negatives wrong contexts
-                # wrong_context_ids = list(wrong_context_ids)[: self.max_negatives]
-                # convert the context ids to a list of ints
-                wrong_context_ids = [
-                    [int(c) for c in context_id.split(" ")]
-                    for context_id in wrong_context_ids
-                ]
                 # add the wrong contexts to the dataset sample
                 sample_idx_in_dataset = sample["ids"]
-                for context_id in wrong_context_ids:
+                wrong_contexts_ids = trainer.datamodule.tokenizer(
+                    wrong_contexts,
+                    max_length=trainer.datamodule.train_dataset.max_context_length,
+                    truncation=True,
+                )
+                for c_index in range(len(wrong_contexts)):
                     augmented_negative_contexts[sample_idx_in_dataset][
                         "input_ids"
-                    ].append(context_id)
+                    ].append(wrong_contexts_ids["input_ids"][c_index])
                     augmented_negative_contexts[sample_idx_in_dataset][
                         "attention_mask"
-                    ].append([1] * len(context_id))
-                    augmented_negative_contexts[sample_idx_in_dataset][
-                        "token_type_ids"
-                    ].append([0] * len(context_id))
+                    ].append(wrong_contexts_ids["attention_mask"][c_index])
+                    if "token_type_ids" in wrong_contexts_ids:
+                        augmented_negative_contexts[sample_idx_in_dataset][
+                            "token_type_ids"
+                        ].append(wrong_contexts_ids["token_type_ids"][c_index])
 
-            dataset_dict = trainer.datamodule.train_dataset.data.to_dict()
-            dataset_dict["augmented_contexts"] = []
-            # add the augmented contexts to the dataset
-            for sample_idx in dataset_dict["id"]:
-                if sample_idx in augmented_negative_contexts:
-                    dataset_dict["augmented_contexts"].append(
-                        augmented_negative_contexts[sample_idx]
-                    )
-            # create a new dataset
-            trainer.datamodule.train_dataset.data = Dataset.from_dict(dataset_dict)
+            # dataset_dict = trainer.datamodule.train_dataset.data.to_dict()
+            # dataset_dict["augmented_contexts"] = []
+            # # add the augmented contexts to the dataset
+            # for sample_idx in dataset_dict["id"]:
+            #     if sample_idx in augmented_negative_contexts:
+            #         dataset_dict["augmented_contexts"].append(
+            #             augmented_negative_contexts[sample_idx]
+            #         )
+            # # create a new dataset
+            # trainer.datamodule.train_dataset.data = Dataset.from_dict(dataset_dict)
+
+            # order augmented_negative_contexts by sample_idx_in_dataset and get the values
+            augmented_negative_contexts = [
+                augmented_negative_contexts[i]
+                for i in sorted(augmented_negative_contexts.keys())
+            ]
+            trainer.datamodule.train_dataset.data[dataloader_idx].update_data(
+                "augmented_contexts", augmented_negative_contexts
+            )
+
         return predictions
 
 
@@ -453,8 +394,8 @@ class TopKEvaluationCallback(NLPTemplateCallback):
             hits, total = 0, 0
             for sample in samples:
                 # compute the recall at k
-                hits += len(set(sample["predictions"]) & set(sample["gold_contexts"]))
-                total += len(set(sample["gold_contexts"]))
+                hits += len(set(sample["predictions"]) & set(sample["gold"]))
+                total += len(set(sample["gold"]))
 
             # compute the mean recall at k
             recall_at_k = hits / total
@@ -490,9 +431,6 @@ class NYTTopKEvaluationCallback(TopKEvaluationCallback):
         **kwargs,
     ) -> dict:
         logger.log(f"Computing recall@{self.k}")
-
-        # metrics to return
-        metrics = {}
 
         # metrics to return
         metrics = {}

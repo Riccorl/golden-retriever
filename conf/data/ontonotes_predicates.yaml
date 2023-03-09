@@ -1,4 +1,4 @@
-contexts_path: "data/dpr-like/srl/propbank_definitions.pairs.txt"
+contexts_path: "data/dpr-like/srl/propbank_definitions.predicates.txt"
 
 datamodule:
   _target_: data.pl_data_modules.PLDataModule

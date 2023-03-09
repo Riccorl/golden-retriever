@@ -31,9 +31,6 @@ def train(conf: omegaconf.DictConfig) -> None:
     # reproducibility
     pl.seed_everything(conf.train.seed)
     torch.set_float32_matmul_precision(conf.train.float32_matmul_precision)
-    if conf.train.set_determinism_the_old_way:
-        set_determinism_the_old_way(conf.train.pl_trainer.deterministic)
-        conf.train.pl_trainer.deterministic = False
 
     logger.log(f"Starting training for [bold cyan]{conf.model_name}[/bold cyan] model")
     if conf.train.pl_trainer.fast_dev_run:
@@ -197,15 +194,6 @@ def train(conf: omegaconf.DictConfig) -> None:
 
     # module test
     trainer.test(best_pl_module, datamodule=pl_data_module)
-
-
-def set_determinism_the_old_way(deterministic: bool):
-    # determinism for cudnn
-    torch.backends.cudnn.deterministic = deterministic
-    if deterministic:
-        # fixing non-deterministic part of horovod
-        # https://github.com/PyTorchLightning/pytorch-lightning/pull/1572/files#r420279383
-        os.environ["HOROVOD_FUSION_THRESHOLD"] = str(0)
 
 
 @hydra.main(config_path="../../conf", config_name="default")
