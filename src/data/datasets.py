@@ -402,17 +402,15 @@ class DPRDataset(BaseDataset):
             model_inputs["ids"] = [sample["id"] for sample in batch]
         return ModelInputs(model_inputs)
 
-    def save_data(self, samples: Any, path: Union[str, os.PathLike]) -> None:
+    def save_data(self, path: Union[str, os.PathLike]) -> None:
         """
         Save the samples to a file.
 
         Args:
-            samples (:obj:`List`):
-                List of samples to save.
             path (:obj:`str`):
-                Path to the file where to save the samples.
+                Path to the file where to save the dataset.
         """
-
+        samples = self.data.to_dict()
         for sample in samples:
             sample["question"] = self.tokenizer.decode(sample["question"]["input_ids"])
             sample["context"] = self.tokenizer.decode(sample["question"]["input_ids"])

@@ -1,9 +1,9 @@
-from typing import Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.nn.functional as F
-from torch.utils.data import DataLoader
 import transformers as tr
+from torch.utils.data import DataLoader
 
 from data.labels import Labels
 from utils.model_inputs import ModelInputs
@@ -88,8 +88,8 @@ class GoldenRetriever(torch.nn.Module):
 
         # indexer stuff
         self._context_embeddings: Optional[torch.Tensor] = None
-        self._context_index: Optional[Dict[str, int]] = None
-        self._reverse_context_index: Optional[Dict[int, str]] = None
+        self._context_index: Optional[Dict[int, str]] = None
+        self._reverse_context_index: Optional[Dict[str, int]] = None
 
     def forward(
         self,
@@ -228,16 +228,14 @@ class GoldenRetriever(torch.nn.Module):
         Retrieve the contexts for the questions.
 
         Args:
-            questions (`List[str]`):
-                The questions to retrieve the contexts for.
+            input_ids (`torch.Tensor`):
+                The input ids of the questions.
+            attention_mask (`torch.Tensor`):
+                The attention mask of the questions.
+            token_type_ids (`torch.Tensor`):
+                The token type ids of the questions.
             k (`int`):
-                The number of contexts to retrieve for each question.
-            batch_size (`int`):
-                The batch size to use for the retrieval.
-            num_workers (`int`):
-                The number of workers to use for the retrieval.
-            collate_fn (`Callable`):
-                The collate function to use for the retrieval.
+                The number of top contexts to retrieve.
 
         Returns:
             `Tuple[List[List[str]], List[List[int]]]`: The retrieved contexts and their indices.
@@ -251,16 +249,17 @@ class GoldenRetriever(torch.nn.Module):
             model_inputs["attention_mask"] = attention_mask
         if token_type_ids is not None:
             model_inputs["token_type_ids"] = token_type_ids
-        model_inputs = {"questions": model_inputs, "contexts_encodings": self._context_embeddings}
+        model_inputs = {
+            "questions": model_inputs,
+            "contexts_encodings": self._context_embeddings,
+        }
         similarity = self(**model_inputs)["logits"]
         # Retrieve the indices of the top k context embeddings
         top_k = torch.topk(similarity, k=min(k, similarity.shape[-1]), dim=1).indices
         # get int values
         top_k = top_k.cpu().numpy().tolist()
         # Retrieve the contexts corresponding to the indices
-        contexts = [
-            [self._context_index[i] for i in indices] for indices in top_k
-        ]
+        contexts = [[self._context_index[i] for i in indices] for indices in top_k]
         return contexts, top_k
 
     def get_index_from_context(self, context: str) -> int:

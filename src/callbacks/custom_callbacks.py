@@ -1,20 +1,17 @@
-import json
-import os
 from collections import defaultdict
 from functools import partial
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple, Union
+from typing import Dict, List, Optional, Set, Union, Tuple
 
 import hydra
 import pytorch_lightning as pl
 import torch
 import transformers as tr
 from omegaconf import DictConfig
-from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 
 from callbacks.base import NLPTemplateCallback, PredictionCallback, Stage
-from data.datasets import BaseDataset
+from data.datasets import BaseDataset, DPRDataset
 from utils.logging import get_console_logger
 from utils.model_inputs import ModelInputs
 
@@ -80,48 +77,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
             logger.log(
                 f"Computing context embeddings for dataset {datasets[dataloader_idx].name}"
             )
-            if datasets[dataloader_idx].contexts is None:
-                logger.log(
-                    f"Contexts not found in dataset {datasets[dataloader_idx].name}, computing them from the dataloaders"
-                )
-                # get the contexts from the all the dataloader context ids
-                contexts = set()  # set to avoid duplicates
-                for batch in trainer.train_dataloader:
-                    contexts.update(
-                        [
-                            " ".join(
-                                map(str, [c for c in context_ids.tolist() if c != 0])
-                            )
-                            for context_ids in batch.contexts.input_ids
-                        ]
-                    )
-                for d in trainer.val_dataloaders:
-                    for batch in d:
-                        contexts.update(
-                            [
-                                " ".join(
-                                    map(
-                                        str, [c for c in context_ids.tolist() if c != 0]
-                                    )
-                                )
-                                for context_ids in batch.contexts.input_ids
-                            ]
-                        )
-                for d in trainer.test_dataloaders:
-                    for batch in d:
-                        contexts.update(
-                            [
-                                " ".join(
-                                    map(
-                                        str, [c for c in context_ids.tolist() if c != 0]
-                                    )
-                                )
-                                for context_ids in batch.contexts.input_ids
-                            ]
-                        )
-                contexts = list(contexts)
-            else:
-                contexts = datasets[dataloader_idx].contexts
+            contexts = self._get_contexts_dataloader(datasets[dataloader_idx], trainer)
 
             collate_fn = lambda x: ModelInputs(
                 tokenizer(
@@ -212,10 +168,50 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                     prediction_folder
                     / f"{datasets[dataloader_idx].name}_{dataloader_idx}.json"
                 )
-                datasets[dataloader_idx].save_samples(predictions_path)
+                datasets[dataloader_idx].save_data(predictions_path)
 
         # return the predictions
         return dataloader_predictions
+
+    @staticmethod
+    def _get_contexts_dataloader(dataset, trainer):
+        if dataset.contexts is None:
+            logger.log(
+                f"Contexts not found in dataset {dataset.name}, computing them from the dataloaders"
+            )
+            # get the contexts from the all the dataloader context ids
+            contexts = set()  # set to avoid duplicates
+            for batch in trainer.train_dataloader:
+                contexts.update(
+                    [
+                        " ".join(map(str, [c for c in context_ids.tolist() if c != 0]))
+                        for context_ids in batch.contexts.input_ids
+                    ]
+                )
+            for d in trainer.val_dataloaders:
+                for batch in d:
+                    contexts.update(
+                        [
+                            " ".join(
+                                map(str, [c for c in context_ids.tolist() if c != 0])
+                            )
+                            for context_ids in batch.contexts.input_ids
+                        ]
+                    )
+            for d in trainer.test_dataloaders:
+                for batch in d:
+                    contexts.update(
+                        [
+                            " ".join(
+                                map(str, [c for c in context_ids.tolist() if c != 0])
+                            )
+                            for context_ids in batch.contexts.input_ids
+                        ]
+                    )
+            contexts = list(contexts)
+        else:
+            contexts = dataset.contexts
+        return contexts
 
     @staticmethod
     def _get_datasets_and_dataloaders(
@@ -224,7 +220,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         stage: Stage,
         trainer: pl.Trainer,
         tokenizer: tr.PreTrainedTokenizer,
-    ) -> Tuple[List[Dataset], List[DataLoader]]:
+    ) -> Tuple[List[DPRDataset], List[DataLoader]]:
         """
         Get the datasets and dataloaders from the datamodule or from the dataset provided.
 
@@ -331,7 +327,7 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
             for sample in samples:
                 top_k_contexts = sample["predictions"]
                 gold_contexts = sample["gold"]
-                # get the ids of the max_negatives wrong contexts with highest similarity
+                # get the ids of the max_negatives wrong contexts with the highest similarity
                 wrong_contexts = [
                     context_id
                     for context_id in top_k_contexts
