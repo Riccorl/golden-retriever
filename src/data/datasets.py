@@ -411,13 +411,14 @@ class DPRDataset(BaseDataset):
                 Path to the file where to save the dataset.
         """
         samples = self.data.to_dict()
-        for sample in samples:
-            sample["question"] = self.tokenizer.decode(sample["question"]["input_ids"])
-            sample["context"] = self.tokenizer.decode(sample["question"]["input_ids"])
+        samples["question"] = self.tokenizer.batch_decode(
+            [question["input_ids"] for question in samples["question"]]
+        )
+        # too large to save
+        samples.pop("context")
 
         with open(path, "w") as f:
-            for sample in samples:
-                f.write(json.dumps(sample) + "\n")
+            json.dump(samples, f)
 
     def update_data(self, name: str, column: List[Any]):
         """
@@ -429,4 +430,4 @@ class DPRDataset(BaseDataset):
             column (:obj:`List[Any]`):
                 List of values to update.
         """
-        self.data.add_column(name=name, column=column)
+        self.data = self.data.add_column(name=name, column=column)

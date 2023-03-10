@@ -8,5 +8,4 @@ black[d]
 #
 # nlp-dataset-readers
 # farm-haystack
-faiss-gpu; platform_system == "Linux"
 datasets

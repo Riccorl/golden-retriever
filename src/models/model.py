@@ -6,7 +6,9 @@ import transformers as tr
 from torch.utils.data import DataLoader
 
 from data.labels import Labels
+from models.faiss_indexer import FaissIndexer
 from utils.model_inputs import ModelInputs
+import numpy as np
 
 
 class SentenceEncoder(torch.nn.Module):
@@ -86,10 +88,11 @@ class GoldenRetriever(torch.nn.Module):
         # loss function
         self.loss_type = loss_type
 
-        # indexer stuff
+        # indexer stuff, lazy loaded
         self._context_embeddings: Optional[torch.Tensor] = None
         self._context_index: Optional[Dict[int, str]] = None
         self._reverse_context_index: Optional[Dict[str, int]] = None
+        self.faiss_indexer: Optional[FaissIndexer] = None
 
     def forward(
         self,
@@ -157,6 +160,8 @@ class GoldenRetriever(torch.nn.Module):
         num_workers: int = 0,
         collate_fn: Optional[Callable] = None,
         force_reindex: bool = False,
+        use_faiss: bool = False,
+        use_gpu: bool = False,
     ):
         """
         Index the contexts for later retrieval.
@@ -216,6 +221,12 @@ class GoldenRetriever(torch.nn.Module):
         self._context_index = {i: context for i, context in enumerate(contexts)}
         # reverse the context index
         self._reverse_context_index = {v: k for k, v in self._context_index.items()}
+        if use_faiss and self.faiss_indexer is None:
+            self.faiss_indexer = FaissIndexer(
+                self._context_embeddings,
+                normalize=True,
+                use_gpu=use_gpu,
+            )
 
     def retrieve(
         self,
@@ -249,13 +260,20 @@ class GoldenRetriever(torch.nn.Module):
             model_inputs["attention_mask"] = attention_mask
         if token_type_ids is not None:
             model_inputs["token_type_ids"] = token_type_ids
-        model_inputs = {
-            "questions": model_inputs,
-            "contexts_encodings": self._context_embeddings,
-        }
-        similarity = self(**model_inputs)["logits"]
-        # Retrieve the indices of the top k context embeddings
-        top_k = torch.topk(similarity, k=min(k, similarity.shape[-1]), dim=1).indices
+        if self.faiss_indexer is not None:
+            top_k: torch.Tensor = self.faiss_indexer.search(
+                self.question_encoder(**model_inputs), k=k
+            )
+        else:
+            model_inputs = {
+                "questions": model_inputs,
+                "contexts_encodings": self._context_embeddings,
+            }
+            similarity = self(**model_inputs)["logits"]
+            # Retrieve the indices of the top k context embeddings
+            top_k: torch.Tensor = torch.topk(
+                similarity, k=min(k, similarity.shape[-1]), dim=1
+            ).indices
         # get int values
         top_k = top_k.cpu().numpy().tolist()
         # Retrieve the contexts corresponding to the indices
@@ -303,3 +321,17 @@ class GoldenRetriever(torch.nn.Module):
                 f"The index '{index}' is not in the index. Please index the context before retrieving it."
             )
         return self._context_index[index]
+
+    @property
+    def context_embeddings(self) -> torch.Tensor:
+        """
+        The context embeddings.
+        """
+        return self._context_embeddings
+
+    @property
+    def context_index(self) -> Dict[int, str]:
+        """
+        The context index.
+        """
+        return self._context_index

@@ -121,7 +121,7 @@ fi
 
 # PRELIMINARIES
 CONDA_BASE=$(conda info --base)
-source $CONDA_BASE/bin/activate golden
+source $CONDA_BASE/bin/activate golden2
 
 # Default device is GPU
 ACCELERATOR="gpu"

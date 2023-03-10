@@ -18,7 +18,7 @@ else
   CONDA_NEW_ARG="--name"
 fi
 
-conda create -y "$CONDA_NEW_ARG" "$ENV_NAME" python="$PYTHON_VERSION" "$PREFIX"
+conda create -y "$CONDA_NEW_ARG" "$ENV_NAME" python="$PYTHON_VERSION"
 conda activate "$ENV_NAME"
 
 # replace placeholder env with $ENV_NAME in scripts/train.sh
@@ -33,8 +33,11 @@ if [ -n "$PYTORCH_VERSION" ]; then
 fi
 if [ -z "$CUDA_VERSION" ]; then
   conda install -y pytorch"$PYTORCH_VERSION" cpuonly -c pytorch
+  pip install faiss-cpu
 else
   conda install -y pytorch"$PYTORCH_VERSION" pytorch-cuda="$CUDA_VERSION" -c pytorch -c nvidia
+  CPPYTHON=$(python -c "import sys; print('cp' + ''.join(str(s) for s in sys.version_info[:2]))")
+  conda install -c conda-forge faiss-gpu
 fi
 
 # install python requirements

@@ -12,10 +12,11 @@ from torch.utils.data import DataLoader, Dataset
 
 from callbacks.base import NLPTemplateCallback, PredictionCallback, Stage
 from data.datasets import BaseDataset, DPRDataset
+from models.model import GoldenRetriever
 from utils.logging import get_console_logger
 from utils.model_inputs import ModelInputs
 
-# from faiss.indexer import FaissIndexer
+from models.faiss_indexer import FaissIndexer
 
 logger = get_console_logger()
 
@@ -31,6 +32,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         stages: Set[Union[str, Stage]] = None,
         other_callbacks: Optional[List[DictConfig]] = None,
         dataset: Optional[Union[DictConfig, BaseDataset]] = None,
+        use_faiss: bool = False,
         *args,
         **kwargs,
     ):
@@ -41,6 +43,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         self.num_workers = num_workers
         self.output_dir = output_dir
         self.dataset = dataset
+        self.use_faiss = use_faiss
 
     @torch.no_grad()
     def __call__(
@@ -68,7 +71,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         # set the model to eval mode
         pl_module.eval()
         # get the retriever
-        retriever = pl_module.model
+        retriever: GoldenRetriever = pl_module.model
 
         # here we will store the samples with predictions for each dataloader
         dataloader_predictions = {}
@@ -94,6 +97,8 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                 num_workers=self.num_workers,
                 collate_fn=collate_fn,
                 force_reindex=True,
+                use_faiss=self.use_faiss,
+                use_gpu=True,
             )
 
             # now compute the question embeddings and compute the top-k accuracy
@@ -156,6 +161,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                 logger.log(
                     "You need to specify an output directory or a logger to save the predictions."
                 )
+            else:
                 # save to file
                 if self.output_dir is not None:
                     prediction_folder = Path(self.output_dir)
@@ -168,6 +174,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                     prediction_folder
                     / f"{datasets[dataloader_idx].name}_{dataloader_idx}.json"
                 )
+                logger.log(f"Saving predictions to {predictions_path}")
                 datasets[dataloader_idx].save_data(predictions_path)
 
         # return the predictions
