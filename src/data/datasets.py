@@ -214,7 +214,7 @@ class DPRDataset(BaseDataset):
                 # shuffle the data
                 data = data.shuffle(seed=42)
 
-            # # measure how long the preprocessing takes
+            # measure how long the preprocessing takes
             start = time.time()
             data = data.map(
                 partial(

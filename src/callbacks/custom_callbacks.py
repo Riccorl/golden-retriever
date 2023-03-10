@@ -1,6 +1,7 @@
 from collections import defaultdict
 from functools import partial
 from pathlib import Path
+import time
 from typing import Dict, List, Optional, Set, Union, Tuple
 
 import hydra
@@ -96,7 +97,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                 collate_fn=collate_fn,
                 force_reindex=True,
                 use_faiss=self.use_faiss,
-                use_gpu=True,
+                use_gpu=(pl_module.device.type == "cuda"),
             )
 
             # now compute the question embeddings and compute the top-k accuracy
@@ -104,6 +105,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                 f"Computing predictions for dataset {datasets[dataloader_idx].name}"
             )
             predictions = []
+            start = time.time()
             for batch in dataloader:
                 batch = batch.to(pl_module.device)
                 # get the top-k indices
@@ -138,6 +140,8 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                             ],
                         }
                     )
+            end = time.time()
+            print("Time to retrieve:", end - start)
             dataloader_predictions[dataloader_idx] = predictions
 
             # update the dataset with the predictions
