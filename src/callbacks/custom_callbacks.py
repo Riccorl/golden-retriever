@@ -359,17 +359,6 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
                             "token_type_ids"
                         ].append(wrong_contexts_ids["token_type_ids"][c_index])
 
-            # dataset_dict = trainer.datamodule.train_dataset.data.to_dict()
-            # dataset_dict["augmented_contexts"] = []
-            # # add the augmented contexts to the dataset
-            # for sample_idx in dataset_dict["id"]:
-            #     if sample_idx in augmented_negative_contexts:
-            #         dataset_dict["augmented_contexts"].append(
-            #             augmented_negative_contexts[sample_idx]
-            #         )
-            # # create a new dataset
-            # trainer.datamodule.train_dataset.data = Dataset.from_dict(dataset_dict)
-
             # order augmented_negative_contexts by sample_idx_in_dataset and get the values
             augmented_negative_contexts = [
                 augmented_negative_contexts[i]
