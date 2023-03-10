@@ -97,7 +97,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                 collate_fn=collate_fn,
                 force_reindex=True,
                 use_faiss=self.use_faiss,
-                use_gpu=(pl_module.device.type == "cuda"),
+                use_gpu=False, #(pl_module.device.type == "cuda"),
             )
 
             # now compute the question embeddings and compute the top-k accuracy
@@ -141,7 +141,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                         }
                     )
             end = time.time()
-            print("Time to retrieve:", end - start)
+            logger.log("Time to retrieve:", end - start)
             dataloader_predictions[dataloader_idx] = predictions
 
             # update the dataset with the predictions
@@ -378,14 +378,12 @@ class TopKEvaluationCallback(NLPTemplateCallback):
         self,
         k: int = 100,
         report_intervals: Optional[int] = None,
-        batch_size: int = 32,
         *args,
         **kwargs,
     ):
         super().__init__()
         self.k = k
         self.report_intervals = report_intervals
-        self.batch_size = batch_size
 
     @torch.no_grad()
     def __call__(

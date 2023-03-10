@@ -1,3 +1,4 @@
+import math
 from typing import Union
 
 import faiss
@@ -11,20 +12,24 @@ class FaissIndexer:
         self,
         embeddings: Union[torch.Tensor, numpy.ndarray],
         index: str = "Flat",
-        metric: int = faiss.METRIC_INNER_PRODUCT,
+        metric: int = faiss.METRIC_L2,
         normalize: bool = True,
         use_gpu: bool = False,
     ) -> None:
+        self.use_gpu = use_gpu
         self.normalize = (
             normalize
             and metric == faiss.METRIC_INNER_PRODUCT
             and not isinstance(embeddings, torch.Tensor)
         )
         if self.normalize:
-            faiss.normalize_L2(embeddings)
-        self.index = faiss.index_factory(embeddings.shape[1], index, metric)
+            index = f"L2norm,{index}"
+        faiss_vector_size = embeddings.shape[1]
+        index = index.replace("x", str(math.ceil(math.sqrt(faiss_vector_size)) * 4))
+        if not self.use_gpu:
+            index = index.replace("x,", "x_HNSW32,")
+        self.index = faiss.index_factory(faiss_vector_size, index, metric)
         # convert to GPU
-        self.use_gpu = use_gpu
         if self.use_gpu:
             # use a single GPU
             faiss_resource = faiss.StandardGpuResources()
@@ -34,7 +39,9 @@ class FaissIndexer:
             embeddings = (
                 embeddings.cpu() if isinstance(embeddings, torch.Tensor) else embeddings
             )
+        self.index.train(embeddings)
         self.index.add(embeddings)
+        # faiss.extract_index_ivf(self.index.quantizer).nprobe = 123
 
     def search(
         self, query: Union[torch.Tensor, numpy.ndarray], k: int = 1

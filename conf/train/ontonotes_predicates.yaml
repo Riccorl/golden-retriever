@@ -50,18 +50,17 @@ prediction_callbacks:
     other_callbacks:
       - _target_: callbacks.custom_callbacks.TopKEvaluationCallback
         k: ${train.top_k}
-        batch_size: 64
-  # - _target_: callbacks.custom_callbacks.NegativeAugmentationCallback
-  #   k: ${train.top_k}
-  #   metric_to_monitor: val_recall@${train.top_k}
-  #   threshold: 0.90
-  #   max_negatives: 5
-  #   batch_size: 64
-  #   stages: [val]
-  #   dataset:
-  #     _target_: data.datasets.DPRDataset
-  #     name: 'train_augmented'
-  #     contexts_path: ${data.contexts_path}
-  #     tokenizer: ${model.language_model}
-  #     path:
-  #       - 'data/dpr-like/srl/ontonotes/ontonotes.train.predicates.json'
+  - _target_: callbacks.custom_callbacks.NegativeAugmentationCallback
+    k: ${train.top_k}
+    metric_to_monitor: val_recall@${train.top_k}
+    threshold: 0.90
+    max_negatives: 5
+    batch_size: 64
+    stages: [val]
+    dataset:
+      _target_: data.datasets.DPRDataset
+      name: 'train_augmented'
+      contexts_path: ${data.contexts_path}
+      tokenizer: ${model.language_model}
+      path:
+        - 'data/dpr-like/srl/ontonotes/ontonotes.train.predicates.json'

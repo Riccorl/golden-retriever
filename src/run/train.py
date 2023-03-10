@@ -114,15 +114,16 @@ def train(conf: omegaconf.DictConfig) -> None:
         )
 
     # callbacks declaration
-    callbacks_store = [
-        RichProgressBar(
-            theme=RichProgressBarTheme(
-                progress_bar="#802433",
-                progress_bar_finished="#802433",
-                progress_bar_pulse="#802433",
-            )
-        ),
-    ]
+    # callbacks_store = [
+    #     RichProgressBar(
+    #         theme=RichProgressBarTheme(
+    #             progress_bar="#802433",
+    #             progress_bar_finished="#802433",
+    #             progress_bar_pulse="#802433",
+    #         )
+    #     ),
+    # ]
+    callbacks_store = []
 
     experiment_logger: Optional[WandbLogger] = None
     experiment_path: Optional[Path] = None

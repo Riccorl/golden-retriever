@@ -4,6 +4,7 @@ import threading
 from typing import Optional
 
 from rich.console import Console
+from rich import get_console
 
 _lock = threading.Lock()
 _default_handler: Optional[logging.Handler] = None
@@ -11,7 +12,7 @@ _default_handler: Optional[logging.Handler] = None
 _default_log_level = logging.WARNING
 
 # fancy logger
-_console = Console()
+_console = get_console()
 
 
 def _get_library_name() -> str:

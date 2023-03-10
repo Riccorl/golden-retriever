@@ -7,7 +7,12 @@ from torch.utils.data import DataLoader
 
 from data.labels import Labels
 from models.faiss_indexer import FaissIndexer
+from utils.logging import get_console_logger
 from utils.model_inputs import ModelInputs
+
+from tqdm.auto import tqdm
+
+logger = get_console_logger()
 
 
 class SentenceEncoder(torch.nn.Module):
@@ -210,7 +215,7 @@ class GoldenRetriever(torch.nn.Module):
         # Create empty lists to store the context embeddings and context index
         context_embeddings: List[torch.Tensor] = []
         # Iterate through each batch in the dataloader
-        for batch in dataloader:
+        for batch in tqdm(dataloader):
             # Move the batch to the device
             batch = batch.to(next(self.parameters()).device)
             # Compute the context embeddings
