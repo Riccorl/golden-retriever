@@ -42,108 +42,108 @@ model_checkpoint_callback:
   filename: 'checkpoint-val_recall@${train.top_k}_{val_recall@${train.top_k}:.4f}-epoch_{epoch:02d}'
   auto_insert_metric_name: False
 
-prediction_callback:
-  _target_: callbacks.custom_callbacks.GoldenRetrieverPredictionCallback
-  k: ${train.top_k}
-  batch_size: 64
-  other_callbacks:
-    - _target_: callbacks.custom_callbacks.NYTTopKEvaluationCallback
-      label_mapping:
-        /people/person/nationality:
-          - the country that a person holds citizenship in
-          - a person's citizenship country
-          - the country a person holds citizenship in
-        /sports/sports_team/location:
-          - the place where a sports team is headquartered
-          - the location where a sports team is based
-          - the headquarters location of a sports team
-        /location/country/administrative_divisions:
-          - the subdivisions within a country
-          - divisions within a country
-          - the country's administrative territorial entity
-        /business/company/major_shareholders:
-          - the shareholders that own a significant portion of a company
-          - shareholders owning a significant portion of a company
-          - the shareholders of a company
-        /people/ethnicity/people:
-          - the country of origin for an ethnic group
-          - origin country of an ethnic group
-          - the country of origin of an ethnic group
-        /people/ethnicity/geographic_distribution:
-          - the geographical spread of an ethnic group
-          - geographical spread of an ethnic group
-          - the geographical distribution of an ethnic group
-        /business/company_shareholder/major_shareholder_of:
-          - a major shareholder in a company
-          - a company's major shareholder
-          - a company's major shareholders
-        /location/location/contains:
-          - a location that encloses another location
-          - a location located within another location
-          - a location enclosed in another location
-        /business/company/founders:
-          - the people who started a company
-          - founders of a company
-          - the individuals who established a company
-        /business/person/company:
-          - the current employer of a person
-          - a person's current employer
-          - an individual's current place of employment
-        /business/company/advisors:
-          - advisors for a company
-          - a company's advisors
-          - individuals who provide guidance to a company
-        /people/deceased_person/place_of_death:
-          - the location where a deceased person passed away
-          - a deceased person's place of death
-          - the location of death of a deceased person
-        /business/company/industry:
-          - the field in which a company operates
-          - a company's industry
-          - the sector in which a company operates
-        /people/person/ethnicity:
-          - the ethnic background of a person
-          - a person's ethnicity
-          - an individual's ethnic background
-        /people/person/place_of_birth:
-          - the birth place of a person
-          - a person's place of birth
-          - the location where a person was born
-        /location/administrative_division/country:
-          - the country that an administrative division belongs to
-          - country of an administrative division
-          - the country where an administrative division is located
-        /people/person/place_lived:
-          - the places where a person has lived
-          - a person's residence
-          - the locations where an individual has lived
-        /sports/sports_team_location/teams:
-          - the sports teams located in a specific location
-          - sports teams based in a location
-          - the teams based in a location
-        /people/person/children:
-          - the child of a person
-          - a person's child
-          - an individual's offspring
-        /people/person/religion:
-          - the religion of a person
-          - a person's religion
-          - an individual's religious beliefs
-        /location/neighborhood/neighborhood_of:
-          - the location that a neighborhood is located in
-          - neighborhood of a location
-          - the location where a neighborhood is situated
-        /location/country/capital:
-          - the capital city of a country
-          - capital of a country
-          - the city that serves as the administrative center of a country
-        /business/company/place_founded:
-          - the location where a company was established
-          - location of a company's formation
-          - the place where a company was founded
-        /people/person/profession:
-          - the occupation of a person
-          - a person's profession
-          - an individual's chosen career
-      k: 5
-      batch_size: 64
+prediction_callbacks:
+  - _target_: callbacks.custom_callbacks.GoldenRetrieverPredictionCallback
+    k: ${train.top_k}
+    batch_size: 64
+    other_callbacks:
+      - _target_: callbacks.custom_callbacks.NYTTopKEvaluationCallback
+        k: 5
+        batch_size: 64
+        label_mapping:
+          /people/person/nationality:
+            - The country that a person holds citizenship in
+            - A person's citizenship country
+            - The country a person holds citizenship in
+          /sports/sports_team/location:
+            - The place where a sports team is headquartered
+            - The location where a sports team is based
+            - The headquarters location of a sports team
+          /location/country/administrative_divisions:
+            - The subdivisions within a country
+            - Divisions within a country
+            - The country's administrative territorial entity
+          /business/company/major_shareholders:
+            - The shareholders that own a significant portion of a company
+            - Shareholders owning a significant portion of a company
+            - The shareholders of a company
+          /people/ethnicity/people:
+            - The country of origin for an ethnic group
+            - Origin country of an ethnic group
+            - The country of origin of an ethnic group
+          /people/ethnicity/geographic_distribution:
+            - The geographical spread of an ethnic group
+            - Geographical spread of an ethnic group
+            - The geographical distribution of an ethnic group
+          /business/company_shareholder/major_shareholder_of:
+            - A major shareholder in a company
+            - A company's major shareholder
+            - A company's major shareholders
+          /location/location/contains:
+            - A location that encloses another location
+            - A location located within another location
+            - A location enclosed in another location
+          /business/company/founders:
+            - The people who started a company
+            - Founders of a company
+            - The individuals who established a company
+          /business/person/company:
+            - The current employer of a person
+            - A person's current employer
+            - An individual's current place of employment
+          /business/company/advisors:
+            - Advisors for a company
+            - A company's advisors
+            - Individuals who provide guidance to a company
+          /people/deceased_person/place_of_death:
+            - The location where a deceased person passed away
+            - A deceased person's place of death
+            - The location of death of a deceased person
+          /business/company/industry:
+            - The field in which a company operates
+            - A company's industry
+            - The sector in which a company operates
+          /people/person/ethnicity:
+            - The ethnic background of a person
+            - A person's ethnicity
+            - An individual's ethnic background
+          /people/person/place_of_birth:
+            - The birth place of a person
+            - A person's place of birth
+            - The location where a person was born
+          /location/administrative_division/country:
+            - The country that an administrative division belongs to
+            - Country of an administrative division
+            - The country where an administrative division is located
+          /people/person/place_lived:
+            - The places where a person has lived
+            - A person's residence
+            - The locations where an individual has lived
+          /sports/sports_team_location/teams:
+            - The sports teams located in a specific location
+            - Sports teams based in a location
+            - The teams based in a location
+          /people/person/children:
+            - The child of a person
+            - A person's child
+            - An individual's offspring
+          /people/person/religion:
+            - The religion of a person
+            - A person's religion
+            - An individual's religious beliefs
+          /location/neighborhood/neighborhood_of:
+            - The location that a neighborhood is located in
+            - Neighborhood of a location
+            - The location where a neighborhood is situated
+          /location/country/capital:
+            - The capital city of a country
+            - Capital of a country
+            - The city that serves as the administrative center of a country
+          /business/company/place_founded:
+            - The location where a company was established
+            - Location of a company's formation
+            - The place where a company was founded
+          /people/person/profession:
+            - The occupation of a person
+            - A person's profession
+            - An individual's chosen career

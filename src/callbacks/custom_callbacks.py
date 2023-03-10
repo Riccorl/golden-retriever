@@ -9,11 +9,9 @@ import hydra
 import pytorch_lightning as pl
 import torch
 import transformers as tr
-import datasets
-from datasets import Dataset
 from omegaconf import DictConfig
 from torch import Tensor
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset
 
 from callbacks.base import NLPTemplateCallback, PredictionCallback, Stage
 from data.datasets import BaseDataset
@@ -66,34 +64,9 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         # get the tokenizer
         tokenizer = trainer.datamodule.tokenizer
 
-        # if a dataset is provided, use it
-        if self.dataset is not None:
-            # get dataset
-            if isinstance(self.dataset, DictConfig):
-                self.dataset = hydra.utils.instantiate(self.dataset, _recursive_=False)
-            datasets = [self.dataset]
-            dataloaders = [
-                DataLoader(
-                    datasets[0],
-                    batch_size=self.batch_size,
-                    shuffle=False,
-                    num_workers=0,
-                    pin_memory=True,
-                    collate_fn=partial(datasets[0].collate_fn, tokenizer=tokenizer),
-                )
-            ]
-        else:
-            # get the dataloaders and datasets from the datamodule
-            datasets = (
-                trainer.datamodule.val_datasets
-                if stage == Stage.VALIDATION
-                else trainer.datamodule.test_datasets
-            )
-            dataloaders = (
-                trainer.val_dataloaders
-                if stage == Stage.VALIDATION
-                else trainer.test_dataloaders
-            )
+        datasets, dataloaders = self._get_datasets_and_dataloaders(
+            self.dataset, self.batch_size, stage, trainer, tokenizer
+        )
 
         # set the model to eval mode
         pl_module.eval()
@@ -180,7 +153,6 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                 )
                 # compute recall at k
                 for sample_idx, retrieved_index in enumerate(retrieved_indices):
-                    labels = batch.labels_for_metrics[sample_idx]
                     # get the positive contexts
                     gold_contexts = batch.positives[sample_idx]
                     # get the index of the gold contexts in the retrieved contexts
@@ -244,6 +216,57 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
 
         # return the predictions
         return dataloader_predictions
+
+    @staticmethod
+    def _get_datasets_and_dataloaders(
+        dataset: Optional[Union[Dataset, DictConfig]],
+        batch_size: int,
+        stage: Stage,
+        trainer: pl.Trainer,
+        tokenizer: tr.PreTrainedTokenizer,
+    ) -> Tuple[List[Dataset], List[DataLoader]]:
+        """
+        Get the datasets and dataloaders from the datamodule or from the dataset provided.
+
+        Args:
+            dataset (`Optional[Union[Dataset, DictConfig]]`): The dataset to use. If `None`, the datamodule is used.
+            batch_size (`int`): The batch size to use for the dataloaders.
+            stage (`Stage`): The stage that indicates whether the dataloaders are for validation or testing.
+            trainer (`pl.Trainer`): The trainer that contains the datamodule.
+            tokenizer (`tr.PreTrainedTokenizer`): The tokenizer to use for the dataloaders.
+
+        Returns:
+            `Tuple[List[Dataset], List[DataLoader]]`: The datasets and dataloaders.
+        """
+        # if a dataset is provided, use it
+        if dataset is not None:
+            # get dataset
+            if isinstance(dataset, DictConfig):
+                dataset = hydra.utils.instantiate(dataset, _recursive_=False)
+            datasets = [dataset]
+            dataloaders = [
+                DataLoader(
+                    datasets[0],
+                    batch_size=batch_size,
+                    shuffle=False,
+                    num_workers=0,
+                    pin_memory=True,
+                    collate_fn=partial(datasets[0].collate_fn, tokenizer=tokenizer),
+                )
+            ]
+        else:
+            # get the dataloaders and datasets from the datamodule
+            datasets = (
+                trainer.datamodule.val_datasets
+                if stage == Stage.VALIDATION
+                else trainer.datamodule.test_datasets
+            )
+            dataloaders = (
+                trainer.val_dataloaders
+                if stage == Stage.VALIDATION
+                else trainer.test_dataloaders
+            )
+        return datasets, dataloaders
 
 
 class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
@@ -419,6 +442,12 @@ class NYTTopKEvaluationCallback(TopKEvaluationCallback):
     ):
         super().__init__(k, report_intervals, batch_size, *args, **kwargs)
         self.label_mapping = label_mapping
+        # invert the label mapping
+        self.inverted_label_mapping = {
+            description: label
+            for label, descriptions in label_mapping.items()
+            for description in descriptions
+        }
 
     @torch.no_grad()
     def __call__(
@@ -441,46 +470,21 @@ class NYTTopKEvaluationCallback(TopKEvaluationCallback):
             )
 
         for dataloader_idx, samples in predictions.items():
-            # shitty hack to get the label mapping normalized to the contexts
-            label_mapping = {
-                label: [
-                    " ".join(
-                        map(
-                            str,
-                            [
-                                c
-                                for c in trainer.datamodule.tokenizer(description)[
-                                    "input_ids"
-                                ]
-                                if c != 0
-                            ],
-                        )
-                    )
-                    for description in descriptions
-                ]
-                for label, descriptions in self.label_mapping.items()
-            }
-            # invert the label mapping
-            inverted_label_mapping = {
-                description: label
-                for label, descriptions in label_mapping.items()
-                for description in descriptions
-            }
             # now compute the question embeddings and compute the top-k accuracy
             logger.log(f"Computing recall@{self.k} for dataloader {dataloader_idx}")
             hits, total = 0, 0
             for sample in samples:
-                gold_contexts_ids = sample["gold_contexts"]
+                gold_contexts = sample["gold"]
                 gold_labels = [
                     label
-                    for label, descriptions in label_mapping.items()
-                    if set(descriptions) & set(gold_contexts_ids)
+                    for label, descriptions in self.label_mapping.items()
+                    if set(descriptions) & set(gold_contexts)
                 ]
                 # get the top_k context ids
-                top_k_context_ids = sample["predictions"]
+                top_k_contexts = sample["predictions"]
                 top_k_labels = [
-                    inverted_label_mapping[context_id]
-                    for context_id in top_k_context_ids
+                    self.inverted_label_mapping[context_id]
+                    for context_id in top_k_contexts
                 ]
                 # remove duplicates and preserve the order
                 top_k_labels = list(dict.fromkeys(top_k_labels))
