@@ -79,8 +79,8 @@ class GoldenRetriever(torch.nn.Module):
         # question encoder model
         self.question_encoder = question_encoder
         if not context_encoder:
-            # if no context encoder is provided, s
-            # hare the weights of the question encoder
+            # if no context encoder is provided,
+            # share the weights of the question encoder
             context_encoder = question_encoder
         # context encoder model
         self.context_encoder = context_encoder
