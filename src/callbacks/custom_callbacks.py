@@ -16,8 +16,6 @@ from models.model import GoldenRetriever
 from utils.logging import get_console_logger
 from utils.model_inputs import ModelInputs
 
-from models.faiss_indexer import FaissIndexer
-
 logger = get_console_logger()
 
 

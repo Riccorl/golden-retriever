@@ -1,10 +1,9 @@
 from typing import Union
 
-import numpy
-import torch
-
 import faiss
 import faiss.contrib.torch_utils
+import numpy
+import torch
 
 
 class FaissIndexer:
@@ -16,8 +15,6 @@ class FaissIndexer:
         normalize: bool = True,
         use_gpu: bool = False,
     ) -> None:
-        # if isinstance(embeddings, torch.Tensor):
-        #     embeddings = embeddings.cpu().numpy()
         self.normalize = normalize
         self.normalize_condition = (
             normalize
@@ -36,10 +33,8 @@ class FaissIndexer:
 
     def search(
         self, query: Union[torch.Tensor, numpy.ndarray], k: int = 1
-    ) -> numpy.ndarray:
+    ) -> Union[torch.Tensor, numpy.ndarray]:
         k = min(k, self.index.ntotal)
-        # if isinstance(query, torch.Tensor):
-        #     query = query.cpu().numpy()
         if self.normalize_condition:
             faiss.normalize_L2(query)
         return self.index.search(query, k)[1]

@@ -8,7 +8,6 @@ from torch.utils.data import DataLoader
 from data.labels import Labels
 from models.faiss_indexer import FaissIndexer
 from utils.model_inputs import ModelInputs
-import numpy as np
 
 
 class SentenceEncoder(torch.nn.Module):
@@ -177,6 +176,10 @@ class GoldenRetriever(torch.nn.Module):
                 The collate function to use for the indexing.
             force_reindex (`bool`):
                 Whether to force reindexing even if the contexts are already indexed.
+            use_faiss (`bool`):
+                Whether to use faiss for the indexing.
+            use_gpu (`bool`):
+                Whether to use the GPU for the indexing.
         """
         if self._context_embeddings is not None and not force_reindex:
             return
@@ -275,7 +278,7 @@ class GoldenRetriever(torch.nn.Module):
                 similarity, k=min(k, similarity.shape[-1]), dim=1
             ).indices
         # get int values
-        top_k = top_k.cpu().numpy().tolist()
+        top_k: List[List[int]] = top_k.cpu().numpy().tolist()
         # Retrieve the contexts corresponding to the indices
         contexts = [[self._context_index[i] for i in indices] for indices in top_k]
         return contexts, top_k
