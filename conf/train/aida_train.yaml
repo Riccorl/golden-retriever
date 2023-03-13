@@ -1,0 +1,54 @@
+# reproducibility
+seed: 42
+
+export: False
+float32_matmul_precision: "medium"
+set_determinism_the_old_way: False
+top_k: 50
+
+only_test: False
+
+# pl_trainer
+pl_trainer:
+  _target_: pytorch_lightning.Trainer
+  accelerator: gpu
+  devices: 1
+  num_nodes: 1
+  strategy: null
+  accumulate_grad_batches: 1
+  gradient_clip_val: 1.0
+  val_check_interval: 1.0  # you can specify an int "n" here => validation every "n" steps
+  check_val_every_n_epoch: 5
+  max_epochs: 40
+  deterministic: True
+  fast_dev_run: False
+  precision: 32
+  resume_from_checkpoint: null
+
+# early stopping callback
+# "early_stopping_callback: null" will disable early stopping
+early_stopping_callback:
+  _target_: pytorch_lightning.callbacks.EarlyStopping
+  monitor: val_recall@${train.top_k}
+  mode: max
+  patience: 15
+
+# model_checkpoint_callback
+# "model_checkpoint_callback: null" will disable model checkpointing
+model_checkpoint_callback:
+  _target_: pytorch_lightning.callbacks.ModelCheckpoint
+  monitor: val_recall@${train.top_k}
+  mode: max
+  verbose: True
+  save_top_k: 1
+  filename: 'checkpoint-val_recall@${train.top_k}_{val_recall@${train.top_k}:.4f}-epoch_{epoch:02d}'
+  auto_insert_metric_name: False
+
+prediction_callbacks:
+  - _target_: callbacks.custom_callbacks.GoldenRetrieverPredictionCallback
+    k: ${train.top_k}
+    batch_size: 2048
+    use_faiss: True
+    other_callbacks:
+      - _target_: callbacks.custom_callbacks.TopKEvaluationCallback
+        k: ${train.top_k}

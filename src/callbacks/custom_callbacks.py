@@ -97,7 +97,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                 collate_fn=collate_fn,
                 force_reindex=True,
                 use_faiss=self.use_faiss,
-                use_gpu=False, #(pl_module.device.type == "cuda"),
+                use_gpu=False,  # (pl_module.device.type == "cuda"),
             )
 
             # now compute the question embeddings and compute the top-k accuracy
@@ -145,18 +145,9 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
             dataloader_predictions[dataloader_idx] = predictions
 
             # update the dataset with the predictions
-            datasets[dataloader_idx].update_data(
-                "gold", [p["gold"] for p in predictions]
-            )
-            datasets[dataloader_idx].update_data(
-                "predictions", [p["predictions"] for p in predictions]
-            )
-            datasets[dataloader_idx].update_data(
-                "correct", [p["correct"] for p in predictions]
-            )
-            datasets[dataloader_idx].update_data(
-                "wrong", [p["wrong"] for p in predictions]
-            )
+            new_names = ["gold", "predictions", "correct", "wrong"]
+            new_columns = [[p[name] for p in predictions] for name in new_names]
+            datasets[dataloader_idx].update_data(new_names, new_columns, overwrite=True)
 
             # write the predictions to a file inside the experiment folder
             if self.output_dir is None and trainer.logger is None:
@@ -367,7 +358,7 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
                 for i in sorted(augmented_negative_contexts.keys())
             ]
             trainer.datamodule.train_dataset.data[dataloader_idx].update_data(
-                "augmented_contexts", augmented_negative_contexts
+                "augmented_contexts", augmented_negative_contexts, overwrite=True
             )
 
         return predictions

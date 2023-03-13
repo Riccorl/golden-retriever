@@ -1,3 +1,4 @@
+import tempfile
 from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import torch
@@ -10,6 +11,10 @@ from models.faiss_indexer import FaissIndexer
 from utils.logging import get_console_logger
 from utils.model_inputs import ModelInputs
 
+from optimum.onnxruntime import ORTModelForFeatureExtraction, ORTQuantizer, ORTOptimizer
+from optimum.onnxruntime.configuration import AutoOptimizationConfig
+from optimum.bettertransformer import BetterTransformer
+
 from tqdm.auto import tqdm
 
 logger = get_console_logger()
@@ -19,15 +24,21 @@ class SentenceEncoder(torch.nn.Module):
     def __init__(
         self,
         language_model: Union[
-            str, tr.PreTrainedModel
+            str, tr.PreTrainedModel, ORTModelForFeatureExtraction
         ] = "sentence-transformers/all-MiniLM-6-v2",
         pooling_strategy: str = "mean",
+        load_ort_model: bool = False,
         *args,
         **kwargs,
     ):
         super().__init__()
         if isinstance(language_model, str):
-            self.language_model = tr.AutoModel.from_pretrained(language_model)
+            if load_ort_model:
+                self.language_model = ORTModelForFeatureExtraction.from_pretrained(
+                    language_model, from_transformers=True
+                )
+            else:
+                self.language_model = tr.AutoModel.from_pretrained(language_model)
         else:
             self.language_model = language_model
         self.pooling_strategy = pooling_strategy
@@ -161,11 +172,12 @@ class GoldenRetriever(torch.nn.Module):
         self,
         contexts: List[str],
         batch_size: int = 32,
-        num_workers: int = 0,
+        num_workers: int = 8,
         collate_fn: Optional[Callable] = None,
         force_reindex: bool = False,
         use_faiss: bool = False,
         use_gpu: bool = False,
+        use_ort: bool = False,
     ):
         """
         Index the contexts for later retrieval.
@@ -212,6 +224,11 @@ class GoldenRetriever(torch.nn.Module):
             pin_memory=True,
             collate_fn=collate_fn,
         )
+        #
+        if not use_ort:
+            context_encoder = self.context_encoder
+        else:
+            context_encoder = self._load_ort_optimized_encoder(self.context_encoder)
         # Create empty lists to store the context embeddings and context index
         context_embeddings: List[torch.Tensor] = []
         # Iterate through each batch in the dataloader
@@ -219,11 +236,12 @@ class GoldenRetriever(torch.nn.Module):
             # Move the batch to the device
             batch = batch.to(next(self.parameters()).device)
             # Compute the context embeddings
-            context_outs = self.context_encoder(**batch)
+            context_outs = context_encoder(**batch)
             # Append the context embeddings to the list
-            context_embeddings.extend([c for c in context_outs])
+            context_embeddings.extend([c if use_gpu else c.cpu() for c in context_outs])
 
         # Stack the context embeddings into a tensor and return it along with the context index
+        self._context_embeddings = None
         self._context_embeddings = torch.stack(context_embeddings, dim=0)
         # Create a dictionary mapping the context index to the context
         self._context_index = {i: context for i, context in enumerate(contexts)}
@@ -343,3 +361,24 @@ class GoldenRetriever(torch.nn.Module):
         The context index.
         """
         return self._context_index
+
+    @staticmethod
+    def _load_ort_optimized_encoder(
+        encoder: SentenceEncoder, provider: str = "CUDAExecutionProvider"
+    ) -> SentenceEncoder:
+        temp_dir = tempfile.mkdtemp()
+        encoder.language_model.save_pretrained(temp_dir)
+        ort_model = ORTModelForFeatureExtraction.from_pretrained(
+            temp_dir, export=True, provider=provider, use_io_binding=False
+        )
+        optimizer = ORTOptimizer.from_pretrained(ort_model)
+        optimization_config = AutoOptimizationConfig.O4()
+        # quantizer = ORTQuantizer.from_pretrained(ort_model)
+        optimizer.optimize(save_dir=temp_dir, optimization_config=optimization_config)
+        ort_model = ORTModelForFeatureExtraction.from_pretrained(
+            temp_dir, export=True, provider=provider, use_io_binding=False
+        )
+        return SentenceEncoder(
+            language_model=ort_model,
+            pooling_strategy=encoder.pooling_strategy,
+        )

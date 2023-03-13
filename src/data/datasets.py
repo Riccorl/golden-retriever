@@ -252,22 +252,22 @@ class DPRDataset(BaseDataset):
         max_context_length: int = 128,
     ) -> Dict:
         question = tokenizer(
-            sample["question"], max_length=max_question_length, truncation=True
+            sample["question"].strip(), max_length=max_question_length, truncation=True
         )
         positive_ctxs = [
-            tokenizer(p["text"], max_length=max_context_length, truncation=True)
+            tokenizer(p["text"].strip(), max_length=max_context_length, truncation=True)
             for p in sample["positive_ctxs"]
         ]
         if max_positives != -1:
             positive_ctxs = positive_ctxs[:max_positives]
         negative_ctxs = [
-            tokenizer(n["text"], max_length=max_context_length, truncation=True)
+            tokenizer(n["text"].strip(), max_length=max_context_length, truncation=True)
             for n in sample["negative_ctxs"]
         ]
         if max_negatives != -1:
             negative_ctxs = negative_ctxs[:max_negatives]
         hard_negative_ctxs = [
-            tokenizer(h["text"], max_length=max_context_length, truncation=True)
+            tokenizer(h["text"].strip(), max_length=max_context_length, truncation=True)
             for h in sample["hard_negative_ctxs"]
         ]
         if max_hard_negatives != -1:
@@ -420,7 +420,12 @@ class DPRDataset(BaseDataset):
         with open(path, "w") as f:
             json.dump(samples, f)
 
-    def update_data(self, name: str, column: List[Any]):
+    def update_data(
+        self,
+        names: Union[str, List[str]],
+        columns: Union[List[Any], List[List[Any]]],
+        overwrite: bool = False,
+    ):
         """
         Update the data with the given column.
 
@@ -430,4 +435,23 @@ class DPRDataset(BaseDataset):
             column (:obj:`List[Any]`):
                 List of values to update.
         """
-        self.data = self.data.add_column(name=name, column=column)
+        # TODO: augment data if overwrite is False and the column already exists
+        if isinstance(names, str):
+            names = [names]
+            # TODO: check if it's a list of list in a prettier way
+            if len(names) != len(columns):
+                columns = [columns]
+
+        if len(names) != len(columns):
+            raise ValueError(
+                "The number of columns to update must be equal to the number of names."
+            )
+
+        for name, column in zip(names, columns):
+            if name in self.data.column_names:
+                if not overwrite:
+                    raise ValueError(
+                        "The dataset already contains a column named `name`, you can force the update by setting `overwrite=True`."
+                    )
+                self.data = self.data.remove_columns(name)
+            self.data = self.data.add_column(name=name, column=column)
