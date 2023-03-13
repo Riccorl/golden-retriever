@@ -14,6 +14,6 @@ pl_module:
       pooling_strategy: "mean"
     loss_type: ${loss}
   optimizer: ${optimizer}
-  lr_scheduler: null
+  lr_scheduler: ${scheduler}
   grouped_parameters: False
   warmup_steps_ratio: 0.1

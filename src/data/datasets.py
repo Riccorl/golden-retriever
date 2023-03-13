@@ -21,21 +21,25 @@ class BaseDataset(Dataset):
     def __init__(
         self,
         name: str,
-        path: Union[str, os.PathLike, List[str], List[os.PathLike]],
+        path: Union[str, os.PathLike, List[str], List[os.PathLike]] = None,
+        data: Any = None,
         **kwargs,
     ):
         super().__init__()
-        self.path = path
         self.name = name
+        if path is None and data is None:
+            raise ValueError("Either `path` or `data` must be provided")
+        self.path = path
         self.project_folder = Path(__file__).parent.parent.parent
+        self.data = data
 
     def __len__(self) -> int:
-        raise NotImplementedError
+        return len(self.data)
 
     def __getitem__(
         self, index
     ) -> Union[Dict[str, torch.Tensor], Tuple[torch.Tensor, torch.Tensor]]:
-        raise NotImplementedError
+        return self.data[index]
 
     def __repr__(self) -> str:
         return f"Dataset({self.name=}, {self.path=})"

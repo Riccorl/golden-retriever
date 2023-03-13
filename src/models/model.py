@@ -6,6 +6,7 @@ import torch.nn.functional as F
 import transformers as tr
 from torch.utils.data import DataLoader
 
+from data.datasets import BaseDataset
 from data.labels import Labels
 from models.faiss_indexer import FaissIndexer
 from utils.logging import get_console_logger
@@ -14,7 +15,7 @@ from utils.model_inputs import ModelInputs
 from optimum.onnxruntime import ORTModelForFeatureExtraction, ORTQuantizer, ORTOptimizer
 from optimum.onnxruntime.configuration import AutoOptimizationConfig, AutoQuantizationConfig
 
-from tqdm.auto import tqdm
+from tqdm import tqdm
 
 logger = get_console_logger()
 
@@ -70,7 +71,9 @@ class SentenceEncoder(torch.nn.Module):
             mean_pooling = torch.sum(
                 token_embeddings * input_mask_expanded, 1
             ) / torch.clamp(input_mask_expanded.sum(1), min=1e-9)
-            return mean_pooling
+            # normalize
+            normalized = F.normalize(mean_pooling, p=2, dim=1)
+            return normalized
         else:
             raise ValueError(
                 f"Pooling strategy {pooling_strategy} not supported, use 'cls' or 'mean'"
@@ -83,7 +86,7 @@ class GoldenRetriever(torch.nn.Module):
         question_encoder: SentenceEncoder,
         loss_type: torch.nn.Module,
         context_encoder: Optional[SentenceEncoder] = None,
-        labels: Labels = None,
+        labels: Optional[Labels] = None,
         *args,
         **kwargs,
     ):
@@ -110,8 +113,8 @@ class GoldenRetriever(torch.nn.Module):
 
     def forward(
         self,
-        questions: Dict[str, torch.Tensor] = None,
-        contexts: Dict[str, torch.Tensor] = None,
+        questions: Optional[Dict[str, torch.Tensor]] = None,
+        contexts: Optional[Dict[str, torch.Tensor]] = None,
         labels: Optional[torch.Tensor] = None,
         question_encodings: Optional[torch.Tensor] = None,
         contexts_encodings: Optional[torch.Tensor] = None,
@@ -196,6 +199,8 @@ class GoldenRetriever(torch.nn.Module):
                 Whether to use faiss for the indexing.
             use_gpu (`bool`):
                 Whether to use the GPU for the indexing.
+            use_ort (`bool`):
+                Whether to use onnxruntime for the indexing.
         """
         if self._context_embeddings is not None and not force_reindex:
             return
@@ -216,14 +221,14 @@ class GoldenRetriever(torch.nn.Module):
                 }
             )
         dataloader = DataLoader(
-            contexts,
+            BaseDataset(name="context", data=contexts),
             batch_size=batch_size,
             shuffle=False,
             num_workers=num_workers,
             pin_memory=True,
             collate_fn=collate_fn,
         )
-        #
+        # we can use the onnx runtime optimized encoder for the indexing
         if not use_ort:
             context_encoder = self.context_encoder
         else:
@@ -233,7 +238,7 @@ class GoldenRetriever(torch.nn.Module):
         # Iterate through each batch in the dataloader
         for batch in tqdm(dataloader, desc="Indexing"):
             # Move the batch to the device
-            batch = batch.to(next(self.parameters()).device)
+            batch: ModelInputs = batch.to(next(self.parameters()).device)
             # Compute the context embeddings
             context_outs = context_encoder(**batch)
             # Append the context embeddings to the list
