@@ -142,6 +142,7 @@ def conll_2012_to_dpr_pairs(
                 continue
             predicate = definitions[annotation["predicate"]]
             predicate_definition = predicate["definition"]
+            predicate_definition = predicate_definition.split(":")[1].strip()
             role_labels = [r for r in predicate["roleset"].keys()]
             role_definitions = [r for r in predicate["roleset"].values()]
             merged_role_labels = ". ".join(role_labels).strip()
@@ -161,25 +162,25 @@ def conll_2012_to_dpr_pairs(
                     "passage_id": f"{sentence_id}_{predicate_index}",
                 }
             )
-            for role_index, role in enumerate(annotation["roles"]):
-                if (
-                    role == "B-V"
-                    or role == "I-V"
-                    or role.startswith("I-")
-                    or role == "_"
-                ):
-                    continue
-                role = role[2:]
-                role_text = predicate["roleset"].get(role, role)
-                if role in argm_definitions:
-                    role_text = argm_definitions[role]
-                    positive_ctxs.append(
-                        {
-                            "title": role,
-                            "text": role_text.strip() + ".",
-                            "passage_id": f"{sentence_id}_{predicate_index}_{role_index}",
-                        }
-                    )
+            # for role_index, role in enumerate(annotation["roles"]):
+            #     if (
+            #         role == "B-V"
+            #         or role == "I-V"
+            #         or role.startswith("I-")
+            #         or role == "_"
+            #     ):
+            #         continue
+            #     role = role[2:]
+            #     role_text = predicate["roleset"].get(role, role)
+            #     if role in argm_definitions:
+            #         role_text = argm_definitions[role]
+            #         positive_ctxs.append(
+            #             {
+            #                 "title": role,
+            #                 "text": role_text.strip() + ".",
+            #                 "passage_id": f"{sentence_id}_{predicate_index}_{role_index}",
+            #             }
+            #         )
         if len(positive_ctxs) == 0:
             continue
         dpr.append(

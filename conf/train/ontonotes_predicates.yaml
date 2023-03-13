@@ -45,8 +45,8 @@ model_checkpoint_callback:
 prediction_callbacks:
   - _target_: callbacks.custom_callbacks.GoldenRetrieverPredictionCallback
     k: ${train.top_k}
-    batch_size: 64
-    use_faiss: True
+    batch_size: 128
+    use_faiss: False
     other_callbacks:
       - _target_: callbacks.custom_callbacks.TopKEvaluationCallback
         k: ${train.top_k}
@@ -55,7 +55,7 @@ prediction_callbacks:
     metric_to_monitor: val_recall@${train.top_k}
     threshold: 0.90
     max_negatives: 5
-    batch_size: 64
+    batch_size: 128
     stages: [val]
     dataset:
       _target_: data.datasets.DPRDataset

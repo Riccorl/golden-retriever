@@ -234,6 +234,9 @@ class DPRDataset(BaseDataset):
                 load_from_cache_file=True,
                 num_proc=psutil.cpu_count(),
             )
+            # add id if not present
+            if "id" not in data.column_names:
+                data = data.add_column("id", range(len(data)))
             end = time.time()
             logger.log(
                 f"Pre-processing [bold cyan]{self.name}[/bold cyan] "
@@ -398,8 +401,7 @@ class DPRDataset(BaseDataset):
             "labels": augmented_labels if augmented_labels is not None else labels,
             "positives": positives,
         }
-        if "id" in batch[0]:
-            model_inputs["ids"] = [sample["id"] for sample in batch]
+        model_inputs["id"] = [sample["id"] for sample in batch]
         return ModelInputs(model_inputs)
 
     def save_data(self, path: Union[str, os.PathLike]) -> None:

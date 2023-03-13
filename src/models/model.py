@@ -12,8 +12,7 @@ from utils.logging import get_console_logger
 from utils.model_inputs import ModelInputs
 
 from optimum.onnxruntime import ORTModelForFeatureExtraction, ORTQuantizer, ORTOptimizer
-from optimum.onnxruntime.configuration import AutoOptimizationConfig
-from optimum.bettertransformer import BetterTransformer
+from optimum.onnxruntime.configuration import AutoOptimizationConfig, AutoQuantizationConfig
 
 from tqdm.auto import tqdm
 
@@ -232,7 +231,7 @@ class GoldenRetriever(torch.nn.Module):
         # Create empty lists to store the context embeddings and context index
         context_embeddings: List[torch.Tensor] = []
         # Iterate through each batch in the dataloader
-        for batch in tqdm(dataloader):
+        for batch in tqdm(dataloader, desc="Indexing"):
             # Move the batch to the device
             batch = batch.to(next(self.parameters()).device)
             # Compute the context embeddings
@@ -248,11 +247,7 @@ class GoldenRetriever(torch.nn.Module):
         # reverse the context index
         self._reverse_context_index = {v: k for k, v in self._context_index.items()}
         if use_faiss and self.faiss_indexer is None:
-            self.faiss_indexer = FaissIndexer(
-                self._context_embeddings,
-                normalize=True,
-                use_gpu=use_gpu,
-            )
+            self.faiss_indexer = FaissIndexer(self._context_embeddings, use_gpu=use_gpu)
 
     def retrieve(
         self,
@@ -301,7 +296,7 @@ class GoldenRetriever(torch.nn.Module):
                 similarity, k=min(k, similarity.shape[-1]), dim=1
             ).indices
         # get int values
-        top_k: List[List[int]] = top_k.cpu().numpy().tolist()
+        top_k: List[List[int]] = top_k.cpu().tolist()
         # Retrieve the contexts corresponding to the indices
         contexts = [[self._context_index[i] for i in indices] for indices in top_k]
         return contexts, top_k
@@ -369,14 +364,14 @@ class GoldenRetriever(torch.nn.Module):
         temp_dir = tempfile.mkdtemp()
         encoder.language_model.save_pretrained(temp_dir)
         ort_model = ORTModelForFeatureExtraction.from_pretrained(
-            temp_dir, export=True, provider=provider, use_io_binding=False
+            temp_dir, export=True, provider=provider, use_io_binding=True
         )
         optimizer = ORTOptimizer.from_pretrained(ort_model)
-        optimization_config = AutoOptimizationConfig.O4()
-        # quantizer = ORTQuantizer.from_pretrained(ort_model)
+        optimization_config = AutoOptimizationConfig.O4(optimization_level=99)
         optimizer.optimize(save_dir=temp_dir, optimization_config=optimization_config)
+        # quantizer = ORTQuantizer.from_pretrained(temp_dir)
         ort_model = ORTModelForFeatureExtraction.from_pretrained(
-            temp_dir, export=True, provider=provider, use_io_binding=False
+            temp_dir, export=True, provider=provider, use_io_binding=True
         )
         return SentenceEncoder(
             language_model=ort_model,

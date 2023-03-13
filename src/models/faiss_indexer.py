@@ -12,8 +12,8 @@ class FaissIndexer:
         self,
         embeddings: Union[torch.Tensor, numpy.ndarray],
         index: str = "Flat",
-        metric: int = faiss.METRIC_L2,
-        normalize: bool = True,
+        metric: int = faiss.METRIC_INNER_PRODUCT,
+        normalize: bool = False,
         use_gpu: bool = False,
     ) -> None:
         self.use_gpu = use_gpu
@@ -39,7 +39,7 @@ class FaissIndexer:
             embeddings = (
                 embeddings.cpu() if isinstance(embeddings, torch.Tensor) else embeddings
             )
-        self.index.train(embeddings)
+        # self.index.train(embeddings)
         self.index.add(embeddings)
         # faiss.extract_index_ivf(self.index.quantizer).nprobe = 123
 

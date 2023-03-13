@@ -7,6 +7,7 @@ from typing import Dict, List, Optional, Set, Union, Tuple
 import hydra
 import pytorch_lightning as pl
 import torch
+from tqdm import tqdm
 import transformers as tr
 from omegaconf import DictConfig
 from torch.utils.data import DataLoader, Dataset
@@ -90,6 +91,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                     return_tensors="pt",
                 )
             )
+            use_gpu = (pl_module.device.type == "cuda") if not self.use_faiss else False
             retriever.index(
                 contexts,
                 batch_size=self.batch_size,
@@ -97,7 +99,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                 collate_fn=collate_fn,
                 force_reindex=True,
                 use_faiss=self.use_faiss,
-                use_gpu=False,  # (pl_module.device.type == "cuda"),
+                use_gpu=use_gpu,  # (pl_module.device.type == "cuda"),
             )
 
             # now compute the question embeddings and compute the top-k accuracy
@@ -106,7 +108,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
             )
             predictions = []
             start = time.time()
-            for batch in dataloader:
+            for batch in tqdm(dataloader, desc="Retrieving contexts"):
                 batch = batch.to(pl_module.device)
                 # get the top-k indices
                 retrieved_contexts, retrieved_indices = retriever.retrieve(
@@ -128,6 +130,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                     # add the predictions to the list
                     predictions.append(
                         {
+                            "id": batch.id[sample_idx],
                             "gold": gold_contexts,
                             "predictions": retrieved_contexts[sample_idx],
                             "correct": [
@@ -321,7 +324,7 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
         )
 
         predictions = super().__call__(trainer, pl_module, stage, *args, **kwargs)
-        for dataloader_idx, samples in predictions.items():
+        for _, samples in predictions.items():
             # create a defaultdict of defaultdicts to store the augmented contexts
             augmented_negative_contexts = defaultdict(lambda: defaultdict(list))
             for sample in samples:
@@ -334,7 +337,7 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
                     if context_id not in gold_contexts
                 ][: self.max_negatives]
                 # add the wrong contexts to the dataset sample
-                sample_idx_in_dataset = sample["ids"]
+                sample_idx_in_dataset = sample["id"]
                 wrong_contexts_ids = trainer.datamodule.tokenizer(
                     wrong_contexts,
                     max_length=trainer.datamodule.train_dataset.max_context_length,
@@ -357,7 +360,7 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
                 augmented_negative_contexts[i]
                 for i in sorted(augmented_negative_contexts.keys())
             ]
-            trainer.datamodule.train_dataset.data[dataloader_idx].update_data(
+            trainer.datamodule.train_dataset.update_data(
                 "augmented_contexts", augmented_negative_contexts, overwrite=True
             )
 
