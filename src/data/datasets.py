@@ -257,7 +257,7 @@ class DPRDataset(BaseDataset):
 
     @property
     def contexts(self):
-        return self.context_manager.get_labels()
+        return list(self.context_manager.get_labels().keys())
 
     @staticmethod
     def process_sample(
@@ -452,7 +452,11 @@ class DPRDataset(BaseDataset):
             augmented_negative_contexts = [
                 sample["augmented_negative_contexts"] for sample in batch
             ]
-            contexts = [c + a for c, a in zip(contexts, augmented_negative_contexts)]
+            contexts = [
+                # remove the last len(a) contexts to add the augmented negative context
+                c[:-len(a)] + a
+                for c, a in zip(contexts, augmented_negative_contexts)
+            ]
 
         questions = self.convert_to_batch(questions)
         # first flat the list of lists of contexts
@@ -460,12 +464,12 @@ class DPRDataset(BaseDataset):
         # invert contexts from list of dict to dict of list
         contexts = self.convert_to_batch(contexts)
 
-        # actual positives
-        labels = torch.zeros(
-            questions["input_ids"].shape[0], contexts["input_ids"].shape[0]
-        )
         augmented_labels: Optional[torch.Tensor] = None
+        contexs_per_question: Optional[List[int]] = None
         if self.strategy == "in_batch_negatives":
+            labels = torch.zeros(
+                questions["input_ids"].shape[0], contexts["input_ids"].shape[0]
+            )
             positive_index_end = [sample["positive_index_end"] for sample in batch]
             last_start = 0
             for i, end in enumerate(positive_index_end):
@@ -490,6 +494,15 @@ class DPRDataset(BaseDataset):
                             if positive_ctx in p:
                                 augmented_labels[i, p_idx] = 1
         else:
+            contexs_per_question = [len(sample["context"]) for sample in batch]
+            labels = [[0] * c for c in contexs_per_question]
+            # pad the labels
+            labels = [
+                self.pad_sequence(l, max(contexs_per_question), value=-100)
+                for l in labels
+            ]
+            # convert to tensor
+            labels = torch.as_tensor(labels)
             # labels is a mask of positive contexts for each question base on positive_index_end
             # has shape num_questions x num_contexts
             positive_index_end = [sample["positive_index_end"] for sample in batch]
@@ -503,6 +516,8 @@ class DPRDataset(BaseDataset):
             "positives": positives,
             "id": [sample["id"] for sample in batch],
         }
+        if contexs_per_question is not None:
+            model_inputs["contexs_per_question"] = contexs_per_question
         return ModelInputs(model_inputs)
 
     def save_data(self, path: Union[str, os.PathLike]) -> None:

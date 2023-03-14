@@ -118,6 +118,7 @@ class GoldenRetriever(torch.nn.Module):
         labels: Optional[torch.Tensor] = None,
         question_encodings: Optional[torch.Tensor] = None,
         contexts_encodings: Optional[torch.Tensor] = None,
+        contexs_per_question: Optional[List[int]] = None,
         return_loss: bool = False,
         *args,
         **kwargs,
@@ -155,7 +156,18 @@ class GoldenRetriever(torch.nn.Module):
             question_encodings = self.question_encoder(**questions)
         if contexts_encodings is None:
             contexts_encodings = self.context_encoder(**contexts)
-        logits = torch.matmul(question_encodings, contexts_encodings.T)
+
+        if contexs_per_question is not None:
+            # multiply each question encoding with a contexs_per_question encodings
+            concatenated_contexts = torch.stack(
+                torch.split(contexts_encodings, contexs_per_question)
+            ).transpose(1, 2)
+            logits = torch.bmm(
+                question_encodings.unsqueeze(1), concatenated_contexts
+            # ).view(contexts_encodings.shape[0], -1)
+            ).squeeze(1)
+        else:
+            logits = torch.matmul(question_encodings, contexts_encodings.T)
 
         output = {"logits": logits}
 
