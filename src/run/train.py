@@ -12,10 +12,6 @@ from pytorch_lightning.callbacks import (
     ModelCheckpoint,
     LearningRateMonitor,
 )
-from pytorch_lightning.callbacks.progress.rich_progress import (
-    RichProgressBar,
-    RichProgressBarTheme,
-)
 from pytorch_lightning.loggers import WandbLogger
 from rich.pretty import pprint
 

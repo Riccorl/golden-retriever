@@ -1,16 +1,16 @@
+import time
 from collections import defaultdict
 from functools import partial
 from pathlib import Path
-import time
 from typing import Dict, List, Optional, Set, Union, Tuple
 
 import hydra
 import pytorch_lightning as pl
 import torch
-from tqdm import tqdm
 import transformers as tr
 from omegaconf import DictConfig
 from torch.utils.data import DataLoader, Dataset
+from tqdm import tqdm
 
 from callbacks.base import NLPTemplateCallback, PredictionCallback, Stage
 from data.datasets import BaseDataset, DPRDataset

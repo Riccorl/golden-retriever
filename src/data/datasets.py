@@ -1,11 +1,11 @@
 import json
 import os
-import numpy as np
 import time
 from functools import partial
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Sequence, Tuple, Union, Optional
 
+import numpy as np
 import psutil
 import torch
 import transformers as tr
@@ -131,7 +131,7 @@ class DPRDataset(BaseDataset):
         in_batch_positives_augmentation: bool = True,
         tokenizer: Optional[Union[str, tr.PreTrainedTokenizer]] = None,
         contexts_path: Union[str, os.PathLike] = None,
-        mode: str = "fixed_contexts",
+        strategy: str = "fixed_contexts",
         **kwargs,
     ):
         super().__init__(name, path, **kwargs)
@@ -143,13 +143,15 @@ class DPRDataset(BaseDataset):
         self.max_context_length = max_context_length
         self.shuffle_negative_contexts = shuffle_negative_contexts
         self.in_batch_positives_augmentation = in_batch_positives_augmentation
-        self.mode = mode
+        self.strategy = strategy
 
         self.context_manager = Labels()
         # read contexts from file if provided
         if contexts_path:
             with open(self.project_folder / contexts_path, "r") as f:
-                self.context_manager.add_labels([line.strip() for line in f.readlines()])
+                self.context_manager.add_labels(
+                    [line.strip() for line in f.readlines()]
+                )
 
         self.tokenizer = tokenizer
         if self.tokenizer is None:
@@ -231,7 +233,7 @@ class DPRDataset(BaseDataset):
                     max_negatives=self.max_negatives,
                     max_hard_negatives=self.max_hard_negatives,
                     context_manager=self.context_manager,
-                    mode=self.mode,
+                    strategy=self.strategy,
                 ),
                 remove_columns=[
                     "answers",
@@ -268,7 +270,7 @@ class DPRDataset(BaseDataset):
         max_question_length: int = 256,
         max_context_length: int = 128,
         context_manager: Labels = None,
-        mode: str = "fixed_contexts",
+        strategy: str = "fixed_contexts",
     ) -> Dict:
         positive_ctxs = [p["text"] for p in sample["positive_ctxs"]]
         if max_positives != -1:
@@ -280,8 +282,10 @@ class DPRDataset(BaseDataset):
         if max_hard_negatives != -1:
             hard_negative_ctxs = hard_negative_ctxs[:max_hard_negatives]
 
-        if mode == "fixed_contexts":
-            positive_indices = [context_manager.get_index_from_label(p) for p in positive_ctxs]
+        if strategy == "fixed_contexts":
+            positive_indices = [
+                context_manager.get_index_from_label(p) for p in positive_ctxs
+            ]
             number_of_positives = len(positive_ctxs)
             actual_number_of_contexts = (
                 number_of_positives + len(negative_ctxs) + len(hard_negative_ctxs)
@@ -338,7 +342,20 @@ class DPRDataset(BaseDataset):
         exclude: List[int] = None,
     ) -> np.array:
         """
-        
+        Fast sampling of `sample_size` elements from `num_elements` elements.
+        The sampling is done by randomly shifting the probabilities and then
+        finding the smallest of the negative numbers. This is much faster than
+        sampling from a multinomial distribution.
+
+        Args:
+            num_elements (`int`): number of elements to sample from
+            sample_size (`int`): number of elements to sample
+            num_samples (`int`, optional): number of samples to draw. Defaults to 1.
+            probabilities (`np.array`, optional): probabilities of each element. Defaults to None.
+            exclude (`List[int]`, optional): indices of elements to exclude. Defaults to None.
+
+        Returns:
+            `np.array`: array of sampled indices
         """
         if probabilities is None:
             # probabilities should sum to 1
@@ -356,9 +373,10 @@ class DPRDataset(BaseDataset):
         random_shifts /= random_shifts.sum(axis=1)[:, np.newaxis]
         # shift by numbers & find largest (by finding the smallest of the negative)
         shifted_probabilities = random_shifts - replicated_probabilities
-        return np.argpartition(shifted_probabilities, sample_size, axis=1)[
+        sampled_indices = np.argpartition(shifted_probabilities, sample_size, axis=1)[
             :, :sample_size
         ]
+        return sampled_indices
 
     @staticmethod
     def pad_sequence(
@@ -447,7 +465,7 @@ class DPRDataset(BaseDataset):
             questions["input_ids"].shape[0], contexts["input_ids"].shape[0]
         )
         augmented_labels: Optional[torch.Tensor] = None
-        if self.mode == "in_batch_negatives":
+        if self.strategy == "in_batch_negatives":
             positive_index_end = [sample["positive_index_end"] for sample in batch]
             last_start = 0
             for i, end in enumerate(positive_index_end):

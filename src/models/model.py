@@ -4,21 +4,18 @@ from typing import Callable, Dict, List, Optional, Tuple, Union
 import torch
 import torch.nn.functional as F
 import transformers as tr
+from optimum.onnxruntime import ORTModelForFeatureExtraction, ORTOptimizer
+from optimum.onnxruntime.configuration import (
+    AutoOptimizationConfig,
+)
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 from data.datasets import BaseDataset
 from data.labels import Labels
 from models.faiss_indexer import FaissIndexer
 from utils.logging import get_console_logger
 from utils.model_inputs import ModelInputs
-
-from optimum.onnxruntime import ORTModelForFeatureExtraction, ORTQuantizer, ORTOptimizer
-from optimum.onnxruntime.configuration import (
-    AutoOptimizationConfig,
-    AutoQuantizationConfig,
-)
-
-from tqdm import tqdm
 
 logger = get_console_logger()
 

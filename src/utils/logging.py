@@ -3,7 +3,6 @@ import sys
 import threading
 from typing import Optional
 
-from rich.console import Console
 from rich import get_console
 
 _lock = threading.Lock()
