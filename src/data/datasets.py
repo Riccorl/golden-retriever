@@ -1,5 +1,6 @@
 import json
 import os
+import numpy as np
 import time
 from functools import partial
 from pathlib import Path
@@ -11,6 +12,7 @@ import transformers as tr
 from datasets import load_dataset
 from torch.utils.data import Dataset, IterableDataset
 
+from data.labels import Labels
 from utils.logging import get_console_logger
 from utils.model_inputs import ModelInputs
 
@@ -119,7 +121,7 @@ class DPRDataset(BaseDataset):
         path: Union[str, os.PathLike, List[str], List[os.PathLike]],
         shuffle: bool = False,
         pre_process: bool = True,
-        split_contexts: bool = False,
+        max_contexts: int = 64,
         max_positives: int = -1,
         max_negatives: int = 0,
         max_hard_negatives: int = 0,
@@ -129,10 +131,11 @@ class DPRDataset(BaseDataset):
         in_batch_positives_augmentation: bool = True,
         tokenizer: Optional[Union[str, tr.PreTrainedTokenizer]] = None,
         contexts_path: Union[str, os.PathLike] = None,
+        mode: str = "fixed_contexts",
         **kwargs,
     ):
         super().__init__(name, path, **kwargs)
-        self.split_contexts = split_contexts
+        self.max_contexts = max_contexts
         self.max_positives = max_positives
         self.max_negatives = max_negatives
         self.max_hard_negatives = max_hard_negatives
@@ -140,11 +143,13 @@ class DPRDataset(BaseDataset):
         self.max_context_length = max_context_length
         self.shuffle_negative_contexts = shuffle_negative_contexts
         self.in_batch_positives_augmentation = in_batch_positives_augmentation
-        self.contexts: Optional[List[str]] = None
+        self.mode = mode
+
+        self.context_manager = Labels()
         # read contexts from file if provided
         if contexts_path:
             with open(self.project_folder / contexts_path, "r") as f:
-                self.contexts = [line.strip() for line in f.readlines()]
+                self.context_manager.add_labels([line.strip() for line in f.readlines()])
 
         self.tokenizer = tokenizer
         if self.tokenizer is None:
@@ -186,9 +191,6 @@ class DPRDataset(BaseDataset):
         *args,
         **kwargs,
     ) -> Any:
-        # the actual data will be here
-        data = []
-
         if isinstance(paths, Sequence):
             paths = [self.project_folder / path for path in paths]
         else:
@@ -224,9 +226,12 @@ class DPRDataset(BaseDataset):
                 partial(
                     DPRDataset.process_sample,
                     tokenizer=tokenizer,
+                    max_contexts=self.max_contexts,
                     max_positives=self.max_positives,
                     max_negatives=self.max_negatives,
                     max_hard_negatives=self.max_hard_negatives,
+                    context_manager=self.context_manager,
+                    mode=self.mode,
                 ),
                 remove_columns=[
                     "answers",
@@ -248,6 +253,10 @@ class DPRDataset(BaseDataset):
             )
         return data
 
+    @property
+    def contexts(self):
+        return self.context_manager.get_labels()
+
     @staticmethod
     def process_sample(
         sample: Dict,
@@ -255,30 +264,62 @@ class DPRDataset(BaseDataset):
         max_positives: int,
         max_negatives: int,
         max_hard_negatives: int,
+        max_contexts: int = -1,
         max_question_length: int = 256,
         max_context_length: int = 128,
+        context_manager: Labels = None,
+        mode: str = "fixed_contexts",
     ) -> Dict:
-        question = tokenizer(
-            sample["question"].strip(), max_length=max_question_length, truncation=True
-        )
-        positive_ctxs = [
-            tokenizer(p["text"].strip(), max_length=max_context_length, truncation=True)
-            for p in sample["positive_ctxs"]
-        ]
+        positive_ctxs = [p["text"] for p in sample["positive_ctxs"]]
         if max_positives != -1:
             positive_ctxs = positive_ctxs[:max_positives]
-        negative_ctxs = [
-            tokenizer(n["text"].strip(), max_length=max_context_length, truncation=True)
-            for n in sample["negative_ctxs"]
-        ]
+        negative_ctxs = [n["text"] for n in sample["negative_ctxs"]]
         if max_negatives != -1:
             negative_ctxs = negative_ctxs[:max_negatives]
-        hard_negative_ctxs = [
-            tokenizer(h["text"].strip(), max_length=max_context_length, truncation=True)
-            for h in sample["hard_negative_ctxs"]
-        ]
+        hard_negative_ctxs = [h["text"] for h in sample["hard_negative_ctxs"]]
         if max_hard_negatives != -1:
             hard_negative_ctxs = hard_negative_ctxs[:max_hard_negatives]
+
+        if mode == "fixed_contexts":
+            positive_indices = [context_manager.get_index_from_label(p) for p in positive_ctxs]
+            number_of_positives = len(positive_ctxs)
+            actual_number_of_contexts = (
+                number_of_positives + len(negative_ctxs) + len(hard_negative_ctxs)
+            )
+            if max_contexts != -1:
+                if actual_number_of_contexts < max_contexts:
+                    remaining_contexts = max_contexts - actual_number_of_contexts
+
+                    sampled = DPRDataset.fast_sampling(
+                        context_manager.get_label_size(),
+                        remaining_contexts,
+                        exclude=positive_indices,
+                    )
+
+                    negative_ctxs += [
+                        context_manager.get_label_from_index(s) for s in sampled[0]
+                    ]
+
+                else:
+                    # TODO: limit the number of contexts to max_contexts (shouldn't happen)
+                    pass
+
+        question = tokenizer(
+            sample["question"], max_length=max_question_length, truncation=True
+        )
+        positive_ctxs = [
+            tokenizer(p, max_length=max_context_length, truncation=True)
+            for p in positive_ctxs
+        ]
+        negative_ctxs = [
+            tokenizer(n, max_length=max_context_length, truncation=True)
+            for n in negative_ctxs
+        ]
+        hard_negative_ctxs = [
+            tokenizer(h, max_length=max_context_length, truncation=True)
+            for h in hard_negative_ctxs
+        ]
+
         context = positive_ctxs + negative_ctxs + hard_negative_ctxs
         output = {
             "question": question,
@@ -287,6 +328,37 @@ class DPRDataset(BaseDataset):
             "positive_index_end": len(positive_ctxs),
         }
         return output
+
+    @staticmethod
+    def fast_sampling(
+        num_elements: int,
+        sample_size: int,
+        num_samples: int = 1,
+        probabilities: np.array = None,
+        exclude: List[int] = None,
+    ) -> np.array:
+        """
+        
+        """
+        if probabilities is None:
+            # probabilities should sum to 1
+            probabilities = np.random.random(num_elements)
+            probabilities /= np.sum(probabilities)
+
+        if exclude is not None:
+            probabilities[exclude] = 0
+            probabilities /= np.sum(probabilities)
+
+        # replicate probabilities as many times as `num_samples`
+        replicated_probabilities = np.tile(probabilities, (num_samples, 1))
+        # get random shifting numbers & scale them correctly
+        random_shifts = np.random.random(replicated_probabilities.shape)
+        random_shifts /= random_shifts.sum(axis=1)[:, np.newaxis]
+        # shift by numbers & find largest (by finding the smallest of the negative)
+        shifted_probabilities = random_shifts - replicated_probabilities
+        return np.argpartition(shifted_probabilities, sample_size, axis=1)[
+            :, :sample_size
+        ]
 
     @staticmethod
     def pad_sequence(
@@ -365,7 +437,7 @@ class DPRDataset(BaseDataset):
             contexts = [c + a for c, a in zip(contexts, augmented_negative_contexts)]
 
         questions = self.convert_to_batch(questions)
-        # first flat the list of list of contexts
+        # first flat the list of lists of contexts
         contexts = [c for ctxs in contexts for c in ctxs]
         # invert contexts from list of dict to dict of list
         contexts = self.convert_to_batch(contexts)
@@ -374,38 +446,45 @@ class DPRDataset(BaseDataset):
         labels = torch.zeros(
             questions["input_ids"].shape[0], contexts["input_ids"].shape[0]
         )
-        positive_index_end = [sample["positive_index_end"] for sample in batch]
-        last_start = 0
-        for i, end in enumerate(positive_index_end):
-            start = 0 if i == 0 else last_start + len(batch[i - 1]["context"])
-            end = end if i == 0 else start + end
-            labels[i, start:end] = 1
-            last_start = start
+        augmented_labels: Optional[torch.Tensor] = None
+        if self.mode == "in_batch_negatives":
+            positive_index_end = [sample["positive_index_end"] for sample in batch]
+            last_start = 0
+            for i, end in enumerate(positive_index_end):
+                start = 0 if i == 0 else last_start + len(batch[i - 1]["context"])
+                end = end if i == 0 else start + end
+                labels[i, start:end] = 1
+                last_start = start
 
-        augmented_labels = None
-        if self.in_batch_positives_augmentation:
-            # labels is a mask of positive contexts for each question
+            if self.in_batch_positives_augmentation:
+                # labels is a mask of positive contexts for each question
+                # has shape num_questions x num_contexts
+                augmented_labels = torch.zeros(
+                    questions["input_ids"].shape[0], contexts["input_ids"].shape[0]
+                )
+                flat_positives = [s for sample in batch for s in sample["positives"]]
+                # labels includes as positive also the labels that appear in the
+                # other samples but are positive for the considered one (avoid false
+                # negative context)
+                for p_idx, p in enumerate(flat_positives):
+                    for i, positive in enumerate(positives):
+                        for positive_ctx in positive:
+                            if positive_ctx in p:
+                                augmented_labels[i, p_idx] = 1
+        else:
+            # labels is a mask of positive contexts for each question base on positive_index_end
             # has shape num_questions x num_contexts
-            augmented_labels = torch.zeros(
-                questions["input_ids"].shape[0], contexts["input_ids"].shape[0]
-            )
-            flat_positives = [s for sample in batch for s in sample["positives"]]
-            # labels includes as positive also the labels that appear in the
-            # other samples but are positive for the considered one (avoid false
-            # negative context)
-            for p_idx, p in enumerate(flat_positives):
-                for i, positive in enumerate(positives):
-                    for positive_ctx in positive:
-                        if positive_ctx in p:
-                            augmented_labels[i, p_idx] = 1
+            positive_index_end = [sample["positive_index_end"] for sample in batch]
+            for i, end in enumerate(positive_index_end):
+                labels[i, :end] = 1
 
         model_inputs = {
             "questions": ModelInputs(questions),
             "contexts": ModelInputs(contexts),
             "labels": augmented_labels if augmented_labels is not None else labels,
             "positives": positives,
+            "id": [sample["id"] for sample in batch],
         }
-        model_inputs["id"] = [sample["id"] for sample in batch]
         return ModelInputs(model_inputs)
 
     def save_data(self, path: Union[str, os.PathLike]) -> None:
@@ -436,10 +515,12 @@ class DPRDataset(BaseDataset):
         Update the data with the given column.
 
         Args:
-            name (:obj:`str`):
+            names (:obj:`str` or :obj:`List[str]`):
                 Name of the column to update.
-            column (:obj:`List[Any]`):
+            columns (:obj:`List[Any]` or :obj:`List[List[Any]]`):
                 List of values to update.
+            overwrite (:obj:`bool`, `optional`, defaults to :obj:`False`):
+                Whether to overwrite the column if it already exists.
         """
         # TODO: augment data if overwrite is False and the column already exists
         if isinstance(names, str):
@@ -457,7 +538,8 @@ class DPRDataset(BaseDataset):
             if name in self.data.column_names:
                 if not overwrite:
                     raise ValueError(
-                        "The dataset already contains a column named `name`, you can force the update by setting `overwrite=True`."
+                        "The dataset already contains a column named `name`, you can force the update by "
+                        "setting `overwrite=True`."
                     )
                 self.data = self.data.remove_columns(name)
             self.data = self.data.add_column(name=name, column=column)

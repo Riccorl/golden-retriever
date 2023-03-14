@@ -13,7 +13,10 @@ from utils.logging import get_console_logger
 from utils.model_inputs import ModelInputs
 
 from optimum.onnxruntime import ORTModelForFeatureExtraction, ORTQuantizer, ORTOptimizer
-from optimum.onnxruntime.configuration import AutoOptimizationConfig, AutoQuantizationConfig
+from optimum.onnxruntime.configuration import (
+    AutoOptimizationConfig,
+    AutoQuantizationConfig,
+)
 
 from tqdm import tqdm
 

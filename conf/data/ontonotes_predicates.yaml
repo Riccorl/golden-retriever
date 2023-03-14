@@ -7,14 +7,13 @@ datamodule:
     train:
       _target_: data.datasets.DPRDataset
       name: 'train'
-      split_contexts: True
+      contexts_path: ${data.contexts_path}
       path:
         - 'data/dpr-like/srl/ontonotes/ontonotes.train.predicates.json'
 
     val:
       - _target_: data.datasets.DPRDataset
         name: 'val'
-        split_contexts: True
         contexts_path: ${data.contexts_path}
         path:
           - 'data/dpr-like/srl/ontonotes/ontonotes.dev.predicates.json'
@@ -22,15 +21,14 @@ datamodule:
     test:
       - _target_: data.datasets.DPRDataset
         name: 'test'
-        split_contexts: True
         contexts_path: ${data.contexts_path}
         path:
           - 'data/dpr-like/srl/ontonotes/ontonotes.test.predicates.json'
 
   batch_sizes:
-    train: 64
-    val: 64
-    test: 64
+    train: 8
+    val: 8
+    test: 8
 
   num_workers:
     train: 4

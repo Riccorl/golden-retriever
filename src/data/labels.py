@@ -77,7 +77,9 @@ class Labels:
         return self._index_to_labels[namespace][index]
 
     def add_labels(
-        self, labels: Union[str, List[str], Set[str], Dict[str, int]], namespace: str
+        self,
+        labels: Union[str, List[str], Set[str], Dict[str, int]],
+        namespace: str = "labels",
     ) -> List[int]:
         """
         Adds the labels in input in the label dictionary.
