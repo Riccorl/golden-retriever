@@ -11,6 +11,7 @@ datamodule:
     train:
       _target_: data.datasets.DPRDataset
       name: 'train'
+      contexts_path: ${data.contexts_path}
       frequency_noise: True
       path:
         - 'data/aida_dpr_normalized/train.json'
