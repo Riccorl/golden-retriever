@@ -8,6 +8,7 @@ datamodule:
       _target_: data.datasets.DPRDataset
       name: 'train'
       contexts_path: ${data.contexts_path}
+      frequency_noise: True
       path:
         - 'data/dpr-like/srl/ontonotes/ontonotes.train.predicates.json'
 
@@ -27,8 +28,8 @@ datamodule:
 
   batch_sizes:
     train: 16
-    val: 16
-    test: 16
+    val: 32
+    test: 32
 
   num_workers:
     train: 4

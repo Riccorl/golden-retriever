@@ -128,6 +128,7 @@ class DPRDataset(BaseDataset):
         max_question_length: int = 256,
         max_context_length: int = 128,
         shuffle_negative_contexts: bool = False,
+        frequency_noise: bool = False,
         in_batch_positives_augmentation: bool = True,
         tokenizer: Optional[Union[str, tr.PreTrainedTokenizer]] = None,
         contexts_path: Union[str, os.PathLike] = None,
@@ -142,6 +143,7 @@ class DPRDataset(BaseDataset):
         self.max_question_length = max_question_length
         self.max_context_length = max_context_length
         self.shuffle_negative_contexts = shuffle_negative_contexts
+        self.frequency_noise = frequency_noise
         self.in_batch_positives_augmentation = in_batch_positives_augmentation
         self.strategy = strategy
 
@@ -235,12 +237,12 @@ class DPRDataset(BaseDataset):
                     context_manager=self.context_manager,
                     strategy=self.strategy,
                 ),
-                remove_columns=[
-                    "answers",
-                    "positive_ctxs",
-                    "negative_ctxs",
-                    "hard_negative_ctxs",
-                ],
+                # remove_columns=[
+                #     "answers",
+                #     "positive_ctxs",
+                #     "negative_ctxs",
+                #     "hard_negative_ctxs",
+                # ],
                 keep_in_memory=True,
                 load_from_cache_file=True,
                 num_proc=psutil.cpu_count(),
@@ -253,11 +255,161 @@ class DPRDataset(BaseDataset):
                 f"Pre-processing [bold cyan]{self.name}[/bold cyan] "
                 f"data took [bold]{end - start:.2f}[/bold] seconds"
             )
+            if self.frequency_noise:
+                context_frequncies = self.compute_contexts_frequency(
+                    data, self.context_manager
+                )
+            else:
+                context_frequncies = None
+            # update the samples with the sampled negatives
+            data = data.map(
+                partial(
+                    DPRDataset.add_sampled_negatives,
+                    tokenizer=tokenizer,
+                    context_manager=self.context_manager,
+                    frequencies=context_frequncies,
+                    max_negatives=self.max_negatives,
+                    max_contexts=self.max_contexts,
+                ),
+                remove_columns=[
+                    "answers",
+                    "positive_ctxs",
+                    "negative_ctxs",
+                    "hard_negative_ctxs",
+                ],
+                keep_in_memory=True,
+                num_proc=psutil.cpu_count(),
+            )
+
         return data
+
+    @staticmethod
+    def add_sampled_negatives(
+        sample: Dict[str, Any],
+        tokenizer: tr.PreTrainedTokenizer,
+        context_manager: Labels,
+        frequencies: List[int] = None,
+        max_negatives: int = -1,
+        max_contexts: int = -1,
+        max_context_length: int = 128,
+    ):
+        """
+        Sample negatives and add them to the sample.
+        """
+        positives_contexts_ids = sample["positive_ctxs"]
+        negative_contexts_ids = sample["negative_ctxs"]
+        hard_negative_contexts_ids = sample["hard_negative_ctxs"]
+
+        positives = sample["positives"]
+        positive_indices = [context_manager.get_index_from_label(p) for p in positives]
+
+        actual_number_of_contexts = (
+            len(positives_contexts_ids)
+            + len(negative_contexts_ids)
+            + len(hard_negative_contexts_ids)
+        )
+
+        sampled_negative_contexts = []
+        if max_contexts != -1:
+            if actual_number_of_contexts < max_contexts:
+                remaining_contexts = max_contexts - actual_number_of_contexts
+
+                sampled = DPRDataset.fast_sampling(
+                    context_manager.get_label_size(),
+                    remaining_contexts,
+                    probabilities=frequencies,
+                    exclude=positive_indices,
+                )
+
+                sampled_negative_contexts += [
+                    context_manager.get_label_from_index(s) for s in sampled[0]
+                ]
+            else:
+                # TODO: limit the number of contexts
+                pass
+
+        sampled_negative_ids = [
+            tokenizer(n, max_length=max_context_length, truncation=True)
+            for n in sampled_negative_contexts
+        ]
+        negative_contexts_ids += sampled_negative_ids
+        context = (
+            positives_contexts_ids + negative_contexts_ids + hard_negative_contexts_ids
+        )
+        sample["context"] = context
+        return sample
 
     @property
     def contexts(self):
         return list(self.context_manager.get_labels().keys())
+
+    @staticmethod
+    def compute_contexts_frequency(data, context_manager) -> np.array:
+        """
+        Compute the frequency of each context in the dataset.
+        """
+        if context_manager is None:
+            raise ValueError(
+                "Context manager is required to compute the frequency of contexts"
+            )
+        frequency = np.zeros(context_manager.get_label_size())
+        for sample in data:
+            for context in sample["positives"]:
+                contex_index = context_manager.get_index_from_label(context)
+                frequency[contex_index] += 1
+        # normalize the frequency
+        frequency = frequency / frequency.sum()
+        return frequency
+
+    @staticmethod
+    def fast_sampling(
+        num_elements: int,
+        sample_size: int,
+        num_samples: int = 1,
+        probabilities: np.array = None,
+        exclude: List[int] = None,
+    ) -> np.array:
+        """
+        Fast sampling of `sample_size` elements from `num_elements` elements.
+        The sampling is done by randomly shifting the probabilities and then
+        finding the smallest of the negative numbers. This is much faster than
+        sampling from a multinomial distribution.
+
+        Args:
+            num_elements (`int`):
+                number of elements to sample from
+            sample_size (`int`):
+                number of elements to sample
+            num_samples (`int`, optional):
+                number of samples to draw. Defaults to 1.
+            probabilities (`np.array`, optional):
+                probabilities of each element. Defaults to None.
+            exclude (`List[int]`, optional):
+                indices of elements to exclude. Defaults to None.
+
+        Returns:
+            `np.array`: array of sampled indices
+        """
+        if probabilities is None:
+            # probabilities should sum to 1
+            probabilities = np.random.random(num_elements)
+            probabilities /= np.sum(probabilities)
+
+        if exclude is not None:
+            probabilities[exclude] = 0
+            # probabilities /= np.sum(probabilities)
+
+        # replicate probabilities as many times as `num_samples`
+        replicated_probabilities = np.tile(probabilities, (num_samples, 1))
+        # get random shifting numbers & scale them correctly
+        random_shifts = np.random.random(replicated_probabilities.shape)
+        random_shifts /= random_shifts.sum(axis=1)[:, np.newaxis]
+        # shift by numbers & find largest (by finding the smallest of the negative)
+        shifted_probabilities = random_shifts - replicated_probabilities
+        sampled_indices = np.argpartition(shifted_probabilities, sample_size, axis=1)[
+            :, :sample_size
+        ]
+        return sampled_indices
 
     @staticmethod
     def process_sample(
@@ -282,32 +434,6 @@ class DPRDataset(BaseDataset):
         if max_hard_negatives != -1:
             hard_negative_ctxs = hard_negative_ctxs[:max_hard_negatives]
 
-        if strategy == "fixed_contexts":
-            positive_indices = [
-                context_manager.get_index_from_label(p) for p in positive_ctxs
-            ]
-            number_of_positives = len(positive_ctxs)
-            actual_number_of_contexts = (
-                number_of_positives + len(negative_ctxs) + len(hard_negative_ctxs)
-            )
-            if max_contexts != -1:
-                if actual_number_of_contexts < max_contexts:
-                    remaining_contexts = max_contexts - actual_number_of_contexts
-
-                    sampled = DPRDataset.fast_sampling(
-                        context_manager.get_label_size(),
-                        remaining_contexts,
-                        exclude=positive_indices,
-                    )
-
-                    negative_ctxs += [
-                        context_manager.get_label_from_index(s) for s in sampled[0]
-                    ]
-
-                else:
-                    # TODO: limit the number of contexts to max_contexts (shouldn't happen)
-                    pass
-
         question = tokenizer(
             sample["question"], max_length=max_question_length, truncation=True
         )
@@ -329,54 +455,12 @@ class DPRDataset(BaseDataset):
             "question": question,
             "context": context,
             "positives": set([p["text"] for p in sample["positive_ctxs"]]),
+            "positive_ctxs": positive_ctxs,
+            "negative_ctxs": negative_ctxs,
+            "hard_negative_ctxs": hard_negative_ctxs,
             "positive_index_end": len(positive_ctxs),
         }
         return output
-
-    @staticmethod
-    def fast_sampling(
-        num_elements: int,
-        sample_size: int,
-        num_samples: int = 1,
-        probabilities: np.array = None,
-        exclude: List[int] = None,
-    ) -> np.array:
-        """
-        Fast sampling of `sample_size` elements from `num_elements` elements.
-        The sampling is done by randomly shifting the probabilities and then
-        finding the smallest of the negative numbers. This is much faster than
-        sampling from a multinomial distribution.
-
-        Args:
-            num_elements (`int`): number of elements to sample from
-            sample_size (`int`): number of elements to sample
-            num_samples (`int`, optional): number of samples to draw. Defaults to 1.
-            probabilities (`np.array`, optional): probabilities of each element. Defaults to None.
-            exclude (`List[int]`, optional): indices of elements to exclude. Defaults to None.
-
-        Returns:
-            `np.array`: array of sampled indices
-        """
-        if probabilities is None:
-            # probabilities should sum to 1
-            probabilities = np.random.random(num_elements)
-            probabilities /= np.sum(probabilities)
-
-        if exclude is not None:
-            probabilities[exclude] = 0
-            probabilities /= np.sum(probabilities)
-
-        # replicate probabilities as many times as `num_samples`
-        replicated_probabilities = np.tile(probabilities, (num_samples, 1))
-        # get random shifting numbers & scale them correctly
-        random_shifts = np.random.random(replicated_probabilities.shape)
-        random_shifts /= random_shifts.sum(axis=1)[:, np.newaxis]
-        # shift by numbers & find largest (by finding the smallest of the negative)
-        shifted_probabilities = random_shifts - replicated_probabilities
-        sampled_indices = np.argpartition(shifted_probabilities, sample_size, axis=1)[
-            :, :sample_size
-        ]
-        return sampled_indices
 
     @staticmethod
     def pad_sequence(
@@ -442,7 +526,6 @@ class DPRDataset(BaseDataset):
                 )
         return samples
 
-    # @staticmethod
     def collate_fn(self, batch: Any, *args, **kwargs) -> Any:
         questions = [sample["question"] for sample in batch]
         contexts = [sample["context"] for sample in batch]
@@ -454,7 +537,7 @@ class DPRDataset(BaseDataset):
             ]
             contexts = [
                 # remove the last len(a) contexts to add the augmented negative context
-                c[:-len(a)] + a
+                c[: -len(a)] + a
                 for c, a in zip(contexts, augmented_negative_contexts)
             ]
 
@@ -465,7 +548,7 @@ class DPRDataset(BaseDataset):
         contexts = self.convert_to_batch(contexts)
 
         augmented_labels: Optional[torch.Tensor] = None
-        contexs_per_question: Optional[List[int]] = None
+        contexts_per_question: Optional[List[int]] = None
         if self.strategy == "in_batch_negatives":
             labels = torch.zeros(
                 questions["input_ids"].shape[0], contexts["input_ids"].shape[0]
@@ -494,11 +577,11 @@ class DPRDataset(BaseDataset):
                             if positive_ctx in p:
                                 augmented_labels[i, p_idx] = 1
         else:
-            contexs_per_question = [len(sample["context"]) for sample in batch]
-            labels = [[0] * c for c in contexs_per_question]
+            contexts_per_question = [len(sample["context"]) for sample in batch]
+            labels = [[0] * c for c in contexts_per_question]
             # pad the labels
             labels = [
-                self.pad_sequence(l, max(contexs_per_question), value=-100)
+                self.pad_sequence(l, max(contexts_per_question), value=-100)
                 for l in labels
             ]
             # convert to tensor
@@ -516,8 +599,8 @@ class DPRDataset(BaseDataset):
             "positives": positives,
             "id": [sample["id"] for sample in batch],
         }
-        if contexs_per_question is not None:
-            model_inputs["contexs_per_question"] = contexs_per_question
+        if contexts_per_question is not None:
+            model_inputs["contexts_per_question"] = contexts_per_question
         return ModelInputs(model_inputs)
 
     def save_data(self, path: Union[str, os.PathLike]) -> None:
@@ -536,7 +619,11 @@ class DPRDataset(BaseDataset):
         samples.pop("context")
 
         with open(path, "w") as f:
-            json.dump(samples, f)
+            for i in range(len(samples["question"])):
+                dump = {
+                    k: v[i] if isinstance(v, list) else v for k, v in samples.items()
+                }
+                json.dump(dump, f, indent=2)
 
     def update_data(
         self,

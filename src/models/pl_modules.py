@@ -4,6 +4,7 @@ import hydra
 import pytorch_lightning as pl
 import torch
 from omegaconf import DictConfig
+import transformers
 
 from data.labels import Labels
 from utils.model_inputs import ModelInputs
@@ -92,7 +93,19 @@ class GoldenRetrieverPLModule(pl.LightningModule):
         if "lr_scheduler" not in self.hparams or not self.hparams.lr_scheduler:
             return optimizer
 
-        lr_scheduler = hydra.utils.instantiate(
-            self.hparams.lr_scheduler, optimizer=optimizer
-        )
-        return [optimizer], [lr_scheduler]
+        lr_scheduler_config = {
+            "scheduler": hydra.utils.instantiate(
+                self.hparams.lr_scheduler, optimizer=optimizer
+            ),
+            "interval": "step",
+            "frequency": 1,
+        }
+        # {
+        #     "lr_scheduler": {
+        #         "scheduler": scheduler,
+        #         "interval": "step",
+        #         "frequency": 1,
+        #     },
+        # }
+        return [optimizer], [lr_scheduler_config]
+        # return {"optimizer": optimizer, "lr_scheduler": lr_scheduler_config}

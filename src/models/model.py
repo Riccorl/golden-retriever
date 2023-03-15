@@ -72,8 +72,8 @@ class SentenceEncoder(torch.nn.Module):
                 token_embeddings * input_mask_expanded, 1
             ) / torch.clamp(input_mask_expanded.sum(1), min=1e-9)
             # normalize
-            normalized = F.normalize(mean_pooling, p=2, dim=1)
-            return normalized
+            # return F.normalize(mean_pooling, p=2, dim=1)
+            return mean_pooling
         else:
             raise ValueError(
                 f"Pooling strategy {pooling_strategy} not supported, use 'cls' or 'mean'"
@@ -118,7 +118,7 @@ class GoldenRetriever(torch.nn.Module):
         labels: Optional[torch.Tensor] = None,
         question_encodings: Optional[torch.Tensor] = None,
         contexts_encodings: Optional[torch.Tensor] = None,
-        contexs_per_question: Optional[List[int]] = None,
+        contexts_per_question: Optional[List[int]] = None,
         return_loss: bool = False,
         *args,
         **kwargs,
@@ -157,16 +157,23 @@ class GoldenRetriever(torch.nn.Module):
         if contexts_encodings is None:
             contexts_encodings = self.context_encoder(**contexts)
 
-        if contexs_per_question is not None:
+        if contexts_per_question is not None:
             # multiply each question encoding with a contexs_per_question encodings
             concatenated_contexts = torch.stack(
-                torch.split(contexts_encodings, contexs_per_question)
+                torch.split(contexts_encodings, contexts_per_question)
             ).transpose(1, 2)
+            if isinstance(self.loss_type, torch.nn.BCEWithLogitsLoss):
+                # normalize the encodings for cosine similarity
+                concatenated_contexts = F.normalize(concatenated_contexts, p=2, dim=2)
+                question_encodings = F.normalize(question_encodings, p=2, dim=1)
             logits = torch.bmm(
                 question_encodings.unsqueeze(1), concatenated_contexts
-            # ).view(contexts_encodings.shape[0], -1)
-            ).squeeze(1)
+            ).view(question_encodings.shape[0], -1)
         else:
+            if isinstance(self.loss_type, torch.nn.BCEWithLogitsLoss):
+                # normalize the encodings for cosine similarity
+                question_encodings = F.normalize(question_encodings, p=2, dim=1)
+                contexts_encodings = F.normalize(contexts_encodings, p=2, dim=1)
             logits = torch.matmul(question_encodings, contexts_encodings.T)
 
         output = {"logits": logits}

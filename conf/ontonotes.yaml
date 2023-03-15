@@ -12,7 +12,7 @@ defaults:
   - model: golden_retriever
   - loss: nce_loss
   - optimizer: radam
-  - scheduler: null
+  - scheduler: none
   - data: default_data
   - evaluation: default_evaluation
   - logging: wandb_logging

@@ -15,7 +15,9 @@ class MultiLabelNCELoss(_WeightedLoss):
     ) -> None:
         super(MultiLabelNCELoss, self).__init__(weight, size_average, None, reduction)
 
-    def forward(self, input: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, input: torch.Tensor, target: torch.Tensor, ignore_index: int = -100
+    ) -> torch.Tensor:
         gold_scores = input.masked_fill(~(target.bool()), 0)
         gold_scores_sum = gold_scores.sum(-1)  # B x C
         neg_logits = input.masked_fill(target.bool(), float("-inf"))  # B x C x L

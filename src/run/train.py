@@ -80,6 +80,7 @@ def train(conf: omegaconf.DictConfig) -> None:
             "max_steps" in conf.train.pl_trainer and conf.train.pl_trainer.max_steps > 0
         ):
             num_training_steps = conf.train.pl_trainer.max_steps
+            conf.train.pl_trainer.max_epochs = None
         else:
             raise ValueError(
                 "Either `max_epochs` or `max_steps` should be specified in the trainer configuration"
@@ -88,7 +89,7 @@ def train(conf: omegaconf.DictConfig) -> None:
 
         if "lr_scheduler" in conf.model.pl_module and conf.model.pl_module.lr_scheduler:
             conf.model.pl_module.lr_scheduler.num_training_steps = num_training_steps
-            # set the number of warmup steps as 10% of the total number of training steps
+            # set the number of warmup steps as x% of the total number of training steps
             if conf.model.pl_module.lr_scheduler.num_warmup_steps is None:
                 if (
                     "warmup_steps_ratio" in conf.model.pl_module
@@ -101,7 +102,7 @@ def train(conf: omegaconf.DictConfig) -> None:
                 else:
                     conf.model.pl_module.lr_scheduler.num_warmup_steps = 0
             logger.log(
-                f"Number of warmup steps: {conf.model.pl_module.lr_scheduler.num_training_steps}"
+                f"Number of warmup steps: {conf.model.pl_module.lr_scheduler.num_warmup_steps}"
             )
 
         logger.log(f"Instantiating the Model")
@@ -110,15 +111,6 @@ def train(conf: omegaconf.DictConfig) -> None:
         )
 
     # callbacks declaration
-    # callbacks_store = [
-    #     RichProgressBar(
-    #         theme=RichProgressBarTheme(
-    #             progress_bar="#802433",
-    #             progress_bar_finished="#802433",
-    #             progress_bar_pulse="#802433",
-    #         )
-    #     ),
-    # ]
     callbacks_store = []
 
     experiment_logger: Optional[WandbLogger] = None

@@ -16,8 +16,9 @@ pl_trainer:
   strategy: null
   accumulate_grad_batches: 1
   gradient_clip_val: 1.0
-  val_check_interval: 1.0  # you can specify an int "n" here => validation every "n" steps
-  max_epochs: 40
+  val_check_interval: 0.2  # you can specify an int "n" here => validation every "n" steps
+  max_epochs: 0
+  max_steps: 100_000
   deterministic: warn
   fast_dev_run: False
   precision: 16
@@ -50,6 +51,21 @@ prediction_callbacks:
     other_callbacks:
       - _target_: callbacks.custom_callbacks.TopKEvaluationCallback
         k: ${train.top_k}
+  # - _target_: callbacks.custom_callbacks.GoldenRetrieverPredictionCallback
+  #   k: ${train.top_k}
+  #   batch_size: 128
+  #   use_faiss: False
+  #   dataset:
+  #     _target_: data.datasets.DPRDataset
+  #     name: "train_eval"
+  #     contexts_path: ${data.contexts_path}
+  #     tokenizer: ${model.language_model}
+  #     path:
+  #       - 'data/dpr-like/srl/ontonotes/ontonotes.train.predicates.json'
+  #   other_callbacks:
+  #     - _target_: callbacks.custom_callbacks.TopKEvaluationCallback
+  #       k: ${train.top_k}
+  #       prefix: "train_eval"
   # - _target_: callbacks.custom_callbacks.NegativeAugmentationCallback
   #   k: ${train.top_k}
   #   metric_to_monitor: val_recall@${train.top_k}

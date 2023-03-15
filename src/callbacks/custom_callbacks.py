@@ -228,11 +228,16 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         Get the datasets and dataloaders from the datamodule or from the dataset provided.
 
         Args:
-            dataset (`Optional[Union[Dataset, DictConfig]]`): The dataset to use. If `None`, the datamodule is used.
-            batch_size (`int`): The batch size to use for the dataloaders.
-            stage (`Stage`): The stage that indicates whether the dataloaders are for validation or testing.
-            trainer (`pl.Trainer`): The trainer that contains the datamodule.
-            tokenizer (`tr.PreTrainedTokenizer`): The tokenizer to use for the dataloaders.
+            dataset (`Optional[Union[Dataset, DictConfig]]`): 
+                The dataset to use. If `None`, the datamodule is used.
+            batch_size (`int`): 
+                The batch size to use for the dataloaders.
+            stage (`Stage`):
+                The stage that indicates whether the dataloaders are for validation or testing.
+            trainer (`pl.Trainer`):
+                The trainer that contains the datamodule.
+            tokenizer (`tr.PreTrainedTokenizer`):
+                The tokenizer to use for the dataloaders.
 
         Returns:
             `Tuple[List[Dataset], List[DataLoader]]`: The datasets and dataloaders.
@@ -372,12 +377,14 @@ class TopKEvaluationCallback(NLPTemplateCallback):
         self,
         k: int = 100,
         report_intervals: Optional[int] = None,
+        prefix: Optional[str] = None,
         *args,
         **kwargs,
     ):
         super().__init__()
         self.k = k
         self.report_intervals = report_intervals
+        self.prefix = prefix
 
     @torch.no_grad()
     def __call__(
@@ -413,7 +420,10 @@ class TopKEvaluationCallback(NLPTemplateCallback):
             metrics[f"recall@{self.k}_{dataloader_idx}"] = recall_at_k
         metrics[f"recall@{self.k}"] = sum(metrics.values()) / len(metrics)
 
-        metrics = {f"{stage.value}_{k}": v for k, v in metrics.items()}
+        if self.prefix is not None:
+            metrics = {f"{self.prefix}_{k}": v for k, v in metrics.items()}
+        else:
+            metrics = {f"{stage.value}_{k}": v for k, v in metrics.items()}
         pl_module.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
         return metrics
 
