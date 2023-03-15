@@ -11,22 +11,13 @@ datamodule:
     train:
       _target_: data.datasets.DPRDataset
       name: 'train'
-      split_contexts: True
-      max_positives: ${data.max_positives}
-      max_negatives: ${data.max_negatives}
-      max_hard_negatives: ${data.max_hard_negatives}
-      in_batch_positives_augmentation: ${data.in_batch_positives_augmentation}
+      frequency_noise: True
       path:
         - 'data/aida_dpr_normalized/train.json'
 
     val:
       - _target_: data.datasets.DPRDataset
         name: 'val'
-        split_contexts: True
-        max_positives: ${data.max_positives}
-        max_negatives: ${data.max_negatives}
-        max_hard_negatives: ${data.max_hard_negatives}
-        in_batch_positives_augmentation: ${data.in_batch_positives_augmentation}
         contexts_path: ${data.contexts_path}
         path:
           - 'data/aida_dpr_normalized/val.json'
@@ -34,19 +25,14 @@ datamodule:
     test:
       - _target_: data.datasets.DPRDataset
         name: 'test'
-        split_contexts: True
-        max_positives: ${data.max_positives}
-        max_negatives: ${data.max_negatives}
-        max_hard_negatives: ${data.max_hard_negatives}
-        in_batch_positives_augmentation: ${data.in_batch_positives_augmentation}
         contexts_path: ${data.contexts_path}
         path:
           - 'data/aida_dpr_normalized/test.json'
 
   batch_sizes:
-    train: 64
-    val: 64
-    test: 64
+    train: 16
+    val: 16
+    test: 16
 
   num_workers:
     train: 4

@@ -11,8 +11,8 @@ defaults:
   - train: ontonotes_predicates
   - model: golden_retriever
   - loss: nce_loss
-  - optimizer: radam
-  - scheduler: none
+  - optimizer: adamw
+  - scheduler: linear_scheduler_with_warmup
   - data: ontonotes_predicates
   - evaluation: default_evaluation
   - logging: wandb_logging

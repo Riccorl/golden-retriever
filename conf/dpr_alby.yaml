@@ -10,8 +10,9 @@ defaults:
   - _self_
   - train: aida_train
   - model: golden_retriever
-  - loss: nll_loss
-  - optimizer: radam
+  - loss: nce_loss
+  - optimizer: adamw
+  - scheduler: linear_scheduler_with_warmup
   - data: aida_dpr_data
   - evaluation: default_evaluation
   - logging: wandb_logging
