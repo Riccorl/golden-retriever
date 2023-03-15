@@ -6,14 +6,23 @@ hydra:
 model_name: ${model.language_model}  # used to name the model in wandb
 project_name: golden-retriever  # used to name the project in wandb
 
+data_overrides:
+  contexts_path: "data/dpr-like/srl/propbank_definitions.roles.txt"
+  train_path:
+    - 'data/dpr-like/srl/ontonotes/ontonotes.train.args.json'
+  val_path:
+    - 'data/dpr-like/srl/ontonotes/ontonotes.dev.args.json'
+  test_path:
+    - 'data/dpr-like/srl/ontonotes/ontonotes.test.args.json'
+
 defaults:
   - _self_
-  - train: default_train
+  - train: ontonotes_args
   - model: golden_retriever
   - loss: nce_loss
-  - optimizer: radam
-  - scheduler: none
-  - data: default_data
+  - optimizer: adamw
+  - scheduler: linear_scheduler_with_warmup
+  - data: in_batch_negatives
   - evaluation: default_evaluation
   - logging: wandb_logging
   - override hydra/job_logging: colorlog

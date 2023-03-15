@@ -228,9 +228,9 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         Get the datasets and dataloaders from the datamodule or from the dataset provided.
 
         Args:
-            dataset (`Optional[Union[Dataset, DictConfig]]`): 
+            dataset (`Optional[Union[Dataset, DictConfig]]`):
                 The dataset to use. If `None`, the datamodule is used.
-            batch_size (`int`): 
+            batch_size (`int`):
                 The batch size to use for the dataloaders.
             stage (`Stage`):
                 The stage that indicates whether the dataloaders are for validation or testing.

@@ -71,8 +71,6 @@ class SentenceEncoder(torch.nn.Module):
             mean_pooling = torch.sum(
                 token_embeddings * input_mask_expanded, 1
             ) / torch.clamp(input_mask_expanded.sum(1), min=1e-9)
-            # normalize
-            # return F.normalize(mean_pooling, p=2, dim=1)
             return mean_pooling
         else:
             raise ValueError(

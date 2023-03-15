@@ -13,6 +13,7 @@ from datasets import load_dataset
 from torch.utils.data import Dataset, IterableDataset
 
 from data.labels import Labels
+from data.sampler import NegativeSampler
 from utils.logging import get_console_logger
 from utils.model_inputs import ModelInputs
 
@@ -120,19 +121,14 @@ class DPRDataset(BaseDataset):
         name: str,
         path: Union[str, os.PathLike, List[str], List[os.PathLike]],
         shuffle: bool = False,
-        pre_process: bool = True,
         max_contexts: int = 64,
         max_positives: int = -1,
         max_negatives: int = 0,
         max_hard_negatives: int = 0,
         max_question_length: int = 256,
         max_context_length: int = 128,
-        shuffle_negative_contexts: bool = False,
-        frequency_noise: bool = False,
-        in_batch_positives_augmentation: bool = True,
-        tokenizer: Optional[Union[str, tr.PreTrainedTokenizer]] = None,
         contexts_path: Union[str, os.PathLike] = None,
-        strategy: str = "fixed_contexts",
+        tokenizer: Optional[Union[str, tr.PreTrainedTokenizer]] = None,
         **kwargs,
     ):
         super().__init__(name, path, **kwargs)
@@ -142,10 +138,6 @@ class DPRDataset(BaseDataset):
         self.max_hard_negatives = max_hard_negatives
         self.max_question_length = max_question_length
         self.max_context_length = max_context_length
-        self.shuffle_negative_contexts = shuffle_negative_contexts
-        self.frequency_noise = frequency_noise
-        self.in_batch_positives_augmentation = in_batch_positives_augmentation
-        self.strategy = strategy
 
         self.context_manager = Labels()
         # read contexts from file if provided
@@ -173,10 +165,8 @@ class DPRDataset(BaseDataset):
                     value=self.tokenizer.pad_token_type_id,
                 ),
             }
-
-        self.data = self.load(
-            path, tokenizer=self.tokenizer, pre_process=pre_process, shuffle=shuffle
-        )
+        # TODO: use cls stuff
+        # self.data = self.load(path, tokenizer=self.tokenizer, shuffle=shuffle)
 
     def __len__(self) -> int:
         return len(self.data)
@@ -186,11 +176,14 @@ class DPRDataset(BaseDataset):
     ) -> Union[Dict[str, torch.Tensor], Tuple[torch.Tensor, torch.Tensor]]:
         return self.data[index]
 
+    @property
+    def contexts(self):
+        return list(self.context_manager.get_labels().keys())
+
     def load(
         self,
         paths: Union[str, os.PathLike, List[str], List[os.PathLike]],
         tokenizer: tr.PreTrainedTokenizer = None,
-        pre_process: bool = True,
         shuffle: bool = False,
         *args,
         **kwargs,
@@ -216,200 +209,43 @@ class DPRDataset(BaseDataset):
         # data in a dict with the key being "train". datasets needs str paths and not Path
         data = load_dataset("json", data_files=[str(p) for p in paths])["train"]
 
-        if pre_process:
-            if not tokenizer:
-                raise ValueError("Tokenizer is required for pre-processing")
-            # Pre-process the data
-            if shuffle:
-                # shuffle the data
-                data = data.shuffle(seed=42)
+        if not tokenizer:
+            raise ValueError("Tokenizer is required for pre-processing")
+        # Pre-process the data
+        if shuffle:
+            # shuffle the data
+            data = data.shuffle(seed=42)
 
-            # measure how long the preprocessing takes
-            start = time.time()
-            data = data.map(
-                partial(
-                    DPRDataset.process_sample,
-                    tokenizer=tokenizer,
-                    max_contexts=self.max_contexts,
-                    max_positives=self.max_positives,
-                    max_negatives=self.max_negatives,
-                    max_hard_negatives=self.max_hard_negatives,
-                ),
-                # remove_columns=[
-                #     "answers",
-                #     "positive_ctxs",
-                #     "negative_ctxs",
-                #     "hard_negative_ctxs",
-                # ],
-                keep_in_memory=True,
-                load_from_cache_file=True,
-                num_proc=psutil.cpu_count(),
-            )
-            # add id if not present
-            if "id" not in data.column_names:
-                data = data.add_column("id", range(len(data)))
-            end = time.time()
-            logger.log(
-                f"Pre-processing [bold cyan]{self.name}[/bold cyan] "
-                f"data took [bold]{end - start:.2f}[/bold] seconds"
-            )
-
-            if self.strategy == "fixed_contexts":
-                if self.frequency_noise:
-                    context_frequncies = self.compute_contexts_frequency(
-                        data, self.context_manager
-                    )
-                else:
-                    context_frequncies = None
-                # update the samples with the sampled negatives
-                data = data.map(
-                    partial(
-                        DPRDataset.add_sampled_negatives,
-                        tokenizer=tokenizer,
-                        context_manager=self.context_manager,
-                        frequencies=context_frequncies,
-                        max_negatives=self.max_negatives,
-                        max_contexts=self.max_contexts,
-                    ),
-                    remove_columns=[
-                        "answers",
-                        "positive_ctxs",
-                        "negative_ctxs",
-                        "hard_negative_ctxs",
-                    ],
-                    keep_in_memory=True,
-                    num_proc=psutil.cpu_count(),
-                )
-
+        # measure how long the preprocessing takes
+        start = time.time()
+        data = data.map(
+            partial(
+                self.process_sample,
+                tokenizer=tokenizer,
+                max_contexts=self.max_contexts,
+                max_positives=self.max_positives,
+                max_negatives=self.max_negatives,
+                max_hard_negatives=self.max_hard_negatives,
+            ),
+            # remove_columns=[
+            #     "answers",
+            #     "positive_ctxs",
+            #     "negative_ctxs",
+            #     "hard_negative_ctxs",
+            # ],
+            keep_in_memory=True,
+            load_from_cache_file=True,
+            num_proc=psutil.cpu_count(),
+        )
+        # add id if not present
+        if "id" not in data.column_names:
+            data = data.add_column("id", range(len(data)))
+        end = time.time()
+        logger.log(
+            f"Pre-processing [bold cyan]{self.name}[/bold cyan] "
+            f"data took [bold]{end - start:.2f}[/bold] seconds"
+        )
         return data
-
-    @staticmethod
-    def add_sampled_negatives(
-        sample: Dict[str, Any],
-        tokenizer: tr.PreTrainedTokenizer,
-        context_manager: Labels,
-        frequencies: List[int] = None,
-        max_negatives: int = -1,
-        max_contexts: int = -1,
-        max_context_length: int = 128,
-    ):
-        """
-        Sample negatives and add them to the sample.
-        """
-        positives_contexts_ids = sample["positive_ctxs"]
-        negative_contexts_ids = sample["negative_ctxs"]
-        hard_negative_contexts_ids = sample["hard_negative_ctxs"]
-
-        positives = sample["positives"]
-        positive_indices = [context_manager.get_index_from_label(p) for p in positives]
-
-        actual_number_of_contexts = (
-            len(positives_contexts_ids)
-            + len(negative_contexts_ids)
-            + len(hard_negative_contexts_ids)
-        )
-
-        sampled_negative_contexts = []
-        if max_contexts != -1:
-            if actual_number_of_contexts < max_contexts:
-                remaining_contexts = max_contexts - actual_number_of_contexts
-
-                sampled = DPRDataset.fast_sampling(
-                    context_manager.get_label_size(),
-                    remaining_contexts,
-                    probabilities=frequencies,
-                    exclude=positive_indices,
-                )
-
-                sampled_negative_contexts += [
-                    context_manager.get_label_from_index(s) for s in sampled[0]
-                ]
-            else:
-                # TODO: limit the number of contexts
-                pass
-
-        sampled_negative_ids = [
-            tokenizer(n, max_length=max_context_length, truncation=True)
-            for n in sampled_negative_contexts
-        ]
-        negative_contexts_ids += sampled_negative_ids
-        context = (
-            positives_contexts_ids + negative_contexts_ids + hard_negative_contexts_ids
-        )
-        sample["context"] = context
-        return sample
-
-    @property
-    def contexts(self):
-        return list(self.context_manager.get_labels().keys())
-
-    @staticmethod
-    def compute_contexts_frequency(data, context_manager) -> np.array:
-        """
-        Compute the frequency of each context in the dataset.
-        """
-        if context_manager is None:
-            raise ValueError(
-                "Context manager is required to compute the frequency of contexts"
-            )
-        frequency = np.zeros(context_manager.get_label_size())
-        for sample in data:
-            for context in sample["positives"]:
-                contex_index = context_manager.get_index_from_label(context)
-                frequency[contex_index] += 1
-        # normalize the frequency
-        frequency = frequency / frequency.sum()
-        return frequency
-
-    @staticmethod
-    def fast_sampling(
-        num_elements: int,
-        sample_size: int,
-        num_samples: int = 1,
-        probabilities: np.array = None,
-        exclude: List[int] = None,
-    ) -> np.array:
-        """
-        Fast sampling of `sample_size` elements from `num_elements` elements.
-        The sampling is done by randomly shifting the probabilities and then
-        finding the smallest of the negative numbers. This is much faster than
-        sampling from a multinomial distribution.
-
-        Args:
-            num_elements (`int`):
-                number of elements to sample from
-            sample_size (`int`):
-                number of elements to sample
-            num_samples (`int`, optional):
-                number of samples to draw. Defaults to 1.
-            probabilities (`np.array`, optional):
-                probabilities of each element. Defaults to None.
-            exclude (`List[int]`, optional):
-                indices of elements to exclude. Defaults to None.
-
-        Returns:
-            `np.array`: array of sampled indices
-        """
-        if probabilities is None:
-            # probabilities should sum to 1
-            probabilities = np.random.random(num_elements)
-            probabilities /= np.sum(probabilities)
-
-        if exclude is not None:
-            probabilities[exclude] = 0
-            # probabilities /= np.sum(probabilities)
-
-        # replicate probabilities as many times as `num_samples`
-        replicated_probabilities = np.tile(probabilities, (num_samples, 1))
-        # get random shifting numbers & scale them correctly
-        random_shifts = np.random.random(replicated_probabilities.shape)
-        random_shifts /= random_shifts.sum(axis=1)[:, np.newaxis]
-        # shift by numbers & find largest (by finding the smallest of the negative)
-        shifted_probabilities = random_shifts - replicated_probabilities
-        sampled_indices = np.argpartition(shifted_probabilities, sample_size, axis=1)[
-            :, :sample_size
-        ]
-        return sampled_indices
 
     @staticmethod
     def process_sample(
@@ -524,83 +360,6 @@ class DPRDataset(BaseDataset):
                 )
         return samples
 
-    def collate_fn(self, batch: Any, *args, **kwargs) -> Any:
-        questions = [sample["question"] for sample in batch]
-        contexts = [sample["context"] for sample in batch]
-        positives = [sample["positives"] for sample in batch]
-        if "augmented_negative_contexts" in batch[0]:
-            # add augmented negative contexts to contexts
-            augmented_negative_contexts = [
-                sample["augmented_negative_contexts"] for sample in batch
-            ]
-            contexts = [
-                # remove the last len(a) contexts to add the augmented negative context
-                c[: -len(a)] + a
-                for c, a in zip(contexts, augmented_negative_contexts)
-            ]
-
-        questions = self.convert_to_batch(questions)
-        # first flat the list of lists of contexts
-        contexts = [c for ctxs in contexts for c in ctxs]
-        # invert contexts from list of dict to dict of list
-        contexts = self.convert_to_batch(contexts)
-
-        augmented_labels: Optional[torch.Tensor] = None
-        contexts_per_question: Optional[List[int]] = None
-        if self.strategy == "in_batch_negatives":
-            labels = torch.zeros(
-                questions["input_ids"].shape[0], contexts["input_ids"].shape[0]
-            )
-            positive_index_end = [sample["positive_index_end"] for sample in batch]
-            last_start = 0
-            for i, end in enumerate(positive_index_end):
-                start = 0 if i == 0 else last_start + len(batch[i - 1]["context"])
-                end = end if i == 0 else start + end
-                labels[i, start:end] = 1
-                last_start = start
-
-            if self.in_batch_positives_augmentation:
-                # labels is a mask of positive contexts for each question
-                # has shape num_questions x num_contexts
-                augmented_labels = torch.zeros(
-                    questions["input_ids"].shape[0], contexts["input_ids"].shape[0]
-                )
-                flat_positives = [s for sample in batch for s in sample["positives"]]
-                # labels includes as positive also the labels that appear in the
-                # other samples but are positive for the considered one (avoid false
-                # negative context)
-                for p_idx, p in enumerate(flat_positives):
-                    for i, positive in enumerate(positives):
-                        for positive_ctx in positive:
-                            if positive_ctx in p:
-                                augmented_labels[i, p_idx] = 1
-        else:
-            contexts_per_question = [len(sample["context"]) for sample in batch]
-            labels = [[0] * c for c in contexts_per_question]
-            # pad the labels
-            labels = [
-                self.pad_sequence(l, max(contexts_per_question), value=-100)
-                for l in labels
-            ]
-            # convert to tensor
-            labels = torch.as_tensor(labels)
-            # labels is a mask of positive contexts for each question base on positive_index_end
-            # has shape num_questions x num_contexts
-            positive_index_end = [sample["positive_index_end"] for sample in batch]
-            for i, end in enumerate(positive_index_end):
-                labels[i, :end] = 1
-
-        model_inputs = {
-            "questions": ModelInputs(questions),
-            "contexts": ModelInputs(contexts),
-            "labels": augmented_labels if augmented_labels is not None else labels,
-            "positives": positives,
-            "id": [sample["id"] for sample in batch],
-        }
-        if contexts_per_question is not None:
-            model_inputs["contexts_per_question"] = contexts_per_question
-        return ModelInputs(model_inputs)
-
     def save_data(self, path: Union[str, os.PathLike]) -> None:
         """
         Save the samples to a file.
@@ -661,3 +420,300 @@ class DPRDataset(BaseDataset):
                     )
                 self.data = self.data.remove_columns(name)
             self.data = self.data.add_column(name=name, column=column)
+
+
+class InBatchNegativesDPRDataset(DPRDataset):
+    def __init__(
+        self,
+        name: str,
+        path: Union[str, os.PathLike, List[str], List[os.PathLike]],
+        shuffle: bool = False,
+        max_contexts: int = 64,
+        max_positives: int = -1,
+        max_negatives: int = 0,
+        max_hard_negatives: int = 0,
+        max_question_length: int = 256,
+        max_context_length: int = 128,
+        contexts_path: Union[str, os.PathLike] = None,
+        tokenizer: Optional[Union[str, tr.PreTrainedTokenizer]] = None,
+        in_batch_positives_augmentation: bool = True,
+        **kwargs,
+    ):
+        super().__init__(
+            name,
+            path,
+            shuffle,
+            max_contexts,
+            max_positives,
+            max_negatives,
+            max_hard_negatives,
+            max_question_length,
+            max_context_length,
+            contexts_path,
+            tokenizer,
+        )
+        self.in_batch_positives_augmentation = in_batch_positives_augmentation
+        self.data = self.load(path, self.tokenizer, shuffle)
+
+    def collate_fn(self, batch: Any, *args, **kwargs) -> Any:
+        questions = [sample["question"] for sample in batch]
+        contexts = [sample["context"] for sample in batch]
+        positives = [sample["positives"] for sample in batch]
+        if "augmented_negative_contexts" in batch[0]:
+            # add augmented negative contexts to contexts
+            augmented_negative_contexts = [
+                sample["augmented_negative_contexts"] for sample in batch
+            ]
+            contexts = [
+                # remove the last len(a) contexts to add the augmented negative context
+                c[: -len(a)] + a
+                for c, a in zip(contexts, augmented_negative_contexts)
+            ]
+
+        questions = self.convert_to_batch(questions)
+        # first flat the list of lists of contexts
+        contexts = [c for ctxs in contexts for c in ctxs]
+        # invert contexts from list of dict to dict of list
+        contexts = self.convert_to_batch(contexts)
+
+        augmented_labels: Optional[torch.Tensor] = None
+        contexts_per_question: Optional[List[int]] = None
+        labels = torch.zeros(
+            questions["input_ids"].shape[0], contexts["input_ids"].shape[0]
+        )
+        positive_index_end = [sample["positive_index_end"] for sample in batch]
+        last_start = 0
+        for i, end in enumerate(positive_index_end):
+            start = 0 if i == 0 else last_start + len(batch[i - 1]["context"])
+            end = end if i == 0 else start + end
+            labels[i, start:end] = 1
+            last_start = start
+
+        if self.in_batch_positives_augmentation:
+            # labels is a mask of positive contexts for each question
+            # has shape num_questions x num_contexts
+            augmented_labels = torch.zeros(
+                questions["input_ids"].shape[0], contexts["input_ids"].shape[0]
+            )
+            flat_positives = [s for sample in batch for s in sample["positives"]]
+            # labels includes as positive also the labels that appear in the
+            # other samples but are positive for the considered one (avoid false
+            # negative context)
+            for p_idx, p in enumerate(flat_positives):
+                for i, positive in enumerate(positives):
+                    for positive_ctx in positive:
+                        if positive_ctx in p:
+                            augmented_labels[i, p_idx] = 1
+
+        model_inputs = {
+            "questions": ModelInputs(questions),
+            "contexts": ModelInputs(contexts),
+            "labels": augmented_labels if augmented_labels is not None else labels,
+            "positives": positives,
+            "id": [sample["id"] for sample in batch],
+        }
+        if contexts_per_question is not None:
+            model_inputs["contexts_per_question"] = contexts_per_question
+        return ModelInputs(model_inputs)
+
+
+class SampledNegativesDPRDataset(DPRDataset):
+    def __init__(
+        self,
+        name: str,
+        path: Union[str, os.PathLike, List[str], List[os.PathLike]],
+        shuffle: bool = False,
+        max_contexts: int = 64,
+        max_positives: int = -1,
+        max_negatives: int = 0,
+        max_hard_negatives: int = 0,
+        max_question_length: int = 256,
+        max_context_length: int = 128,
+        contexts_path: Union[str, os.PathLike] = None,
+        tokenizer: Optional[Union[str, tr.PreTrainedTokenizer]] = None,
+        frequency_noise: bool = True,
+        **kwargs,
+    ):
+        super().__init__(
+            name,
+            path,
+            shuffle,
+            max_contexts,
+            max_positives,
+            max_negatives,
+            max_hard_negatives,
+            max_question_length,
+            max_context_length,
+            contexts_path,
+            tokenizer,
+        )
+        self.frequency_noise = frequency_noise
+        self.data = self.load(path, self.tokenizer, shuffle)
+
+    def load(
+        self,
+        paths: Union[str, os.PathLike, List[str], List[os.PathLike]],
+        tokenizer: tr.PreTrainedTokenizer = None,
+        shuffle: bool = False,
+        *args,
+        **kwargs,
+    ) -> Any:
+        data = super().load(paths, self.tokenizer, shuffle)
+        if self.frequency_noise:
+            context_frequencies = self.compute_contexts_frequency(
+                data, self.context_manager
+            )
+            # get only those contexts that have frequency > 0
+            context_idx_above_zero = [
+                idx for idx, freq in enumerate(context_frequencies) if freq > 0
+            ]
+            sample_space_size = len(context_idx_above_zero)
+            # get those frequencies
+            context_frequencies = [
+                context_frequencies[idx] for idx in context_idx_above_zero
+            ]
+            # build a reduced context_manager for sampling negatives
+            sampled_context_manager = Labels()
+            sampled_context_manager.add_labels(
+                [
+                    self.context_manager.get_label_from_index(idx)
+                    for idx in context_idx_above_zero
+                ]
+            )
+        else:
+            context_frequencies = None
+            sample_space_size = self.context_manager.get_label_size()
+            sampled_context_manager = self.context_manager
+        negative_sampler = NegativeSampler(sample_space_size, context_frequencies)
+        logger.log(f"Sampling negative contexts from {sample_space_size} samples")
+        # update the samples with the sampled negatives
+        data = data.map(
+            partial(
+                self.add_sampled_negatives,
+                tokenizer=tokenizer,
+                negative_sampler=negative_sampler,
+                context_manager=sampled_context_manager,
+                max_negatives=self.max_negatives,
+                max_contexts=self.max_contexts,
+            ),
+            remove_columns=[
+                "answers",
+                "positive_ctxs",
+                "negative_ctxs",
+                "hard_negative_ctxs",
+            ],
+            keep_in_memory=True,
+            num_proc=psutil.cpu_count(),
+        )
+        return data
+
+    @staticmethod
+    def compute_contexts_frequency(data, context_manager) -> np.array:
+        """
+        Compute the frequency of each context in the dataset.
+        """
+        if context_manager is None:
+            raise ValueError(
+                "Context manager is required to compute the frequency of contexts"
+            )
+        frequency = np.zeros(context_manager.get_label_size())
+        for sample in data:
+            for context in sample["positives"]:
+                contex_index = context_manager.get_index_from_label(context)
+                frequency[contex_index] += 1
+        # normalize the frequency
+        frequency = frequency / frequency.sum()
+        return frequency
+
+    @staticmethod
+    def add_sampled_negatives(
+        sample: Dict[str, Any],
+        tokenizer: tr.PreTrainedTokenizer,
+        context_manager: Labels,
+        negative_sampler: NegativeSampler,
+        max_negatives: int = -1,
+        max_contexts: int = -1,
+        max_context_length: int = 128,
+    ):
+        """
+        Sample negatives and add them to the sample.
+        """
+        positives_contexts_ids = sample["positive_ctxs"]
+        negative_contexts_ids = sample["negative_ctxs"]
+        hard_negative_contexts_ids = sample["hard_negative_ctxs"]
+
+        positives = sample["positives"]
+        positive_indices = [context_manager.get_index_from_label(p) for p in positives]
+
+        actual_number_of_contexts = (
+            len(positives_contexts_ids)
+            + len(negative_contexts_ids)
+            + len(hard_negative_contexts_ids)
+        )
+
+        sampled_negative_contexts = []
+        if max_contexts != -1:
+            if actual_number_of_contexts < max_contexts:
+                remaining_contexts = max_contexts - actual_number_of_contexts
+                sampled = negative_sampler(remaining_contexts, exclude=positive_indices)
+                sampled_negative_contexts += [
+                    context_manager.get_label_from_index(s) for s in sampled[0]
+                ]
+
+        sampled_negative_ids = [
+            tokenizer(n, max_length=max_context_length, truncation=True)
+            for n in sampled_negative_contexts
+        ]
+        negative_contexts_ids += sampled_negative_ids
+        context = (
+            positives_contexts_ids + negative_contexts_ids + hard_negative_contexts_ids
+        )
+        sample["context"] = context
+        return sample
+
+    def collate_fn(self, batch: Any, *args, **kwargs) -> Any:
+        questions = [sample["question"] for sample in batch]
+        contexts = [sample["context"] for sample in batch]
+        positives = [sample["positives"] for sample in batch]
+        if "augmented_negative_contexts" in batch[0]:
+            # add augmented negative contexts to contexts
+            augmented_negative_contexts = [
+                sample["augmented_negative_contexts"] for sample in batch
+            ]
+            contexts = [
+                # remove the last len(a) contexts to add the augmented negative context
+                c[: -len(a)] + a
+                for c, a in zip(contexts, augmented_negative_contexts)
+            ]
+
+        questions = self.convert_to_batch(questions)
+        # first flat the list of lists of contexts
+        contexts = [c for ctxs in contexts for c in ctxs]
+        # invert contexts from list of dict to dict of list
+        contexts = self.convert_to_batch(contexts)
+
+        augmented_labels: Optional[torch.Tensor] = None
+        contexts_per_question = [len(sample["context"]) for sample in batch]
+        labels = [[0] * c for c in contexts_per_question]
+        # pad the labels
+        labels = [
+            self.pad_sequence(l, max(contexts_per_question), value=-100) for l in labels
+        ]
+        # convert to tensor
+        labels = torch.as_tensor(labels)
+        # labels is a mask of positive contexts for each question base on positive_index_end
+        # has shape num_questions x num_contexts
+        positive_index_end = [sample["positive_index_end"] for sample in batch]
+        for i, end in enumerate(positive_index_end):
+            labels[i, :end] = 1
+
+        model_inputs = {
+            "questions": ModelInputs(questions),
+            "contexts": ModelInputs(contexts),
+            "labels": augmented_labels if augmented_labels is not None else labels,
+            "positives": positives,
+            "id": [sample["id"] for sample in batch],
+        }
+        if contexts_per_question is not None:
+            model_inputs["contexts_per_question"] = contexts_per_question
+        return ModelInputs(model_inputs)
