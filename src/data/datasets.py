@@ -234,8 +234,6 @@ class DPRDataset(BaseDataset):
                     max_positives=self.max_positives,
                     max_negatives=self.max_negatives,
                     max_hard_negatives=self.max_hard_negatives,
-                    context_manager=self.context_manager,
-                    strategy=self.strategy,
                 ),
                 # remove_columns=[
                 #     "answers",
@@ -255,31 +253,33 @@ class DPRDataset(BaseDataset):
                 f"Pre-processing [bold cyan]{self.name}[/bold cyan] "
                 f"data took [bold]{end - start:.2f}[/bold] seconds"
             )
-            if self.frequency_noise:
-                context_frequncies = self.compute_contexts_frequency(
-                    data, self.context_manager
+
+            if self.strategy == "fixed_contexts":
+                if self.frequency_noise:
+                    context_frequncies = self.compute_contexts_frequency(
+                        data, self.context_manager
+                    )
+                else:
+                    context_frequncies = None
+                # update the samples with the sampled negatives
+                data = data.map(
+                    partial(
+                        DPRDataset.add_sampled_negatives,
+                        tokenizer=tokenizer,
+                        context_manager=self.context_manager,
+                        frequencies=context_frequncies,
+                        max_negatives=self.max_negatives,
+                        max_contexts=self.max_contexts,
+                    ),
+                    remove_columns=[
+                        "answers",
+                        "positive_ctxs",
+                        "negative_ctxs",
+                        "hard_negative_ctxs",
+                    ],
+                    keep_in_memory=True,
+                    num_proc=psutil.cpu_count(),
                 )
-            else:
-                context_frequncies = None
-            # update the samples with the sampled negatives
-            data = data.map(
-                partial(
-                    DPRDataset.add_sampled_negatives,
-                    tokenizer=tokenizer,
-                    context_manager=self.context_manager,
-                    frequencies=context_frequncies,
-                    max_negatives=self.max_negatives,
-                    max_contexts=self.max_contexts,
-                ),
-                remove_columns=[
-                    "answers",
-                    "positive_ctxs",
-                    "negative_ctxs",
-                    "hard_negative_ctxs",
-                ],
-                keep_in_memory=True,
-                num_proc=psutil.cpu_count(),
-            )
 
         return data
 
@@ -421,8 +421,6 @@ class DPRDataset(BaseDataset):
         max_contexts: int = -1,
         max_question_length: int = 256,
         max_context_length: int = 128,
-        context_manager: Labels = None,
-        strategy: str = "fixed_contexts",
     ) -> Dict:
         positive_ctxs = [p["text"] for p in sample["positive_ctxs"]]
         if max_positives != -1:

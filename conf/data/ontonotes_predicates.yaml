@@ -27,9 +27,9 @@ datamodule:
           - 'data/dpr-like/srl/ontonotes/ontonotes.test.predicates.json'
 
   batch_sizes:
-    train: 16
-    val: 32
-    test: 32
+    train: 32
+    val: 64
+    test: 64
 
   num_workers:
     train: 4
