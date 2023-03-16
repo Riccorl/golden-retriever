@@ -109,6 +109,11 @@ def train(conf: omegaconf.DictConfig) -> None:
         pl_module: GoldenRetrieverPLModule = hydra.utils.instantiate(
             conf.model.pl_module, _recursive_=False
         )
+        try:
+            pl_module = torch.compile(pl_module, backend="inductor")
+        except Exception as e:
+            logger.log(f"Failed to compile the model, you may need to install PyTorch 2.0")
+
 
     # callbacks declaration
     callbacks_store = []
@@ -179,6 +184,10 @@ def train(conf: omegaconf.DictConfig) -> None:
             )
         logger.log(f"Loading best model from {best_model_path}")
         best_pl_module = GoldenRetrieverPLModule.load_from_checkpoint(best_model_path)
+        try:
+            best_pl_module = torch.compile(best_pl_module, backend="inductor")
+        except Exception as e:
+            logger.log(f"Failed to compile the model, you may need to install PyTorch 2.0")
 
     # module test
     trainer.test(best_pl_module, datamodule=pl_data_module)

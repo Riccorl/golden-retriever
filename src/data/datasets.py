@@ -1,5 +1,6 @@
 import json
 import os
+import random
 import time
 from functools import partial
 from pathlib import Path
@@ -16,6 +17,8 @@ from data.labels import Labels
 from data.sampler import NegativeSampler
 from utils.logging import get_console_logger
 from utils.model_inputs import ModelInputs
+
+from numba import jit, njit
 
 logger = get_console_logger()
 
@@ -560,17 +563,13 @@ class SampledNegativesDPRDataset(DPRDataset):
     ) -> Any:
         data = super().load(paths, self.tokenizer, shuffle)
         if self.frequency_noise:
+            logger.log("Computing contexts frequencies")
             context_frequencies = self.compute_contexts_frequency(
                 data, self.context_manager
             )
             # get only those contexts that have frequency > 0
             context_idx_above_zero = [
                 idx for idx, freq in enumerate(context_frequencies) if freq > 0
-            ]
-            sample_space_size = len(context_idx_above_zero)
-            # get those frequencies
-            context_frequencies = [
-                context_frequencies[idx] for idx in context_idx_above_zero
             ]
             # build a reduced context_manager for sampling negatives
             sampled_context_manager = Labels()
@@ -580,27 +579,27 @@ class SampledNegativesDPRDataset(DPRDataset):
                     for idx in context_idx_above_zero
                 ]
             )
+            context_frequencies = self.compute_contexts_frequency(
+                data, sampled_context_manager
+            )
         else:
             context_frequencies = None
-            sample_space_size = self.context_manager.get_label_size()
             sampled_context_manager = self.context_manager
-        negative_sampler = NegativeSampler(sample_space_size, context_frequencies)
+        sample_space_size = sampled_context_manager.get_label_size()
         logger.log(f"Sampling negative contexts from {sample_space_size} samples")
         # update the samples with the sampled negatives
         data = data.map(
             partial(
                 self.add_sampled_negatives,
                 tokenizer=tokenizer,
-                negative_sampler=negative_sampler,
+                sample_space_size=sample_space_size,
+                context_frequencies=context_frequencies,
                 context_manager=sampled_context_manager,
                 max_negatives=self.max_negatives,
                 max_contexts=self.max_contexts,
             ),
             remove_columns=[
                 "answers",
-                "positive_ctxs",
-                "negative_ctxs",
-                "hard_negative_ctxs",
             ],
             keep_in_memory=True,
             num_proc=psutil.cpu_count(),
@@ -630,7 +629,8 @@ class SampledNegativesDPRDataset(DPRDataset):
         sample: Dict[str, Any],
         tokenizer: tr.PreTrainedTokenizer,
         context_manager: Labels,
-        negative_sampler: NegativeSampler,
+        sample_space_size: int,
+        context_frequencies: np.array,
         max_negatives: int = -1,
         max_contexts: int = -1,
         max_context_length: int = 128,
@@ -638,6 +638,9 @@ class SampledNegativesDPRDataset(DPRDataset):
         """
         Sample negatives and add them to the sample.
         """
+
+        negative_sampler = NegativeSampler(sample_space_size, context_frequencies)
+    
         positives_contexts_ids = sample["positive_ctxs"]
         negative_contexts_ids = sample["negative_ctxs"]
         hard_negative_contexts_ids = sample["hard_negative_ctxs"]
@@ -670,6 +673,144 @@ class SampledNegativesDPRDataset(DPRDataset):
         )
         sample["context"] = context
         return sample
+
+    # @staticmethod
+    # def add_sampled_negatives(
+    #     samples: Dict[str, Any],
+    #     tokenizer: tr.PreTrainedTokenizer,
+    #     context_manager: Labels,
+    #     sample_space_size: int,
+    #     context_frequencies: np.array,
+    #     max_negatives: int = -1,
+    #     max_contexts: int = -1,
+    #     max_context_length: int = 128,
+    # ):
+    #     """
+    #     Sample negatives and add them to the sample.
+    #     """
+
+    #     # negative_sampler = NegativeSampler(sample_space_size, context_frequencies)
+
+    #     num_samples = len(samples["question"])
+
+    #     positive_indices = []
+    #     for s_idx in range(num_samples):
+    #         positives = samples["positives"][s_idx]
+    #         positive_indices.append(
+    #             [context_manager.get_index_from_label(p) for p in positives]
+    #         )
+
+    #     sampled = None
+    #     if max_contexts != -1:
+    #         exclude = np.zeros([num_samples, context_frequencies.shape[0]])
+    #         for i, indices in enumerate(positive_indices):
+    #             exclude[i, indices] = 0
+    #         # make it a boolean mask
+    #         exclude = exclude.astype(bool)
+    #         sampled = SampledNegativesDPRDataset.fast_sampling(
+    #             sample_space_size,
+    #             max_contexts,
+    #             num_samples=num_samples,
+    #             probabilities=context_frequencies,
+    #             exclude=exclude,
+    #         )
+
+    #     for s_idx in range(num_samples):
+    #         positives_contexts_ids = samples["positive_ctxs"][s_idx]
+    #         negative_contexts_ids = samples["negative_ctxs"][s_idx]
+    #         hard_negative_contexts_ids = samples["hard_negative_ctxs"][s_idx]
+
+    #         # positives = sample["positives"]
+    #         # positive_indices = [context_manager.get_index_from_label(p) for p in positives]
+
+    #         actual_number_of_contexts = (
+    #             len(positives_contexts_ids)
+    #             + len(negative_contexts_ids)
+    #             + len(hard_negative_contexts_ids)
+    #         )
+
+    #         sampled_negative_contexts = []
+    #         if max_contexts != -1:
+    #             if actual_number_of_contexts < max_contexts:
+    #                 remaining_contexts = max_contexts - actual_number_of_contexts
+    #                 negative_sampled = random.choices(
+    #                     sampled[s_idx], k=remaining_contexts
+    #                 )
+    #                 sampled_negative_contexts += [
+    #                     context_manager.get_label_from_index(s)
+    #                     for s in negative_sampled
+    #                 ]
+
+    #         sampled_negative_ids = [
+    #             tokenizer(n, max_length=max_context_length, truncation=True)
+    #             for n in sampled_negative_contexts
+    #         ]
+    #         negative_contexts_ids += sampled_negative_ids
+    #         context = (
+    #             positives_contexts_ids
+    #             + negative_contexts_ids
+    #             + hard_negative_contexts_ids
+    #         )
+    #         samples["context"][s_idx] = context
+    #     return samples
+
+    # @staticmethod
+    # @njit
+    # def fast_sampling(
+    #     num_elements: int,
+    #     sample_size: int,
+    #     num_samples: int = 1,
+    #     probabilities: np.array([]) = None,
+    #     exclude: np.array([[]]) = None,
+    # ) -> np.array([[]]):
+    #     """
+    #     Fast sampling of `sample_size` elements from `num_elements` elements.
+    #     The sampling is done by randomly shifting the probabilities and then
+    #     finding the smallest of the negative numbers. This is much faster than
+    #     sampling from a multinomial distribution.
+    #     Args:
+    #         num_elements (`int`):
+    #             number of elements to sample from
+    #         sample_size (`int`):
+    #             number of elements to sample
+    #         num_samples (`int`, optional):
+    #             number of samples to draw. Defaults to 1.
+    #         probabilities (`np.array`, optional):
+    #             probabilities of each element. Defaults to None.
+    #         exclude (`List[int]`, optional):
+    #             indices of elements to exclude. Defaults to None.
+    #     Returns:
+    #         `np.array`: array of sampled indices
+    #     """
+    #     if probabilities is None:
+    #         # probabilities should sum to 1
+    #         probabilities = np.random.random(num_elements)
+    #         probabilities /= np.sum(probabilities)
+
+    #     # replicate probabilities as many times as `num_samples`
+    #     # replicated_probabilities = np.tile(probabilities, (num_samples, 1))
+    #     replicated_probabilities = (
+    #         probabilities.repeat(num_samples).reshape((-1, num_samples)).T
+    #     )
+    #     # exclude indices
+    #     # if exclude is not None:
+    #     #     replicated_probabilities[exclude] = 0
+    #     #     # for i, indices in enumerate(exclude):
+    #     #     #     replicated_probabilities[i, indices] = 0
+    #     # get random shifting numbers & scale them correctly
+    #     replicated_probabilities = np.ravel(replicated_probabilities)
+    #     exclude = np.ravel(exclude)
+    #     replicated_probabilities[exclude] = 0
+    #     replicated_probabilities = replicated_probabilities.reshape((-1, num_elements))
+    #     random_shifts = np.random.random(replicated_probabilities.shape)
+    #     sum_random_shifts = random_shifts.sum(axis=1)
+    #     sum_random_shifts = np.expand_dims(sum_random_shifts, 1)
+    #     random_shifts /= sum_random_shifts
+    #     # shift by numbers & find largest (by finding the smallest of the negative)
+    #     shifted_probabilities = random_shifts - replicated_probabilities
+    #     sampled_indices = np.argpartition(shifted_probabilities, sample_size)
+    #     sampled_indices = sampled_indices[:, :sample_size]
+    #     return sampled_indices
 
     def collate_fn(self, batch: Any, *args, **kwargs) -> Any:
         questions = [sample["question"] for sample in batch]

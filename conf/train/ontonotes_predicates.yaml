@@ -7,7 +7,6 @@ top_k: 100
 
 only_test: False
 
-# pl_trainer
 pl_trainer:
   _target_: pytorch_lightning.Trainer
   accelerator: gpu
@@ -22,7 +21,6 @@ pl_trainer:
   deterministic: warn
   fast_dev_run: False
   precision: 16
-  resume_from_checkpoint: null
 
 # early stopping callback
 # "early_stopping_callback: null" will disable early stopping
@@ -66,17 +64,17 @@ prediction_callbacks:
   #     - _target_: callbacks.custom_callbacks.TopKEvaluationCallback
   #       k: ${train.top_k}
   #       prefix: "train_eval"
-  # - _target_: callbacks.custom_callbacks.NegativeAugmentationCallback
-  #   k: ${train.top_k}
-  #   metric_to_monitor: val_recall@${train.top_k}
-  #   threshold: 0.90
-  #   max_negatives: 5
-  #   batch_size: 128
-  #   stages: [val]
-  #   dataset:
-  #     _target_: data.datasets.DPRDataset
-  #     name: 'train_augmented'
-  #     contexts_path: ${data.contexts_path}
-  #     tokenizer: ${model.language_model}
-  #     path:
-  #       - 'data/dpr-like/srl/ontonotes/ontonotes.train.predicates.json'
+  - _target_: callbacks.custom_callbacks.NegativeAugmentationCallback
+    k: ${train.top_k}
+    metric_to_monitor: val_recall@${train.top_k}
+    threshold: 0.88
+    max_negatives: 5
+    batch_size: 128
+    stages: [val]
+    dataset:
+      _target_: ${data.datamodule.datasets.train._target_}
+      name: 'train_augmented'
+      contexts_path: ${data_overrides.contexts_path}
+      tokenizer: ${model.language_model}
+      path:
+        - 'data/dpr-like/srl/ontonotes/ontonotes.train.predicates.json'

@@ -39,7 +39,7 @@ class GoldenRetrieverPLModule(pl.LightningModule):
         return self.model(**kwargs)
 
     def training_step(self, batch: ModelInputs, batch_idx: int) -> torch.Tensor:
-        forward_output = self.forward(**{**batch, "return_loss": True})
+        forward_output = self.forward(**batch, return_loss=True)
         self.log(
             "loss",
             forward_output["loss"],
@@ -48,7 +48,7 @@ class GoldenRetrieverPLModule(pl.LightningModule):
         return forward_output["loss"]
 
     def validation_step(self, batch: ModelInputs, batch_idx: int) -> None:
-        forward_output = self.forward(**{**batch, "return_loss": True})
+        forward_output = self.forward(**batch, return_loss=True)
         self.log(
             "val_loss",
             forward_output["loss"],
@@ -56,7 +56,7 @@ class GoldenRetrieverPLModule(pl.LightningModule):
         )
 
     def test_step(self, batch: ModelInputs, batch_idx: int) -> Any:
-        forward_output = self.forward(**{**batch, "return_loss": True})
+        forward_output = self.forward(**batch, return_loss=True)
         self.log(
             "test_loss",
             forward_output["loss"],

@@ -242,6 +242,7 @@ cat <<EOF
 
 Configuration:
 -------------------------------------------------------------------
+python:                           $(which python)
 Language model name:              $LANG_MODEL_NAME
 Config path:                      $CONFIG_PATH
 Model name:                       $MODEL_NAME
