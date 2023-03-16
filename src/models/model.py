@@ -100,6 +100,7 @@ class GoldenRetriever(torch.nn.Module):
             context_encoder = question_encoder
         # context encoder model
         self.context_encoder = context_encoder
+
         # loss function
         self.loss_type = loss_type
 

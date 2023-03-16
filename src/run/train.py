@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 from typing import Optional
 
@@ -20,7 +21,6 @@ from models.pl_modules import GoldenRetrieverPLModule
 from utils.logging import get_console_logger
 
 logger = get_console_logger()
-
 
 def train(conf: omegaconf.DictConfig) -> None:
     # reproducibility
@@ -109,10 +109,10 @@ def train(conf: omegaconf.DictConfig) -> None:
         pl_module: GoldenRetrieverPLModule = hydra.utils.instantiate(
             conf.model.pl_module, _recursive_=False
         )
-        try:
-            pl_module = torch.compile(pl_module, backend="inductor")
-        except Exception as e:
-            logger.log(f"Failed to compile the model, you may need to install PyTorch 2.0")
+        # try:
+        #     pl_module = torch.compile(pl_module, backend="inductor")
+        # except Exception as e:
+        #     logger.log(f"Failed to compile the model, you may need to install PyTorch 2.0")
 
 
     # callbacks declaration
