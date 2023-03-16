@@ -227,15 +227,15 @@ class DPRDataset(BaseDataset):
                 max_negatives=self.max_negatives,
                 max_hard_negatives=self.max_hard_negatives,
             ),
-            # remove_columns=[
-            #     "answers",
+            remove_columns=[
+                "answers",
             #     "positive_ctxs",
             #     "negative_ctxs",
             #     "hard_negative_ctxs",
-            # ],
+            ],
             keep_in_memory=True,
             load_from_cache_file=True,
-            num_proc=psutil.cpu_count(),
+            num_proc=psutil.cpu_count(logical=False),
         )
         # add id if not present
         if "id" not in data.column_names:
@@ -285,6 +285,8 @@ class DPRDataset(BaseDataset):
         ]
 
         context = positive_ctxs + negative_ctxs + hard_negative_ctxs
+        if max_contexts != -1:
+            context = context[:max_contexts]
         output = {
             "question": question,
             "context": context,
@@ -460,64 +462,60 @@ class InBatchNegativesDPRDataset(DPRDataset):
         questions = [sample["question"] for sample in batch]
         contexts = [sample["context"] for sample in batch]
         positives = [sample["positives"] for sample in batch]
-        negatives = [sample["negatives"] for sample in batch]
-        hard_negatives = [sample["hard_negatives"] for sample in batch]
+
+        # this is needed to get the correct labels for each question
+        positives_ctxs = [sample["positive_ctxs"] for sample in batch]
+        negatives_ctxs = [sample["negative_ctxs"] for sample in batch]
+        hard_negatives_ctxs = [sample["hard_negative_ctxs"] for sample in batch]
         # use negatives from predictions if available
         if "augmented_negative_contexts" in batch[0]:
             # add augmented negative contexts to contexts
             augmented_negative_contexts = [
                 sample["augmented_negative_contexts"] for sample in batch
             ]
-            contexts = [
-                # remove the last len(a) contexts to add the augmented negative context
-                c[: -len(a)] + a
-                for c, a in zip(contexts, augmented_negative_contexts)
-            ]
+            hard_negatives_ctxs += augmented_negative_contexts
 
+        # convert the questions to a batch
         questions = self.convert_to_batch(questions)
-        # first flat the list of lists of contexts
-        contexts = [c for ctxs in contexts for c in ctxs]
-        # invert contexts from list of dict to dict of list
-        contexts = self.convert_to_batch(contexts)
 
-        augmented_labels: Optional[torch.Tensor] = None
-        contexts_per_question: Optional[List[int]] = None
+        # now we need to make the batch of contexts
+        # it can happen that there are duplicate contexts from different questions
+        # so we need to remove them
+        flat_positives = [p for ps in positives_ctxs for p in ps]
+        flat_negatives = [n for ns in negatives_ctxs for n in ns]
+        flat_hard_negatives = [hn for hns in hard_negatives_ctxs for hn in hns]
+        # remove duplicates based on input_ids (input_ids is a list of int)
+        flat_positives = list({tuple(p["input_ids"]): p for p in flat_positives}.values())
+        flat_negatives = list({tuple(n["input_ids"]): n for n in flat_negatives}.values())
+        flat_hard_negatives = list(
+            {tuple(hn["input_ids"]): hn for hn in flat_hard_negatives}.values()
+        )
+        unique_contexts = flat_positives + flat_negatives + flat_hard_negatives
+        contexts = self.convert_to_batch(unique_contexts)
+        # build an index to map the position of the context in the batch
+        context_index = {
+            tuple(c["input_ids"]): i for i, c in enumerate(unique_contexts)
+        }
+
+        # now we can create the labels
         labels = torch.zeros(
             questions["input_ids"].shape[0], contexts["input_ids"].shape[0]
         )
-        positive_index_end = [sample["positive_index_end"] for sample in batch]
-        last_start = 0
-        for i, end in enumerate(positive_index_end):
-            start = 0 if i == 0 else last_start + len(batch[i - 1]["context"])
-            end = end if i == 0 else start + end
-            labels[i, start:end] = 1
-            last_start = start
-
-        if self.in_batch_positives_augmentation:
-            # labels is a mask of positive contexts for each question
-            # has shape num_questions x num_contexts
-            augmented_labels = torch.zeros(
-                questions["input_ids"].shape[0], contexts["input_ids"].shape[0]
-            )
-            flat_positives = [s for sample in batch for s in sample["positives"]]
-            # labels includes as positive also the labels that appear in the
-            # other samples but are positive for the considered one (avoid false
-            # negative context)
-            for p_idx, p in enumerate(flat_positives):
-                for i, positive in enumerate(positives):
-                    for positive_ctx in positive:
-                        if positive_ctx in p:
-                            augmented_labels[i, p_idx] = 1
+        # iterate over the questions and set the labels to 1 if the context is positive
+        for sample_idx in range(len(questions["input_ids"])):
+            for ctx in positives_ctxs[sample_idx]:
+                # get the index of the positive context
+                index = context_index[tuple(ctx["input_ids"])]
+                # set the label to 1
+                labels[sample_idx, index] = 1
 
         model_inputs = {
             "questions": ModelInputs(questions),
             "contexts": ModelInputs(contexts),
-            "labels": augmented_labels if augmented_labels is not None else labels,
+            "labels": labels,
             "positives": positives,
             "id": [sample["id"] for sample in batch],
         }
-        if contexts_per_question is not None:
-            model_inputs["contexts_per_question"] = contexts_per_question
         return ModelInputs(model_inputs)
 
 
