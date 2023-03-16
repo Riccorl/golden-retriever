@@ -4,7 +4,6 @@ import hydra
 import pytorch_lightning as pl
 import torch
 from omegaconf import DictConfig
-import transformers
 
 from data.labels import Labels
 from utils.model_inputs import ModelInputs
@@ -100,12 +99,4 @@ class GoldenRetrieverPLModule(pl.LightningModule):
             "interval": "step",
             "frequency": 1,
         }
-        # {
-        #     "lr_scheduler": {
-        #         "scheduler": scheduler,
-        #         "interval": "step",
-        #         "frequency": 1,
-        #     },
-        # }
         return [optimizer], [lr_scheduler_config]
-        # return {"optimizer": optimizer, "lr_scheduler": lr_scheduler_config}

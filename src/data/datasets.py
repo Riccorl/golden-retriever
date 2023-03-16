@@ -1,6 +1,5 @@
 import json
 import os
-import random
 import time
 from functools import partial
 from pathlib import Path
@@ -457,9 +456,13 @@ class InBatchNegativesDPRDataset(DPRDataset):
         self.data = self.load(path, self.tokenizer, shuffle)
 
     def collate_fn(self, batch: Any, *args, **kwargs) -> Any:
+        # get data from batch
         questions = [sample["question"] for sample in batch]
         contexts = [sample["context"] for sample in batch]
         positives = [sample["positives"] for sample in batch]
+        negatives = [sample["negatives"] for sample in batch]
+        hard_negatives = [sample["hard_negatives"] for sample in batch]
+        # use negatives from predictions if available
         if "augmented_negative_contexts" in batch[0]:
             # add augmented negative contexts to contexts
             augmented_negative_contexts = [
