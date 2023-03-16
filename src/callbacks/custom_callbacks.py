@@ -412,7 +412,7 @@ class TopKEvaluationCallback(NLPTemplateCallback):
                 # compute the recall at k
                 # cut the predictions to the first k elements
                 predictions = sample["predictions"][: self.k]
-                hits += len(set(sample["predictions"]) & set(sample["gold"]))
+                hits += len(set(predictions) & set(sample["gold"]))
                 total += len(set(sample["gold"]))
 
             # compute the mean recall at k
