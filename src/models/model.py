@@ -25,9 +25,10 @@ class SentenceEncoder(torch.nn.Module):
         self,
         language_model: Union[
             str, tr.PreTrainedModel, ORTModelForFeatureExtraction
-        ] = "sentence-transformers/all-MiniLM-6-v2",
+        ] = "sentence-transformers/all-MiniLM-12-v2",
         pooling_strategy: str = "mean",
         load_ort_model: bool = False,
+        freeze: bool = False,
         *args,
         **kwargs,
     ):
@@ -42,6 +43,10 @@ class SentenceEncoder(torch.nn.Module):
         else:
             self.language_model = language_model
         self.pooling_strategy = pooling_strategy
+
+        if freeze and not isinstance(self.language_model, ORTModelForFeatureExtraction):
+            for param in self.language_model.parameters():
+                param.requires_grad = False
 
     def forward(
         self,
