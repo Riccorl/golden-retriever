@@ -25,25 +25,25 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
     def __init__(
         self,
         k: int = 100,
-        report_intervals: Optional[int] = None,
         batch_size: int = 32,
         num_workers: int = 0,
+        use_faiss: bool = False,
+        force_reindex: bool = True,
         output_dir: Optional[Path] = None,
         stages: Set[Union[str, Stage]] = None,
         other_callbacks: Optional[List[DictConfig]] = None,
         dataset: Optional[Union[DictConfig, BaseDataset]] = None,
-        use_faiss: bool = False,
         *args,
         **kwargs,
     ):
         super().__init__(stages, other_callbacks)
         self.k = k
-        self.report_intervals = report_intervals
         self.batch_size = batch_size
         self.num_workers = num_workers
+        self.use_faiss = use_faiss
+        self.force_reindex = force_reindex
         self.output_dir = output_dir
         self.dataset = dataset
-        self.use_faiss = use_faiss
 
     @torch.no_grad()
     def __call__(
@@ -97,7 +97,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                 batch_size=self.batch_size,
                 num_workers=self.num_workers,
                 collate_fn=collate_fn,
-                force_reindex=True,
+                force_reindex=self.force_reindex,
                 use_faiss=self.use_faiss,
                 use_gpu=use_gpu,  # (pl_module.device.type == "cuda"),
             )
@@ -289,22 +289,26 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
     def __init__(
         self,
         k: int = 100,
-        report_intervals: Optional[int] = None,
-        metric_to_monitor: str = "val_loss",
-        threshold: float = 0.8,
-        max_negatives: int = 3,
         batch_size: int = 32,
+        num_workers: int = 0,
+        force_reindex: bool = False,
+        use_faiss: bool = False,
         output_dir: Optional[Path] = None,
         stages: Set[Union[str, Stage]] = None,
         other_callbacks: Optional[List[DictConfig]] = None,
-        dataset: Optional[DictConfig] = None,
+        dataset: Optional[Union[DictConfig, BaseDataset]] = None,
+        metric_to_monitor: str = "val_loss",
+        threshold: float = 0.8,
+        max_negatives: int = 5,
         *args,
         **kwargs,
     ):
         super().__init__(
             k=k,
-            report_intervals=report_intervals,
             batch_size=batch_size,
+            num_workers=num_workers,
+            force_reindex=force_reindex,
+            use_faiss=use_faiss,
             output_dir=output_dir,
             stages=stages,
             other_callbacks=other_callbacks,

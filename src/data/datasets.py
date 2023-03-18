@@ -633,7 +633,7 @@ class SampledNegativesDPRDataset(DPRDataset):
         # update the samples with the sampled negatives
         data = data.map(
             partial(
-                self.add_sampled_negatives,
+                self.sample_negatives,
                 tokenizer=tokenizer,
                 sample_space_size=sample_space_size,
                 context_frequencies=context_frequencies,
@@ -646,7 +646,7 @@ class SampledNegativesDPRDataset(DPRDataset):
         return data
 
     @staticmethod
-    def add_sampled_negatives(
+    def sample_negatives(
         sample: Dict[str, Any],
         tokenizer: tr.PreTrainedTokenizer,
         context_manager: Labels,
