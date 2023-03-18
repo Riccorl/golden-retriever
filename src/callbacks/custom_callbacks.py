@@ -171,7 +171,19 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                     / f"{datasets[dataloader_idx].name}_{dataloader_idx}.json"
                 )
                 logger.log(f"Saving predictions to {predictions_path}")
-                datasets[dataloader_idx].save_data(predictions_path)
+                datasets[dataloader_idx].save_data(
+                    predictions_path,
+                    remove_columns=[
+                        "context",
+                        "positives",
+                        "negatives",
+                        "wrong",
+                        "positive_ctxs",
+                        "negative_ctxs",
+                        "hard_negative_ctxs",
+                        "positive_index_end",
+                    ],
+                )
 
         # return the predictions
         return dataloader_predictions

@@ -122,7 +122,7 @@ class DPRDataset(BaseDataset):
         path: Union[str, os.PathLike, List[str], List[os.PathLike]],
         shuffle: bool = False,
         max_contexts: int = 64,
-        max_positives: int = -1,
+        max_positives: int = 1,
         max_negatives: int = 0,
         max_hard_negatives: int = 0,
         max_question_length: int = 256,
@@ -139,6 +139,12 @@ class DPRDataset(BaseDataset):
         self.max_question_length = max_question_length
         self.max_context_length = max_context_length
 
+        if type(self) == DPRDataset and max_positives != 1:
+            raise ValueError(
+                "DPRDataset only supports one positive per question. "
+                "Please use `InBatchNegativesDPRDataset` or `SampledNegativesDPRDataset` "
+                "for multiple positives."
+            )
         self.context_manager = Labels()
         # read contexts from file if provided
         if contexts_path:
@@ -165,8 +171,7 @@ class DPRDataset(BaseDataset):
                     value=self.tokenizer.pad_token_type_id,
                 ),
             }
-        # TODO: use cls stuff
-        # self.data = self.load(path, tokenizer=self.tokenizer, shuffle=shuffle)
+        self.data = self.load(path, tokenizer=self.tokenizer, shuffle=shuffle)
 
     def __len__(self) -> int:
         return len(self.data)
@@ -227,12 +232,6 @@ class DPRDataset(BaseDataset):
                 max_negatives=self.max_negatives,
                 max_hard_negatives=self.max_hard_negatives,
             ),
-            remove_columns=[
-                "answers",
-            #     "positive_ctxs",
-            #     "negative_ctxs",
-            #     "hard_negative_ctxs",
-            ],
             keep_in_memory=True,
             load_from_cache_file=True,
             num_proc=psutil.cpu_count(logical=False),
@@ -258,13 +257,13 @@ class DPRDataset(BaseDataset):
         max_question_length: int = 256,
         max_context_length: int = 128,
     ) -> Dict:
-        positive_ctxs = [p["text"] for p in sample["positive_ctxs"]]
+        positive_ctxs = [p["text"].strip() for p in sample["positive_ctxs"]]
         if max_positives != -1:
             positive_ctxs = positive_ctxs[:max_positives]
-        negative_ctxs = [n["text"] for n in sample["negative_ctxs"]]
+        negative_ctxs = [n["text"].strip() for n in sample["negative_ctxs"]]
         if max_negatives != -1:
             negative_ctxs = negative_ctxs[:max_negatives]
-        hard_negative_ctxs = [h["text"] for h in sample["hard_negative_ctxs"]]
+        hard_negative_ctxs = [h["text"].strip() for h in sample["hard_negative_ctxs"]]
         if max_hard_negatives != -1:
             hard_negative_ctxs = hard_negative_ctxs[:max_hard_negatives]
 
@@ -290,7 +289,7 @@ class DPRDataset(BaseDataset):
         output = {
             "question": question,
             "context": context,
-            "positives": set([p["text"] for p in sample["positive_ctxs"]]),
+            "positives": set([p["text"].strip() for p in sample["positive_ctxs"]]),
             "positive_ctxs": positive_ctxs,
             "negative_ctxs": negative_ctxs,
             "hard_negative_ctxs": hard_negative_ctxs,
@@ -362,7 +361,9 @@ class DPRDataset(BaseDataset):
                 )
         return samples
 
-    def save_data(self, path: Union[str, os.PathLike]) -> None:
+    def save_data(
+        self, path: Union[str, os.PathLike], remove_columns: Optional[List[str]] = None
+    ) -> None:
         """
         Save the samples to a file.
 
@@ -374,8 +375,13 @@ class DPRDataset(BaseDataset):
         samples["question"] = self.tokenizer.batch_decode(
             [question["input_ids"] for question in samples["question"]]
         )
-        # too large to save
-        samples.pop("context")
+
+        # remove columns if needed
+        if remove_columns is None:
+            remove_columns = []
+        for key in remove_columns:
+            if key in samples:
+                samples.pop(key)
 
         with open(path, "w") as f:
             for i in range(len(samples["question"])):
@@ -423,6 +429,38 @@ class DPRDataset(BaseDataset):
                 self.data = self.data.remove_columns(name)
             self.data = self.data.add_column(name=name, column=column)
 
+    def collate_fn(self, batch: Any, *args, **kwargs) -> Any:
+        questions = [sample["question"] for sample in batch]
+        contexts = [sample["context"] for sample in batch]
+        positives = [sample["positives"] for sample in batch]
+
+        questions = self.convert_to_batch(questions)
+        # first flat the list of list of contexts
+        contexts = [c for ctxs in contexts for c in ctxs]
+        # invert contexts from list of dict to dict of list
+        contexts = self.convert_to_batch(contexts)
+
+        # actual positives
+        labels = torch.zeros(
+                questions["input_ids"].shape[0], contexts["input_ids"].shape[0]
+        )
+        positive_index_end = [sample["positive_index_end"] for sample in batch]
+        last_start = 0
+        for i, end in enumerate(positive_index_end):
+            start = 0 if i == 0 else last_start + len(batch[i - 1]["context"])
+            end = end if i == 0 else start + end
+            labels[i, start:end] = 1
+            last_start = start
+
+        model_inputs = {
+            "questions": ModelInputs(questions),
+            "contexts": ModelInputs(contexts),
+            "labels": labels,
+            "positives": positives,
+            "id": [sample["id"] for sample in batch],
+        }
+        return ModelInputs(model_inputs)
+
 
 class InBatchNegativesDPRDataset(DPRDataset):
     def __init__(
@@ -430,7 +468,7 @@ class InBatchNegativesDPRDataset(DPRDataset):
         name: str,
         path: Union[str, os.PathLike, List[str], List[os.PathLike]],
         shuffle: bool = False,
-        max_contexts: int = 64,
+        max_contexts: int = -1,
         max_positives: int = -1,
         max_negatives: int = 0,
         max_hard_negatives: int = 0,
@@ -438,7 +476,6 @@ class InBatchNegativesDPRDataset(DPRDataset):
         max_context_length: int = 128,
         contexts_path: Union[str, os.PathLike] = None,
         tokenizer: Optional[Union[str, tr.PreTrainedTokenizer]] = None,
-        in_batch_positives_augmentation: bool = True,
         **kwargs,
     ):
         super().__init__(
@@ -453,14 +490,12 @@ class InBatchNegativesDPRDataset(DPRDataset):
             max_context_length,
             contexts_path,
             tokenizer,
+            **kwargs,
         )
-        self.in_batch_positives_augmentation = in_batch_positives_augmentation
-        self.data = self.load(path, self.tokenizer, shuffle)
 
     def collate_fn(self, batch: Any, *args, **kwargs) -> Any:
         # get data from batch
         questions = [sample["question"] for sample in batch]
-        contexts = [sample["context"] for sample in batch]
         positives = [sample["positives"] for sample in batch]
 
         # this is needed to get the correct labels for each question
@@ -485,8 +520,12 @@ class InBatchNegativesDPRDataset(DPRDataset):
         flat_negatives = [n for ns in negatives_ctxs for n in ns]
         flat_hard_negatives = [hn for hns in hard_negatives_ctxs for hn in hns]
         # remove duplicates based on input_ids (input_ids is a list of int)
-        flat_positives = list({tuple(p["input_ids"]): p for p in flat_positives}.values())
-        flat_negatives = list({tuple(n["input_ids"]): n for n in flat_negatives}.values())
+        flat_positives = list(
+            {tuple(p["input_ids"]): p for p in flat_positives}.values()
+        )
+        flat_negatives = list(
+            {tuple(n["input_ids"]): n for n in flat_negatives}.values()
+        )
         flat_hard_negatives = list(
             {tuple(hn["input_ids"]): hn for hn in flat_hard_negatives}.values()
         )
@@ -550,22 +589,27 @@ class SampledNegativesDPRDataset(DPRDataset):
             tokenizer,
         )
         self.frequency_noise = frequency_noise
-        self.data = self.load(path, self.tokenizer, shuffle)
+        self.data = self.add_sampled_negatives_to_data(
+            self.data,
+            self.tokenizer,
+            self.context_manager,
+            frequency_noise,
+            max_contexts,
+        )
 
-    def load(
+    def add_sampled_negatives_to_data(
         self,
-        paths: Union[str, os.PathLike, List[str], List[os.PathLike]],
-        tokenizer: tr.PreTrainedTokenizer = None,
-        shuffle: bool = False,
+        data,
+        tokenizer: tr.PreTrainedTokenizer,
+        context_manager: Labels,
+        frequency_noise: bool = True,
+        max_contexts: int = 64,
         *args,
         **kwargs,
     ) -> Any:
-        data = super().load(paths, self.tokenizer, shuffle)
-        if self.frequency_noise:
+        if frequency_noise:
             logger.log("Computing contexts frequencies")
-            context_frequencies = self.compute_contexts_frequency(
-                data, self.context_manager
-            )
+            context_frequencies = self.compute_contexts_frequency(data, context_manager)
             # get only those contexts that have frequency > 0
             context_idx_above_zero = [
                 idx for idx, freq in enumerate(context_frequencies) if freq > 0
@@ -574,7 +618,7 @@ class SampledNegativesDPRDataset(DPRDataset):
             sampled_context_manager = Labels()
             sampled_context_manager.add_labels(
                 [
-                    self.context_manager.get_label_from_index(idx)
+                    context_manager.get_label_from_index(idx)
                     for idx in context_idx_above_zero
                 ]
             )
@@ -583,7 +627,7 @@ class SampledNegativesDPRDataset(DPRDataset):
             )
         else:
             context_frequencies = None
-            sampled_context_manager = self.context_manager
+            sampled_context_manager = context_manager
         sample_space_size = sampled_context_manager.get_label_size()
         logger.log(f"Sampling negative contexts from {sample_space_size} samples")
         # update the samples with the sampled negatives
@@ -594,34 +638,12 @@ class SampledNegativesDPRDataset(DPRDataset):
                 sample_space_size=sample_space_size,
                 context_frequencies=context_frequencies,
                 context_manager=sampled_context_manager,
-                max_negatives=self.max_negatives,
-                max_contexts=self.max_contexts,
+                max_contexts=max_contexts,
             ),
-            remove_columns=[
-                "answers",
-            ],
             keep_in_memory=True,
             num_proc=psutil.cpu_count(),
         )
         return data
-
-    @staticmethod
-    def compute_contexts_frequency(data, context_manager) -> np.array:
-        """
-        Compute the frequency of each context in the dataset.
-        """
-        if context_manager is None:
-            raise ValueError(
-                "Context manager is required to compute the frequency of contexts"
-            )
-        frequency = np.zeros(context_manager.get_label_size())
-        for sample in data:
-            for context in sample["positives"]:
-                contex_index = context_manager.get_index_from_label(context)
-                frequency[contex_index] += 1
-        # normalize the frequency
-        frequency = frequency / frequency.sum()
-        return frequency
 
     @staticmethod
     def add_sampled_negatives(
@@ -630,7 +652,6 @@ class SampledNegativesDPRDataset(DPRDataset):
         context_manager: Labels,
         sample_space_size: int,
         context_frequencies: np.array,
-        max_negatives: int = -1,
         max_contexts: int = -1,
         max_context_length: int = 128,
     ):
@@ -638,6 +659,7 @@ class SampledNegativesDPRDataset(DPRDataset):
         Sample negatives and add them to the sample.
         """
 
+        # TODO: make faster sampling
         negative_sampler = NegativeSampler(sample_space_size, context_frequencies)
 
         positives_contexts_ids = sample["positive_ctxs"]
@@ -672,6 +694,24 @@ class SampledNegativesDPRDataset(DPRDataset):
         )
         sample["context"] = context
         return sample
+
+    @staticmethod
+    def compute_contexts_frequency(data, context_manager) -> np.array:
+        """
+        Compute the frequency of each context in the dataset.
+        """
+        if context_manager is None:
+            raise ValueError(
+                "Context manager is required to compute the frequency of contexts"
+            )
+        frequency = np.zeros(context_manager.get_label_size())
+        for sample in data:
+            for context in sample["positives"]:
+                contex_index = context_manager.get_index_from_label(context)
+                frequency[contex_index] += 1
+        # normalize the frequency
+        frequency = frequency / frequency.sum()
+        return frequency
 
     def collate_fn(self, batch: Any, *args, **kwargs) -> Any:
         questions = [sample["question"] for sample in batch]
