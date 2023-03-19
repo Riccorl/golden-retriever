@@ -636,10 +636,10 @@ class InBatchNegativesDPRDataset(DPRDataset):
         negatives_ctxs = [sample["negative_ctxs"] for sample in batch]
         hard_negatives_ctxs = [sample["hard_negative_ctxs"] for sample in batch]
         # use negatives from predictions if available
-        if "augmented_negative_contexts" in batch[0]:
+        if "retrieved_hard_negatives" in batch[0]:
             # add augmented negative contexts to contexts
             augmented_negative_contexts = [
-                sample["augmented_negative_contexts"] for sample in batch
+                sample["retrieved_hard_negatives"] for sample in batch
             ]
             hard_negatives_ctxs += augmented_negative_contexts
 

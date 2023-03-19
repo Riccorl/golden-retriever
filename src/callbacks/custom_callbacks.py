@@ -26,7 +26,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         self,
         k: int = 100,
         batch_size: int = 32,
-        num_workers: int = 0,
+        num_workers: int = 4,
         use_faiss: bool = False,
         force_reindex: bool = True,
         output_dir: Optional[Path] = None,
@@ -293,7 +293,7 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
         self,
         k: int = 100,
         batch_size: int = 32,
-        num_workers: int = 0,
+        num_workers: int = 4,
         force_reindex: bool = False,
         use_faiss: bool = False,
         output_dir: Optional[Path] = None,
@@ -350,7 +350,7 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
         predictions = super().__call__(trainer, pl_module, stage, *args, **kwargs)
         for _, samples in predictions.items():
             # create a defaultdict of defaultdicts to store the augmented contexts
-            augmented_negative_contexts = defaultdict(lambda: defaultdict(list))
+            retrieved_hard_negatives = defaultdict(lambda: defaultdict(list))
             for s_idx, sample in enumerate(samples):
                 top_k_contexts = sample["predictions"]
                 gold_contexts = sample["gold"]
@@ -368,24 +368,24 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
                     truncation=True,
                 )
                 for c_index in range(len(wrong_contexts)):
-                    augmented_negative_contexts[s_idx][
+                    retrieved_hard_negatives[s_idx][
                         "input_ids"
                     ].append(wrong_contexts_ids["input_ids"][c_index])
-                    augmented_negative_contexts[s_idx][
+                    retrieved_hard_negatives[s_idx][
                         "attention_mask"
                     ].append(wrong_contexts_ids["attention_mask"][c_index])
                     if "token_type_ids" in wrong_contexts_ids:
-                        augmented_negative_contexts[s_idx][
+                        retrieved_hard_negatives[s_idx][
                             "token_type_ids"
                         ].append(wrong_contexts_ids["token_type_ids"][c_index])
 
-            # order augmented_negative_contexts by sample_idx_in_dataset and get the values
-            augmented_negative_contexts = [
-                augmented_negative_contexts[i]
-                for i in sorted(augmented_negative_contexts.keys())
+            # order retrieved_hard_negatives by sample_idx_in_dataset and get the values
+            retrieved_hard_negatives = [
+                retrieved_hard_negatives[i]
+                for i in sorted(retrieved_hard_negatives.keys())
             ]
             trainer.datamodule.train_dataset.update_data(
-                "augmented_contexts", augmented_negative_contexts, overwrite=True
+                "retrieved_hard_negatives", retrieved_hard_negatives, overwrite=True
             )
 
         return predictions
@@ -395,14 +395,12 @@ class TopKEvaluationCallback(NLPTemplateCallback):
     def __init__(
         self,
         k: int = 100,
-        report_intervals: Optional[int] = None,
         prefix: Optional[str] = None,
         *args,
         **kwargs,
     ):
         super().__init__()
         self.k = k
-        self.report_intervals = report_intervals
         self.prefix = prefix
 
     @torch.no_grad()
@@ -452,12 +450,11 @@ class NYTTopKEvaluationCallback(TopKEvaluationCallback):
         self,
         label_mapping: Dict[str, List[str]],
         k: int = 100,
-        report_intervals: Optional[int] = None,
         batch_size: int = 32,
         *args,
         **kwargs,
     ):
-        super().__init__(k, report_intervals, batch_size, *args, **kwargs)
+        super().__init__(k, batch_size, *args, **kwargs)
         self.label_mapping = label_mapping
         # invert the label mapping
         self.inverted_label_mapping = {
