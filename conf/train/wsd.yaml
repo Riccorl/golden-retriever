@@ -49,15 +49,18 @@ prediction_callbacks:
     other_callbacks:
       - _target_: callbacks.custom_callbacks.TopKEvaluationCallback
         k: ${train.top_k}
+        verbose: True
       - _target_: callbacks.custom_callbacks.TopKEvaluationCallback
         k: 50
+        verbose: True
       - _target_: callbacks.custom_callbacks.TopKEvaluationCallback
         k: 20
+        verbose: True
   - _target_: callbacks.custom_callbacks.NegativeAugmentationCallback
     k: ${train.top_k}
     metric_to_monitor: val_recall@${train.top_k}
     threshold: 0.70
-    max_negatives: 10
+    max_negatives: 5
     batch_size: 256
     stages: [val]
     dataset:
@@ -68,4 +71,4 @@ prediction_callbacks:
       max_context_length: 512
       tokenizer: ${model.language_model}
       path: ${data_overrides.train_path}
-      output_dir: null
+      save_predictions: False

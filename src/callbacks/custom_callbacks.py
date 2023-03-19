@@ -30,6 +30,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         use_faiss: bool = False,
         force_reindex: bool = True,
         output_dir: Optional[Path] = None,
+        save_predictions: bool = True,
         stages: Set[Union[str, Stage]] = None,
         other_callbacks: Optional[List[DictConfig]] = None,
         dataset: Optional[Union[DictConfig, BaseDataset]] = None,
@@ -43,6 +44,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         self.use_faiss = use_faiss
         self.force_reindex = force_reindex
         self.output_dir = output_dir
+        self.save_predictions = save_predictions
         self.dataset = dataset
 
     @torch.no_grad()
@@ -159,31 +161,32 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                 )
             else:
                 # save to file
-                if self.output_dir is not None:
-                    prediction_folder = Path(self.output_dir)
-                else:
-                    prediction_folder = (
-                        Path(trainer.logger.experiment.dir) / "predictions"
+                if self.save_predictions:
+                    if self.output_dir is not None:
+                        prediction_folder = Path(self.output_dir)
+                    else:
+                        prediction_folder = (
+                            Path(trainer.logger.experiment.dir) / "predictions"
+                        )
+                        prediction_folder.mkdir(exist_ok=True)
+                    predictions_path = (
+                        prediction_folder
+                        / f"{datasets[dataloader_idx].name}_{dataloader_idx}.json"
                     )
-                    prediction_folder.mkdir(exist_ok=True)
-                predictions_path = (
-                    prediction_folder
-                    / f"{datasets[dataloader_idx].name}_{dataloader_idx}.json"
-                )
-                logger.log(f"Saving predictions to {predictions_path}")
-                datasets[dataloader_idx].save_data(
-                    predictions_path,
-                    remove_columns=[
-                        "context",
-                        "positives",
-                        "negatives",
-                        "wrong",
-                        "positive_ctxs",
-                        "negative_ctxs",
-                        "hard_negative_ctxs",
-                        "positive_index_end",
-                    ],
-                )
+                    logger.log(f"Saving predictions to {predictions_path}")
+                    datasets[dataloader_idx].save_data(
+                        predictions_path,
+                        remove_columns=[
+                            "context",
+                            "positives",
+                            "negatives",
+                            "wrong",
+                            "positive_ctxs",
+                            "negative_ctxs",
+                            "hard_negative_ctxs",
+                            "positive_index_end",
+                        ],
+                    )
 
         # return the predictions
         return dataloader_predictions
@@ -297,6 +300,7 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
         force_reindex: bool = False,
         use_faiss: bool = False,
         output_dir: Optional[Path] = None,
+        save_predictions: bool = False,
         stages: Set[Union[str, Stage]] = None,
         other_callbacks: Optional[List[DictConfig]] = None,
         dataset: Optional[Union[DictConfig, BaseDataset]] = None,
@@ -313,6 +317,7 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
             force_reindex=force_reindex,
             use_faiss=use_faiss,
             output_dir=output_dir,
+            save_predictions=save_predictions,
             stages=stages,
             other_callbacks=other_callbacks,
             dataset=dataset,
@@ -350,7 +355,8 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
         predictions = super().__call__(trainer, pl_module, stage, *args, **kwargs)
         for _, samples in predictions.items():
             # create a defaultdict of defaultdicts to store the augmented contexts
-            retrieved_hard_negatives = defaultdict(lambda: defaultdict(list))
+            # retrieved_hard_negatives = defaultdict(lambda: defaultdict(list))
+            retrieved_hard_negatives = []
             for s_idx, sample in enumerate(samples):
                 top_k_contexts = sample["predictions"]
                 gold_contexts = sample["gold"]
@@ -367,23 +373,20 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
                     max_length=trainer.datamodule.train_dataset.max_context_length,
                     truncation=True,
                 )
-                for c_index in range(len(wrong_contexts)):
-                    retrieved_hard_negatives[s_idx][
-                        "input_ids"
-                    ].append(wrong_contexts_ids["input_ids"][c_index])
-                    retrieved_hard_negatives[s_idx][
-                        "attention_mask"
-                    ].append(wrong_contexts_ids["attention_mask"][c_index])
-                    if "token_type_ids" in wrong_contexts_ids:
-                        retrieved_hard_negatives[s_idx][
-                            "token_type_ids"
-                        ].append(wrong_contexts_ids["token_type_ids"][c_index])
-
-            # order retrieved_hard_negatives by sample_idx_in_dataset and get the values
-            retrieved_hard_negatives = [
-                retrieved_hard_negatives[i]
-                for i in sorted(retrieved_hard_negatives.keys())
-            ]
+                retrieved_hard_negatives.append(
+                    [
+                        {
+                            "input_ids": wrong_contexts_ids["input_ids"][c_index],
+                            "attention_mask": wrong_contexts_ids["attention_mask"][
+                                c_index
+                            ],
+                            "token_type_ids": wrong_contexts_ids["token_type_ids"][
+                                c_index
+                            ],
+                        }
+                        for c_index in range(len(wrong_contexts))
+                    ]
+                )
             trainer.datamodule.train_dataset.update_data(
                 "retrieved_hard_negatives", retrieved_hard_negatives, overwrite=True
             )
@@ -396,12 +399,14 @@ class TopKEvaluationCallback(NLPTemplateCallback):
         self,
         k: int = 100,
         prefix: Optional[str] = None,
+        verbose: bool = False,
         *args,
         **kwargs,
     ):
         super().__init__()
         self.k = k
         self.prefix = prefix
+        self.verbose = verbose
 
     @torch.no_grad()
     def __call__(
@@ -413,7 +418,8 @@ class TopKEvaluationCallback(NLPTemplateCallback):
         *args,
         **kwargs,
     ) -> dict:
-        logger.log(f"Computing recall@{self.k}")
+        if self.verbose:
+            logger.log(f"Computing recall@{self.k}")
 
         # metrics to return
         metrics = {}
@@ -442,6 +448,12 @@ class TopKEvaluationCallback(NLPTemplateCallback):
         else:
             metrics = {f"{stage.value}_{k}": v for k, v in metrics.items()}
         pl_module.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
+
+        if self.verbose:
+            logger.log(
+                f"Recall@{self.k} on {stage.value}: {metrics[f'{stage.value}_recall@{self.k}']}"
+            )
+
         return metrics
 
 
