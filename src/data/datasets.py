@@ -729,15 +729,15 @@ class SampledNegativesDPRDataset(DPRDataset):
         questions = [sample["question"] for sample in batch]
         contexts = [sample["context"] for sample in batch]
         positives = [sample["positives"] for sample in batch]
-        if "augmented_negative_contexts" in batch[0]:
+        if "retrieved_hard_negatives" in batch[0]:
             # add augmented negative contexts to contexts
-            augmented_negative_contexts = [
-                sample["augmented_negative_contexts"] for sample in batch
+            retrieved_hard_negatives = [
+                sample["retrieved_hard_negatives"] for sample in batch
             ]
             contexts = [
                 # remove the last len(a) contexts to add the augmented negative context
                 c[: -len(a)] + a
-                for c, a in zip(contexts, augmented_negative_contexts)
+                for c, a in zip(contexts, retrieved_hard_negatives)
             ]
 
         questions = self.convert_to_batch(questions)
