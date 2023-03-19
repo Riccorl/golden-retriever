@@ -127,6 +127,8 @@ class DPRDataset(BaseDataset):
         max_hard_negatives: int = 0,
         max_question_length: int = 256,
         max_context_length: int = 128,
+        max_negatives_to_sample: int = 0,
+        sample_by_frequency: bool = False,
         contexts_path: Union[str, os.PathLike] = None,
         tokenizer: Optional[Union[str, tr.PreTrainedTokenizer]] = None,
         **kwargs,
@@ -138,6 +140,8 @@ class DPRDataset(BaseDataset):
         self.max_hard_negatives = max_hard_negatives
         self.max_question_length = max_question_length
         self.max_context_length = max_context_length
+        self.max_negatives_to_sample = max_negatives_to_sample
+        self.sample_by_frequency = sample_by_frequency
 
         if type(self) == DPRDataset and max_positives != 1:
             raise ValueError(
@@ -172,6 +176,14 @@ class DPRDataset(BaseDataset):
                 ),
             }
         self.data = self.load(path, tokenizer=self.tokenizer, shuffle=shuffle)
+        if self.max_negatives_to_sample > 0:
+            self.data = self.add_sampled_negatives_to_data(
+                self.data,
+                self.tokenizer,
+                self.context_manager,
+                sample_by_frequency,
+                self.max_negatives_to_sample,
+            )
 
     def __len__(self) -> int:
         return len(self.data)
@@ -296,6 +308,123 @@ class DPRDataset(BaseDataset):
             "positive_index_end": len(positive_ctxs),
         }
         return output
+    
+
+    def add_sampled_negatives_to_data(
+        self,
+        data,
+        tokenizer: tr.PreTrainedTokenizer,
+        context_manager: Labels,
+        sample_by_frequency: bool = True,
+        max_negatives_to_sample: int = 64,
+        *args,
+        **kwargs,
+    ) -> Any:
+        if sample_by_frequency:
+            logger.log("Computing contexts frequencies")
+            context_frequencies = self.compute_contexts_frequency(data, context_manager)
+            # get only those contexts that have frequency > 0
+            context_idx_above_zero = [
+                idx for idx, freq in enumerate(context_frequencies) if freq > 0
+            ]
+            # build a reduced context_manager for sampling negatives
+            sampled_context_manager = Labels()
+            sampled_context_manager.add_labels(
+                [
+                    context_manager.get_label_from_index(idx)
+                    for idx in context_idx_above_zero
+                ]
+            )
+            context_frequencies = self.compute_contexts_frequency(
+                data, sampled_context_manager
+            )
+        else:
+            context_frequencies = None
+            sampled_context_manager = context_manager
+        sample_space_size = sampled_context_manager.get_label_size()
+        logger.log(f"Sampling negative contexts from {sample_space_size} samples")
+        # update the samples with the sampled negatives
+        data = data.map(
+            partial(
+                self.sample_negatives,
+                tokenizer=tokenizer,
+                sample_space_size=sample_space_size,
+                context_frequencies=context_frequencies,
+                context_manager=sampled_context_manager,
+                max_negatives_to_sample=max_negatives_to_sample,
+            ),
+            keep_in_memory=True,
+            num_proc=psutil.cpu_count(),
+        )
+        return data
+
+    @staticmethod
+    def sample_negatives(
+        sample: Dict[str, Any],
+        tokenizer: tr.PreTrainedTokenizer,
+        context_manager: Labels,
+        sample_space_size: int,
+        context_frequencies: np.array,
+        max_negatives_to_sample: int = 0,
+        max_context_length: int = 128,
+    ):
+        """
+        Sample negatives and add them to the sample.
+        """
+
+        # TODO: make faster sampling
+        negative_sampler = NegativeSampler(sample_space_size, context_frequencies)
+
+        positives_contexts_ids = sample["positive_ctxs"]
+        negative_contexts_ids = sample["negative_ctxs"]
+        hard_negative_contexts_ids = sample["hard_negative_ctxs"]
+
+        positives = sample["positives"]
+        positive_indices = [context_manager.get_index_from_label(p) for p in positives]
+
+        actual_number_of_contexts = (
+            len(positives_contexts_ids)
+            + len(negative_contexts_ids)
+            + len(hard_negative_contexts_ids)
+        )
+
+        sampled_negative_contexts = []
+        if max_negatives_to_sample > 0:
+            if actual_number_of_contexts < max_negatives_to_sample:
+                remaining_contexts = max_negatives_to_sample - actual_number_of_contexts
+                sampled = negative_sampler(remaining_contexts, exclude=positive_indices)
+                sampled_negative_contexts += [
+                    context_manager.get_label_from_index(s) for s in sampled[0]
+                ]
+
+        sampled_negative_ids = [
+            tokenizer(n, max_length=max_context_length, truncation=True)
+            for n in sampled_negative_contexts
+        ]
+        negative_contexts_ids += sampled_negative_ids
+        context = (
+            positives_contexts_ids + negative_contexts_ids + hard_negative_contexts_ids
+        )
+        sample["context"] = context
+        return sample
+
+    @staticmethod
+    def compute_contexts_frequency(data, context_manager) -> np.array:
+        """
+        Compute the frequency of each context in the dataset.
+        """
+        if context_manager is None:
+            raise ValueError(
+                "Context manager is required to compute the frequency of contexts"
+            )
+        frequency = np.zeros(context_manager.get_label_size())
+        for sample in data:
+            for context in sample["positives"]:
+                contex_index = context_manager.get_index_from_label(context)
+                frequency[contex_index] += 1
+        # normalize the frequency
+        frequency = frequency / frequency.sum()
+        return frequency
 
     @staticmethod
     def pad_sequence(
@@ -474,6 +603,8 @@ class InBatchNegativesDPRDataset(DPRDataset):
         max_hard_negatives: int = 0,
         max_question_length: int = 256,
         max_context_length: int = 128,
+        sample_negatives: bool = False,
+        sample_by_frequency: bool = False,
         contexts_path: Union[str, os.PathLike] = None,
         tokenizer: Optional[Union[str, tr.PreTrainedTokenizer]] = None,
         **kwargs,
@@ -488,6 +619,8 @@ class InBatchNegativesDPRDataset(DPRDataset):
             max_hard_negatives,
             max_question_length,
             max_context_length,
+            sample_negatives,
+            sample_by_frequency,
             contexts_path,
             tokenizer,
             **kwargs,
@@ -570,9 +703,10 @@ class SampledNegativesDPRDataset(DPRDataset):
         max_hard_negatives: int = 0,
         max_question_length: int = 256,
         max_context_length: int = 128,
+        sample_negatives: bool = True,
+        sample_by_frequency: bool = True,
         contexts_path: Union[str, os.PathLike] = None,
         tokenizer: Optional[Union[str, tr.PreTrainedTokenizer]] = None,
-        frequency_noise: bool = True,
         **kwargs,
     ):
         super().__init__(
@@ -585,133 +719,11 @@ class SampledNegativesDPRDataset(DPRDataset):
             max_hard_negatives,
             max_question_length,
             max_context_length,
+            sample_negatives,
+            sample_by_frequency,
             contexts_path,
             tokenizer,
         )
-        self.frequency_noise = frequency_noise
-        self.data = self.add_sampled_negatives_to_data(
-            self.data,
-            self.tokenizer,
-            self.context_manager,
-            frequency_noise,
-            max_contexts,
-        )
-
-    def add_sampled_negatives_to_data(
-        self,
-        data,
-        tokenizer: tr.PreTrainedTokenizer,
-        context_manager: Labels,
-        frequency_noise: bool = True,
-        max_contexts: int = 64,
-        *args,
-        **kwargs,
-    ) -> Any:
-        if frequency_noise:
-            logger.log("Computing contexts frequencies")
-            context_frequencies = self.compute_contexts_frequency(data, context_manager)
-            # get only those contexts that have frequency > 0
-            context_idx_above_zero = [
-                idx for idx, freq in enumerate(context_frequencies) if freq > 0
-            ]
-            # build a reduced context_manager for sampling negatives
-            sampled_context_manager = Labels()
-            sampled_context_manager.add_labels(
-                [
-                    context_manager.get_label_from_index(idx)
-                    for idx in context_idx_above_zero
-                ]
-            )
-            context_frequencies = self.compute_contexts_frequency(
-                data, sampled_context_manager
-            )
-        else:
-            context_frequencies = None
-            sampled_context_manager = context_manager
-        sample_space_size = sampled_context_manager.get_label_size()
-        logger.log(f"Sampling negative contexts from {sample_space_size} samples")
-        # update the samples with the sampled negatives
-        data = data.map(
-            partial(
-                self.sample_negatives,
-                tokenizer=tokenizer,
-                sample_space_size=sample_space_size,
-                context_frequencies=context_frequencies,
-                context_manager=sampled_context_manager,
-                max_contexts=max_contexts,
-            ),
-            keep_in_memory=True,
-            num_proc=psutil.cpu_count(),
-        )
-        return data
-
-    @staticmethod
-    def sample_negatives(
-        sample: Dict[str, Any],
-        tokenizer: tr.PreTrainedTokenizer,
-        context_manager: Labels,
-        sample_space_size: int,
-        context_frequencies: np.array,
-        max_contexts: int = -1,
-        max_context_length: int = 128,
-    ):
-        """
-        Sample negatives and add them to the sample.
-        """
-
-        # TODO: make faster sampling
-        negative_sampler = NegativeSampler(sample_space_size, context_frequencies)
-
-        positives_contexts_ids = sample["positive_ctxs"]
-        negative_contexts_ids = sample["negative_ctxs"]
-        hard_negative_contexts_ids = sample["hard_negative_ctxs"]
-
-        positives = sample["positives"]
-        positive_indices = [context_manager.get_index_from_label(p) for p in positives]
-
-        actual_number_of_contexts = (
-            len(positives_contexts_ids)
-            + len(negative_contexts_ids)
-            + len(hard_negative_contexts_ids)
-        )
-
-        sampled_negative_contexts = []
-        if max_contexts != -1:
-            if actual_number_of_contexts < max_contexts:
-                remaining_contexts = max_contexts - actual_number_of_contexts
-                sampled = negative_sampler(remaining_contexts, exclude=positive_indices)
-                sampled_negative_contexts += [
-                    context_manager.get_label_from_index(s) for s in sampled[0]
-                ]
-
-        sampled_negative_ids = [
-            tokenizer(n, max_length=max_context_length, truncation=True)
-            for n in sampled_negative_contexts
-        ]
-        negative_contexts_ids += sampled_negative_ids
-        context = (
-            positives_contexts_ids + negative_contexts_ids + hard_negative_contexts_ids
-        )
-        sample["context"] = context
-        return sample
-
-    @staticmethod
-    def compute_contexts_frequency(data, context_manager) -> np.array:
-        """
-        Compute the frequency of each context in the dataset.
-        """
-        if context_manager is None:
-            raise ValueError(
-                "Context manager is required to compute the frequency of contexts"
-            )
-        frequency = np.zeros(context_manager.get_label_size())
-        for sample in data:
-            for context in sample["positives"]:
-                contex_index = context_manager.get_index_from_label(context)
-                frequency[contex_index] += 1
-        # normalize the frequency
-        frequency = frequency / frequency.sum()
-        return frequency
 
     def collate_fn(self, batch: Any, *args, **kwargs) -> Any:
         questions = [sample["question"] for sample in batch]

@@ -65,7 +65,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         tokenizer = trainer.datamodule.tokenizer
 
         datasets, dataloaders = self._get_datasets_and_dataloaders(
-            self.dataset, self.batch_size, stage, trainer, tokenizer
+            self.dataset, self.batch_size, self.num_workers, stage, trainer, tokenizer
         )
 
         # set the model to eval mode
@@ -232,6 +232,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
     def _get_datasets_and_dataloaders(
         dataset: Optional[Union[Dataset, DictConfig]],
         batch_size: int,
+        num_workers: int,
         stage: Stage,
         trainer: pl.Trainer,
         tokenizer: tr.PreTrainedTokenizer,
@@ -244,6 +245,8 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                 The dataset to use. If `None`, the datamodule is used.
             batch_size (`int`):
                 The batch size to use for the dataloaders.
+            num_workers (`int`):
+                The number of workers to use for the dataloaders.
             stage (`Stage`):
                 The stage that indicates whether the dataloaders are for validation or testing.
             trainer (`pl.Trainer`):
@@ -265,7 +268,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                     datasets[0],
                     batch_size=batch_size,
                     shuffle=False,
-                    num_workers=0,
+                    num_workers=num_workers,
                     pin_memory=True,
                     collate_fn=partial(datasets[0].collate_fn, tokenizer=tokenizer),
                 )
@@ -341,14 +344,14 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
             return {}
 
         logger.log(
-            f"Metric {self.metric_to_monitor} is above threshold {self.threshold}. Augmenting the dataset."
+            f"Metric {self.metric_to_monitor} is above threshold {self.threshold}. Computing hard negatives."
         )
 
         predictions = super().__call__(trainer, pl_module, stage, *args, **kwargs)
         for _, samples in predictions.items():
             # create a defaultdict of defaultdicts to store the augmented contexts
             augmented_negative_contexts = defaultdict(lambda: defaultdict(list))
-            for sample in samples:
+            for s_idx, sample in enumerate(samples):
                 top_k_contexts = sample["predictions"]
                 gold_contexts = sample["gold"]
                 # get the ids of the max_negatives wrong contexts with the highest similarity
@@ -358,21 +361,21 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
                     if context_id not in gold_contexts
                 ][: self.max_negatives]
                 # add the wrong contexts to the dataset sample
-                sample_idx_in_dataset = sample["id"]
+                # sample_idx_in_dataset = sample["id"]
                 wrong_contexts_ids = trainer.datamodule.tokenizer(
                     wrong_contexts,
                     max_length=trainer.datamodule.train_dataset.max_context_length,
                     truncation=True,
                 )
                 for c_index in range(len(wrong_contexts)):
-                    augmented_negative_contexts[sample_idx_in_dataset][
+                    augmented_negative_contexts[s_idx][
                         "input_ids"
                     ].append(wrong_contexts_ids["input_ids"][c_index])
-                    augmented_negative_contexts[sample_idx_in_dataset][
+                    augmented_negative_contexts[s_idx][
                         "attention_mask"
                     ].append(wrong_contexts_ids["attention_mask"][c_index])
                     if "token_type_ids" in wrong_contexts_ids:
-                        augmented_negative_contexts[sample_idx_in_dataset][
+                        augmented_negative_contexts[s_idx][
                             "token_type_ids"
                         ].append(wrong_contexts_ids["token_type_ids"][c_index])
 
