@@ -21,7 +21,7 @@ datamodule:
         path: ${data_overrides.test_path}
 
   batch_sizes:
-    train: 32
+    train: 64
     val: 64
     test: 64
 

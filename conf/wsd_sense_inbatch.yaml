@@ -32,13 +32,27 @@ data:
   datamodule:
     datasets:
       train:
-        max_question_length: 512
-        max_context_length: 512
+        _target_: data.datasets.InBatchNegativesDPRDataset
+        name: 'train'
+        contexts_path: ${data_overrides.contexts_path}
+        sample_by_frequency: True
+        path: ${data_overrides.train_path}
 
       val:
-        max_question_length: 512
-        max_context_length: 512
+        - _target_: data.datasets.InBatchNegativesDPRDataset
+          name: 'val'
+          contexts_path: ${data_overrides.contexts_path}
+          max_question_length: 256
+          max_context_length: 256
+          path: ${data_overrides.val_path}
 
       test:
-        max_question_length: 512
-        max_context_length: 512
+        - _target_: data.datasets.InBatchNegativesDPRDataset
+          name: 'test'
+          contexts_path: ${data_overrides.contexts_path}
+          max_question_length: 256
+          max_context_length: 256
+          path: ${data_overrides.test_path}
+    
+    batch_sizes:
+      train: 64
