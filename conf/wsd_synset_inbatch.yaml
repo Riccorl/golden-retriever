@@ -55,4 +55,4 @@ data:
           path: ${data_overrides.test_path}
     
     batch_sizes:
-      train: 64
+      train: 32

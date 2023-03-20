@@ -56,19 +56,21 @@ prediction_callbacks:
       - _target_: callbacks.custom_callbacks.TopKEvaluationCallback
         k: 20
         verbose: True
-  # - _target_: callbacks.custom_callbacks.NegativeAugmentationCallback
-  #   k: ${train.top_k}
-  #   metric_to_monitor: val_recall@${train.top_k}
-  #   threshold: 0.70
-  #   max_negatives: 5
-  #   batch_size: 256
-  #   stages: [val]
-  #   dataset:
-  #     _target_: ${data.datamodule.datasets.train._target_}
-  #     name: 'train_augmented'
-  #     contexts_path: ${data_overrides.contexts_path}
-  #     max_question_length: 256
-  #     max_context_length: 256
-  #     tokenizer: ${model.language_model}
-  #     path: ${data_overrides.train_path}
-  #     save_predictions: False
+  - _target_: callbacks.custom_callbacks.NegativeAugmentationCallback
+    k: ${train.top_k}
+    metric_to_monitor: val_recall@${train.top_k}
+    threshold: 0.0
+    max_negatives: 2
+    batch_size: 256
+    stages: [val]
+    dataset:
+      _target_: ${data.datamodule.datasets.train._target_}
+      name: 'train_augmented'
+      contexts_path: ${data_overrides.contexts_path}
+      max_question_length: 256
+      max_context_length: 256
+      tokenizer: ${model.language_model}
+      path: ${data_overrides.train_path}
+      save_predictions: False
+    other_callbacks:
+      - _target_: callbacks.custom_callbacks.FreeUpIndexerVRAMCallback

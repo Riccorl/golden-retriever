@@ -2,7 +2,7 @@ import time
 from collections import defaultdict
 from functools import partial
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Union, Tuple
+from typing import Any, Dict, List, Optional, Set, Union, Tuple
 
 import hydra
 import pytorch_lightning as pl
@@ -387,6 +387,7 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
                         for c_index in range(len(wrong_contexts))
                     ]
                 )
+            logger.log(f"Adding hard negatives to the dataset.")
             trainer.datamodule.train_dataset.update_data(
                 "retrieved_hard_negatives", retrieved_hard_negatives, overwrite=True
             )
@@ -527,3 +528,19 @@ class NYTTopKEvaluationCallback(TopKEvaluationCallback):
         metrics = {f"{stage.value}_{k}": v for k, v in metrics.items()}
         pl_module.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
         return metrics
+
+
+class FreeUpIndexerVRAMCallback(NLPTemplateCallback):
+    def __call__(
+        self,
+        trainer: pl.Trainer,
+        pl_module: pl.LightningModule,
+        stage: Union[str, Stage],
+        predictions: Dict[str, Any],
+        *args,
+        **kwargs,
+    ) -> Any:
+        logger.log("Freeing up GPU memory")
+        # remove the index from the GPU memory
+        pl_module.model._context_embeddings = None
+        torch.cuda.empty_cache()
