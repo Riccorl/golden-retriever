@@ -27,3 +27,18 @@ defaults:
   - logging: wandb_logging
   - override hydra/job_logging: colorlog
   - override hydra/hydra_logging: colorlog
+
+data:
+  datamodule:
+    datasets:
+      train:
+        max_question_length: 512
+        max_context_length: 512
+
+      val:
+        max_question_length: 512
+        max_context_length: 512
+
+      test:
+        max_question_length: 512
+        max_context_length: 512

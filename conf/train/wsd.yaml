@@ -67,8 +67,8 @@ prediction_callbacks:
       _target_: ${data.datamodule.datasets.train._target_}
       name: 'train_augmented'
       contexts_path: ${data_overrides.contexts_path}
-      max_question_length: 512
-      max_context_length: 512
+      max_question_length: 256
+      max_context_length: 256
       tokenizer: ${model.language_model}
       path: ${data_overrides.train_path}
       save_predictions: False
