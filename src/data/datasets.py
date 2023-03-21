@@ -703,7 +703,7 @@ class SampledNegativesDPRDataset(DPRDataset):
         max_hard_negatives: int = 0,
         max_question_length: int = 256,
         max_context_length: int = 128,
-        max_negatives_to_sample: bool = True,
+        max_negatives_to_sample: int = 64,
         sample_by_frequency: bool = True,
         contexts_path: Union[str, os.PathLike] = None,
         tokenizer: Optional[Union[str, tr.PreTrainedTokenizer]] = None,

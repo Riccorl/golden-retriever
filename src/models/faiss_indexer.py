@@ -25,9 +25,9 @@ class FaissIndexer:
         if self.normalize:
             index = f"L2norm,{index}"
         faiss_vector_size = embeddings.shape[1]
-        index = index.replace("x", str(math.ceil(math.sqrt(faiss_vector_size)) * 4))
         if not self.use_gpu:
             index = index.replace("x,", "x_HNSW32,")
+        index = index.replace("x", str(math.ceil(math.sqrt(faiss_vector_size)) * 4))
         self.index = faiss.index_factory(faiss_vector_size, index, metric)
         # convert to GPU
         if self.use_gpu:

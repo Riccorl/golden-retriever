@@ -1,3 +1,5 @@
+import json
+from pathlib import Path
 import tempfile
 from typing import Callable, Dict, List, Optional, Tuple, Union
 
@@ -159,7 +161,22 @@ class GoldenRetriever(torch.nn.Module):
         if question_encodings is None:
             question_encodings = self.question_encoder(**questions)
         if contexts_encodings is None:
-            contexts_encodings = self.context_encoder(**contexts)
+            print(questions["input_ids"].shape)
+            print(contexts["input_ids"].shape)
+            # if batch size is too large, split the contexts into smaller batches
+            if contexts["input_ids"].shape[0] > 32:
+                contexts_encodings = []
+                for i in range(0, contexts["input_ids"].shape[0], 32):
+                    contexts_encodings.append(
+                        self.context_encoder(
+                            input_ids=contexts["input_ids"][i : i + 32],
+                            attention_mask=contexts["attention_mask"][i : i + 32],
+                            token_type_ids=contexts["token_type_ids"][i : i + 32],
+                        )
+                    )
+                contexts_encodings = torch.cat(contexts_encodings, dim=0)
+            else:
+                contexts_encodings = self.context_encoder(**contexts)
 
         if contexts_per_question is not None:
             # multiply each question encoding with a contexs_per_question encodings
@@ -203,6 +220,7 @@ class GoldenRetriever(torch.nn.Module):
         use_faiss: bool = False,
         use_gpu: bool = False,
         use_ort: bool = False,
+        move_index_to_cpu: bool = False,
     ):
         """
         Index the contexts for later retrieval.
@@ -224,6 +242,8 @@ class GoldenRetriever(torch.nn.Module):
                 Whether to use the GPU for the indexing.
             use_ort (`bool`):
                 Whether to use onnxruntime for the indexing.
+            move_index_to_cpu (`bool`):
+                Whether to move the index to the CPU after the indexing.
         """
         if self._context_embeddings is not None and not force_reindex:
             return
@@ -265,7 +285,9 @@ class GoldenRetriever(torch.nn.Module):
             # Compute the context embeddings
             context_outs = context_encoder(**batch)
             # Append the context embeddings to the list
-            context_embeddings.extend([c if use_gpu else c.cpu() for c in context_outs])
+            context_embeddings.extend(
+                [c.cpu() if move_index_to_cpu else c for c in context_outs]
+            )
 
         # Stack the context embeddings into a tensor and return it along with the context index
         self._context_embeddings = None
@@ -275,7 +297,9 @@ class GoldenRetriever(torch.nn.Module):
         # reverse the context index
         self._reverse_context_index = {v: k for k, v in self._context_index.items()}
         if use_faiss and self.faiss_indexer is None:
-            self.faiss_indexer = FaissIndexer(self._context_embeddings, use_gpu=use_gpu)
+            self.faiss_indexer = FaissIndexer(
+                self._context_embeddings, use_gpu=move_index_to_cpu
+            )
 
     def retrieve(
         self,
@@ -314,11 +338,24 @@ class GoldenRetriever(torch.nn.Module):
                 self.question_encoder(**model_inputs), k=k
             )
         else:
+            # check if the device of the context embeddings is the same
+            # as the device of the input ids
+            if self._context_embeddings.device != input_ids.device:
+                self._context_embeddings = self._context_embeddings.to(input_ids.device)
             model_inputs = {
                 "questions": model_inputs,
                 "contexts_encodings": self._context_embeddings,
             }
+            # check that the device of the question encoder is the same as
+            # the device of the context embeddings
+            past_device = next(self.parameters()).device
+            if past_device != self._context_embeddings:
+                self.to(self._context_embeddings.device)
+            # Compute the similarity between the questions and the contexts
             similarity = self(**model_inputs)["logits"]
+            # move the model back to the original device
+            if past_device != next(self.parameters()).device:
+                self.to(past_device)
             # Retrieve the indices of the top k context embeddings
             top_k: torch.Tensor = torch.topk(
                 similarity, k=min(k, similarity.shape[-1]), dim=1
@@ -385,6 +422,27 @@ class GoldenRetriever(torch.nn.Module):
         """
         return self._context_index
 
+    def save(self, output_dir: str):
+        """
+        Save the retriever to disk.
+        """
+        if self._context_embeddings is None:
+            raise ValueError("The contexts must be indexed before they can be saved.")
+        logger.log(f"Saving retriever to {output_dir}")
+        # create the output directory
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        # save the current state of the retriever
+        torch.save(self.state_dict(), output_dir / "retriever.pt")
+        # save the context embeddings
+        torch.save(self._context_embeddings, output_dir / "index.pt")
+        # save the context index
+        with open(output_dir / "index.json", "w") as f:
+            json.dump(self._context_index, f)
+        # save the faiss indexer
+        if self.faiss_indexer is not None:
+            self.faiss_indexer.save(output_dir / "faiss_indexer.pt")
+
     @staticmethod
     def _load_ort_optimized_encoder(
         encoder: SentenceEncoder, provider: str = "CUDAExecutionProvider"
@@ -395,9 +453,8 @@ class GoldenRetriever(torch.nn.Module):
             temp_dir, export=True, provider=provider, use_io_binding=True
         )
         optimizer = ORTOptimizer.from_pretrained(ort_model)
-        optimization_config = AutoOptimizationConfig.O4(optimization_level=99)
+        optimization_config = AutoOptimizationConfig.O4()
         optimizer.optimize(save_dir=temp_dir, optimization_config=optimization_config)
-        # quantizer = ORTQuantizer.from_pretrained(temp_dir)
         ort_model = ORTModelForFeatureExtraction.from_pretrained(
             temp_dir, export=True, provider=provider, use_io_binding=True
         )

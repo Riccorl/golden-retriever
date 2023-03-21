@@ -28,9 +28,13 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         batch_size: int = 32,
         num_workers: int = 4,
         use_faiss: bool = False,
+        move_index_to_cpu: bool = True,
         force_reindex: bool = True,
-        output_dir: Optional[Path] = None,
+        save_retriever: bool = False,
+        retriever_dir: Optional[Path] = None,
         save_predictions: bool = True,
+        predictions_dir: Optional[Path] = None,
+        remove_columns: Optional[List[str]] = None,
         stages: Set[Union[str, Stage]] = None,
         other_callbacks: Optional[List[DictConfig]] = None,
         dataset: Optional[Union[DictConfig, BaseDataset]] = None,
@@ -42,10 +46,26 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.use_faiss = use_faiss
+        self.move_index_to_cpu = move_index_to_cpu
         self.force_reindex = force_reindex
-        self.output_dir = output_dir
+        self.save_retriever = save_retriever
+        self.retriever_dir = retriever_dir
         self.save_predictions = save_predictions
+        self.predictions_dir = predictions_dir
         self.dataset = dataset
+
+        if remove_columns is None:
+            remove_columns = [
+                "context",
+                "positives",
+                "negatives",
+                "wrong",
+                "positive_ctxs",
+                "negative_ctxs",
+                "hard_negative_ctxs",
+                "positive_index_end",
+            ]
+        self.remove_columns = remove_columns
 
     @torch.no_grad()
     def __call__(
@@ -94,15 +114,28 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                 )
             )
             use_gpu = (pl_module.device.type == "cuda") if not self.use_faiss else False
+            if self.retriever_dir is not None and trainer.current_epoch == 0:
+                force_reindex = False
+            else:
+                force_reindex = self.force_reindex
             retriever.index(
                 contexts,
                 batch_size=self.batch_size,
                 num_workers=self.num_workers,
                 collate_fn=collate_fn,
-                force_reindex=self.force_reindex,
+                force_reindex=force_reindex,
                 use_faiss=self.use_faiss,
                 use_gpu=use_gpu,  # (pl_module.device.type == "cuda"),
+                move_index_to_cpu=self.move_index_to_cpu,
             )
+
+            pl_module_original_device = pl_module.device
+            if (
+                not self.use_faiss
+                and self.move_index_to_cpu
+                and pl_module.device.type == "cuda"
+            ):
+                pl_module.to("cpu")
 
             # now compute the question embeddings and compute the top-k accuracy
             logger.log(
@@ -149,21 +182,40 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
             logger.log("Time to retrieve:", end - start)
             dataloader_predictions[dataloader_idx] = predictions
 
+            if pl_module_original_device != pl_module.device:
+                pl_module.to(pl_module_original_device)
+
             # update the dataset with the predictions
             new_names = ["gold", "predictions", "correct", "wrong"]
             new_columns = [[p[name] for p in predictions] for name in new_names]
             datasets[dataloader_idx].update_data(new_names, new_columns, overwrite=True)
 
             # write the predictions to a file inside the experiment folder
-            if self.output_dir is None and trainer.logger is None:
+            if self.save_retriever:
+                if self.retriever_dir is None and trainer.logger is None:
+                    logger.log(
+                        "You need to specify an output directory (`retriever_dir`) or a logger to save the retriever."
+                    )
+                else:
+                    if self.retriever_dir is not None:
+                        retriever_folder = Path(self.retriever_dir)
+                    else:
+                        retriever_folder = (
+                            Path(trainer.logger.experiment.dir) / "retriever"
+                        )
+                        retriever_folder.mkdir(exist_ok=True)
+                    retriever.save(retriever_folder)
+
+            # write the predictions to a file inside the experiment folder
+            if self.predictions_dir is None and trainer.logger is None:
                 logger.log(
-                    "You need to specify an output directory or a logger to save the predictions."
+                    "You need to specify an output directory (`predictions_dir`) or a logger to save the predictions."
                 )
             else:
                 # save to file
                 if self.save_predictions:
-                    if self.output_dir is not None:
-                        prediction_folder = Path(self.output_dir)
+                    if self.predictions_dir is not None:
+                        prediction_folder = Path(self.predictions_dir)
                     else:
                         prediction_folder = (
                             Path(trainer.logger.experiment.dir) / "predictions"
@@ -175,17 +227,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                     )
                     logger.log(f"Saving predictions to {predictions_path}")
                     datasets[dataloader_idx].save_data(
-                        predictions_path,
-                        remove_columns=[
-                            "context",
-                            "positives",
-                            "negatives",
-                            "wrong",
-                            "positive_ctxs",
-                            "negative_ctxs",
-                            "hard_negative_ctxs",
-                            "positive_index_end",
-                        ],
+                        predictions_path, remove_columns=self.remove_columns
                     )
 
         # return the predictions
@@ -297,10 +339,14 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
         k: int = 100,
         batch_size: int = 32,
         num_workers: int = 4,
-        force_reindex: bool = False,
         use_faiss: bool = False,
-        output_dir: Optional[Path] = None,
+        move_index_to_cpu: bool = False,
+        force_reindex: bool = False,
+        save_retriever: bool = False,
+        retriever_dir: Optional[Path] = None,
         save_predictions: bool = False,
+        predictions_dir: Optional[Path] = None,
+        remove_columns: Optional[List[str]] = None,
         stages: Set[Union[str, Stage]] = None,
         other_callbacks: Optional[List[DictConfig]] = None,
         dataset: Optional[Union[DictConfig, BaseDataset]] = None,
@@ -314,10 +360,14 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
             k=k,
             batch_size=batch_size,
             num_workers=num_workers,
-            force_reindex=force_reindex,
             use_faiss=use_faiss,
-            output_dir=output_dir,
+            move_index_to_cpu=move_index_to_cpu,
+            force_reindex=force_reindex,
+            save_retriever=save_retriever,
+            retriever_dir=retriever_dir,
+            predictions_dir=predictions_dir,
             save_predictions=save_predictions,
+            remove_columns=remove_columns,
             stages=stages,
             other_callbacks=other_callbacks,
             dataset=dataset,

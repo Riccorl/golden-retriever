@@ -12,22 +12,20 @@ def aida_to_dpr(
     title_map: Optional[Union[str, os.PathLike]] = None,
 ) -> List[Dict[str, Any]]:
     # Read AIDA file
-
-    tokenizer = AutoTokenizer.from_pretrained("bert-large-uncased")
-
     with open(conll_path, "r") as f:
         aida_data = json.load(f)
 
     definitions = {}
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     # read entities definitions
     # with open("data/aida_dpr/definitions.txt", "w") as f:
-    with open(definitions_path, "r") as f:
-        for line in f:
-            line_data = json.loads(line)
-            definitions[line_data["title"]] = (
-                line_data["title"] + ": " + line_data["text"]
-            )
-
+    with open(output_path.parent / "definitions.txt", "w") as f_def:
+        with open(definitions_path, "r") as f:
+            for line in f:
+                line_data = json.loads(line)
+                definitions[line_data["title"]] = line_data["title"] + " <def> " + line_data["text"]
+                f_def.write(line_data["title"] + " <def> " + line_data["text"] + "\n")
             # tokenizer.decode(line_data["text_ids"])
             # definitions[line_data["title"]].replace("[unused2]", ": ")
 
@@ -49,7 +47,7 @@ def aida_to_dpr(
                 positive_ctxs.append(
                     {
                         "title": entity,
-                        "text": def_text.strip(),
+                        "text": def_text,
                         "passage_id": f"{sentence['doc_id']}_{sentence['offset']}_{idx}",
                     }
                 )
@@ -69,10 +67,10 @@ def aida_to_dpr(
         )
 
     # Write DPR file
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+
     with open(output_path, "w") as f:
         json.dump(dpr, f, indent=2)
+
     return dpr
 
 
