@@ -1,3 +1,4 @@
+from collections import defaultdict
 import time
 from functools import partial
 from pathlib import Path
@@ -406,11 +407,10 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
         self.dataloader = trainer.datamodule.train_dataloader()
 
         predictions = super().__call__(trainer, pl_module, stage, *args, **kwargs)
-        for _, prediction_samples in predictions.items():
+        for dataloader_idx, prediction_samples in predictions.items():
             # store the predictions in a dictionary for faster access based on the sample index
-            # predictions_dict = {p["sample_idx"]: p for p in prediction_samples}
-            update_dict = {}
-            for prediction in predictions:
+            update_dict = defaultdict(lambda: defaultdict(list))
+            for prediction in prediction_samples:
                 top_k_contexts = prediction["predictions"]
                 gold_contexts = prediction["gold"]
                 # get the ids of the max_negatives wrong contexts with the highest similarity
@@ -424,22 +424,23 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
                     max_length=trainer.datamodule.train_dataset.max_context_length,
                     truncation=True,
                 )
-                retrieved_hard_negatives = {"input_ids": [], "attention_mask": []}
+                retrieved_hard_negatives = []
+                # for wrong_context in wrong_contexts:
+                #     retrieved_hard_negatives["context"].append(wrong_context)
                 for c_index in range(len(wrong_contexts)):
-                    retrieved_hard_negatives["input_ids"].append(
-                        wrong_contexts_ids["input_ids"][c_index]
-                    )
-                    retrieved_hard_negatives["attention_mask"].append(
-                        wrong_contexts_ids["attention_mask"][c_index]
-                    )
-                    # TODO: default dict of default list
+                    p_dict = {
+                        "input_ids": wrong_contexts_ids["input_ids"][c_index],
+                        "attention_mask": wrong_contexts_ids["attention_mask"][c_index],
+                    }
                     if "token_type_ids" in wrong_contexts_ids:
-                        if "token_type_ids" not in retrieved_hard_negatives:
-                            retrieved_hard_negatives["token_type_ids"] = []
-                        retrieved_hard_negatives["token_type_ids"].append(
-                            wrong_contexts_ids["token_type_ids"][c_index]
-                        )
+                        p_dict["token_type_ids"] = wrong_contexts_ids["token_type_ids"][
+                            c_index
+                        ]
+                    retrieved_hard_negatives.append(p_dict)
+                update_dict[prediction["sample_idx"]][
+                    "retrieved_hard_negatives"
+                ] = retrieved_hard_negatives
             logger.log(f"Adding hard negatives to the dataset.")
-            self.dataset.update_data(update_dict)
+            self.dataset.add_fields_to_samples(update_dict)
 
         return predictions

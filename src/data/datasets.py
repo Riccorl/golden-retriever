@@ -240,7 +240,8 @@ class DPRIterableDataset(GenerativeDataset, DPRMixin):
 
         if not tokenizer:
             raise ValueError("Tokenizer is required for pre-processing")
-        # Pre-process the data
+        
+
         if shuffle:
             # shuffle the data
             self.shuffle_data(seed=42)
@@ -352,13 +353,11 @@ class InBatchNegativesDPRIterableDataset(DPRIterableDataset):
         negatives_ctxs = [sample["negative_ctxs"] for sample in batch]
         hard_negatives_ctxs = [sample["hard_negative_ctxs"] for sample in batch]
         # use negatives from predictions if available
-        print("retrieved_hard_negatives:", "retrieved_hard_negatives" in batch[0])
         if "retrieved_hard_negatives" in batch[0]:
             # add augmented negative contexts to contexts
-            augmented_negative_contexts = [
+            hard_negatives_ctxs += [
                 sample["retrieved_hard_negatives"] for sample in batch
             ]
-            hard_negatives_ctxs += augmented_negative_contexts
 
         # convert the questions to a batch
         questions = self.convert_to_batch(questions)

@@ -279,7 +279,7 @@ class DPRMixin:
                         sample.pop(key)
                 json.dump(sample, f, indent=2)
 
-    def update_data(
+    def add_fields_to_samples(
         self,
         updates: Dict[int, Dict[str, Any]],
     ):
@@ -295,4 +295,4 @@ class DPRMixin:
             sample.update(updates[sample["sample_idx"]])
             return sample
 
-        self.data = self.data.map(update_fn, keep_in_memory=True, num_proc=1)
+        self.data = self.data.map(update_fn)
