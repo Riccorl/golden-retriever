@@ -1,6 +1,6 @@
 import json
-from pathlib import Path
 import tempfile
+from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import torch
@@ -12,16 +12,13 @@ from optimum.onnxruntime.configuration import (
 )
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-# from speedster import optimize_model
-# from nebullvm.operations.inference_learners.huggingface import (
-#     HuggingFaceInferenceLearner,
-# )
 
 from data.datasets import BaseDataset
 from data.labels import Labels
 from models.faiss_indexer import FaissIndexer
 from utils.logging import get_console_logger
 from utils.model_inputs import ModelInputs
+
 
 logger = get_console_logger()
 
@@ -30,9 +27,7 @@ class SentenceEncoder(torch.nn.Module):
     def __init__(
         self,
         language_model: Union[
-            str,
-            tr.PreTrainedModel,
-            ORTModelForFeatureExtraction
+            str, tr.PreTrainedModel, ORTModelForFeatureExtraction
         ] = "sentence-transformers/all-MiniLM-12-v2",
         pooling_strategy: str = "mean",
         load_ort_model: bool = False,
@@ -151,6 +146,8 @@ class GoldenRetriever(torch.nn.Module):
                 The encodings of the questions.
             contexts_encodings (`torch.Tensor`):
                 The encodings of the contexts.
+            contexts_per_question (`List[int]`):
+                The number of contexts per question.
 
         Returns:
             obj:`torch.Tensor`: The outputs of the model.
@@ -456,43 +453,3 @@ class GoldenRetriever(torch.nn.Module):
             language_model=ort_model,
             pooling_strategy=encoder.pooling_strategy,
         )
-
-    # @staticmethod
-    # def _load_speedster_optimized_encoder(
-    #     encoder: SentenceEncoder, input_sample: List[ModelInputs]
-    # ) -> HuggingFaceInferenceLearner:
-    #     optimized_model = optimize_model(
-    #         encoder.language_model,
-    #         input_data=input_sample,
-    #         optimization_time="constrained",
-    #         ignore_compressors=["sparseml", "intel_pruning"],
-    #         dynamic_info={
-    #             "inputs": [
-    #                 {
-    #                     0: {
-    #                         "name": "batch",
-    #                         "min_val": 1,
-    #                         "opt_val": 1,
-    #                         "max_val": 8,
-    #                     },
-    #                     2: {
-    #                         "name": "dim_image",
-    #                         "min_val": 128,
-    #                         "opt_val": 256,
-    #                         "max_val": 512,
-    #                     },
-    #                     3: {
-    #                         "name": "dim_image",
-    #                         "min_val": 128,
-    #                         "opt_val": 256,
-    #                         "max_val": 512,
-    #                     },
-    #                 }
-    #             ],
-    #             "outputs": [{0: "batch", 1: "out_dim"}],
-    #         },
-    #     )
-    #     return SentenceEncoder(
-    #         language_model=optimized_model,
-    #         pooling_strategy=encoder.pooling_strategy,
-    #     )

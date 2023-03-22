@@ -10,8 +10,8 @@ from omegaconf import DictConfig
 from pytorch_lightning.utilities.types import EVAL_DATALOADERS
 from torch.utils.data import DataLoader, Dataset
 
-from data.labels import Labels
 from data.datasets import GenerativeDataset
+from data.labels import Labels
 from utils.logging import get_console_logger
 
 logger = get_console_logger()

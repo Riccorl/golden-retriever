@@ -1,23 +1,10 @@
-import os
-import time
-from collections import defaultdict
-from functools import partial
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Dict, List, Optional, Union
 
-import hydra
 import pytorch_lightning as pl
 import torch
-import transformers as tr
-from omegaconf import DictConfig
-from torch.utils.data import DataLoader, Dataset
-from tqdm import tqdm
 
-from callbacks.base import NLPTemplateCallback, PredictionCallback, Stage
-from data.datasets import BaseDataset, DPRDataset
-from models.model import GoldenRetriever
+from callbacks.base import NLPTemplateCallback, Stage
 from utils.logging import get_console_logger
-from utils.model_inputs import ModelInputs
 
 logger = get_console_logger()
 

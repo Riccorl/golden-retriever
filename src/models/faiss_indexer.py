@@ -1,8 +1,8 @@
-import math
 from typing import Union
 
 import faiss
 import faiss.contrib.torch_utils
+import math
 import numpy
 import torch
 

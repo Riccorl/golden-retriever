@@ -1,9 +1,7 @@
-import os
 import time
-from collections import defaultdict
 from functools import partial
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Union, Tuple
+from typing import List, Optional, Set, Union, Tuple
 
 import hydra
 import pytorch_lightning as pl
@@ -13,7 +11,7 @@ from omegaconf import DictConfig
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
-from callbacks.base import NLPTemplateCallback, PredictionCallback, Stage
+from callbacks.base import PredictionCallback, Stage
 from data.datasets import BaseDataset, DPRDataset
 from models.model import GoldenRetriever
 from utils.logging import get_console_logger
@@ -410,13 +408,9 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
         predictions = super().__call__(trainer, pl_module, stage, *args, **kwargs)
         for _, prediction_samples in predictions.items():
             # store the predictions in a dictionary for faster access based on the sample index
-            predictions_dict = {p["sample_idx"]: p for p in prediction_samples}
-            for sample in self.dataset.data:
-                if sample["sample_idx"] not in predictions_dict:
-                    raise ValueError(
-                        f"Sample with index {sample['sample_idx']} not found in predictions."
-                    )
-                prediction = predictions_dict[sample["sample_idx"]]
+            # predictions_dict = {p["sample_idx"]: p for p in prediction_samples}
+            update_dict = {}
+            for prediction in predictions:
                 top_k_contexts = prediction["predictions"]
                 gold_contexts = prediction["gold"]
                 # get the ids of the max_negatives wrong contexts with the highest similarity
@@ -430,41 +424,22 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
                     max_length=trainer.datamodule.train_dataset.max_context_length,
                     truncation=True,
                 )
-                sample["retrieved_hard_negatives"] = {
-                    "input_ids": [],
-                    "attention_mask": [],
-                    "token_type_ids": [],
-                }
+                retrieved_hard_negatives = {"input_ids": [], "attention_mask": []}
                 for c_index in range(len(wrong_contexts)):
-                    sample["retrieved_hard_negatives"]["input_ids"].append(
+                    retrieved_hard_negatives["input_ids"].append(
                         wrong_contexts_ids["input_ids"][c_index]
                     )
-                    sample["retrieved_hard_negatives"]["attention_mask"].append(
+                    retrieved_hard_negatives["attention_mask"].append(
                         wrong_contexts_ids["attention_mask"][c_index]
                     )
+                    # TODO: default dict of default list
                     if "token_type_ids" in wrong_contexts_ids:
-                        sample["retrieved_hard_negatives"]["token_type_ids"].append(
+                        if "token_type_ids" not in retrieved_hard_negatives:
+                            retrieved_hard_negatives["token_type_ids"] = []
+                        retrieved_hard_negatives["token_type_ids"].append(
                             wrong_contexts_ids["token_type_ids"][c_index]
                         )
-                #     retrieved_hard_negatives[sample_idx_in_dataset]["input_ids"].append(
-                #         wrong_contexts_ids["input_ids"][c_index]
-                #     )
-                #     retrieved_hard_negatives[sample_idx_in_dataset][
-                #         "attention_mask"
-                #     ].append(wrong_contexts_ids["attention_mask"][c_index])
-                #     if "token_type_ids" in wrong_contexts_ids:
-                #         retrieved_hard_negatives[sample_idx_in_dataset][
-                #             "token_type_ids"
-                #         ].append(wrong_contexts_ids["token_type_ids"][c_index])
-
-            # order retrieved_hard_negatives by sample_idx_in_dataset and get the values
-            # retrieved_hard_negatives = [
-            #     retrieved_hard_negatives[i]
-            #     for i in sorted(retrieved_hard_negatives.keys())
-            # ]
-            # logger.log(f"Adding hard negatives to the dataset.")
-            # trainer.datamodule.train_dataset.update_data(
-            #     "retrieved_hard_negatives", retrieved_hard_negatives, overwrite=True
-            # )
+            logger.log(f"Adding hard negatives to the dataset.")
+            self.dataset.update_data(update_dict)
 
         return predictions

@@ -1,20 +1,18 @@
 import json
 import os
 import time
-from functools import partial, partialmethod
+from functools import partial
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Sequence, Tuple, Union, Optional
 
-import numpy as np
 import psutil
 import torch
-from tqdm import tqdm
 import transformers as tr
 from datasets import load_dataset
 from torch.utils.data import Dataset, IterableDataset
 
+from data.dpr_mixin import DPRMixin
 from data.labels import Labels
-from data.sampler import NegativeSampler
 from utils.logging import get_console_logger
 from utils.model_inputs import ModelInputs
 
@@ -119,7 +117,7 @@ class GenerativeDataset(IterableDataset):
         raise NotImplementedError
 
 
-class DPRIterableDataset(GenerativeDataset):
+class DPRIterableDataset(GenerativeDataset, DPRMixin):
     def __init__(
         self,
         name: str,
@@ -189,16 +187,13 @@ class DPRIterableDataset(GenerativeDataset):
             }
         self.data = self.load(path, tokenizer=self.tokenizer, shuffle=shuffle)
         if self.max_negatives_to_sample > 0:
-            self.data = self.add_sampled_negatives_to_data(
+            self.data = self._sample_dataset_negatives(
                 self.data,
                 self.tokenizer,
                 self.context_manager,
                 sample_by_frequency,
                 self.max_negatives_to_sample,
             )
-    
-    # def __len__(self):
-    #     return len(self.data)
 
     def __iter__(self) -> Iterator[Dict[str, torch.Tensor]]:
         batch = []
@@ -213,10 +208,6 @@ class DPRIterableDataset(GenerativeDataset):
         # drop last cause might be too short and result in issues (nan if we are using amp)
         if not self.drop_last_batch and len(batch) > 0:
             yield self.collate_fn(batch)
-
-    @property
-    def contexts(self):
-        return list(self.context_manager.get_labels().keys())
 
     def load(
         self,
@@ -252,13 +243,13 @@ class DPRIterableDataset(GenerativeDataset):
         # Pre-process the data
         if shuffle:
             # shuffle the data
-            self.shuffle(seed=42)
+            self.shuffle_data(seed=42)
 
         # measure how long the preprocessing takes
         start = time.time()
         data = data.map(
             partial(
-                self.dataset_map_fn,
+                self._process_dataset_sample,
                 tokenizer=tokenizer,
                 max_positives=self.max_positives,
                 max_negatives=self.max_negatives,
@@ -280,310 +271,6 @@ class DPRIterableDataset(GenerativeDataset):
             f"data took [bold]{end - start:.2f}[/bold] seconds"
         )
         return data
-
-    def shuffle_data(self, seed: int = 42):
-        self.data = self.data.shuffle(seed=seed)
-
-    @staticmethod
-    def dataset_map_fn(
-        sample: Dict,
-        tokenizer: tr.PreTrainedTokenizer,
-        max_positives: int,
-        max_negatives: int,
-        max_hard_negatives: int,
-        max_contexts: int = -1,
-        max_question_length: int = 256,
-        max_context_length: int = 128,
-    ):
-        positive_ctxs = [p["text"].strip() for p in sample["positive_ctxs"]]
-        if max_positives != -1:
-            positive_ctxs = positive_ctxs[:max_positives]
-        negative_ctxs = [n["text"].strip() for n in sample["negative_ctxs"]]
-        if max_negatives != -1:
-            negative_ctxs = negative_ctxs[:max_negatives]
-        hard_negative_ctxs = [h["text"].strip() for h in sample["hard_negative_ctxs"]]
-        if max_hard_negatives != -1:
-            hard_negative_ctxs = hard_negative_ctxs[:max_hard_negatives]
-
-        question = tokenizer(
-            sample["question"], max_length=max_question_length, truncation=True
-        )
-        positive_ctxs = [
-            tokenizer(p, max_length=max_context_length, truncation=True)
-            for p in positive_ctxs
-        ]
-        negative_ctxs = [
-            tokenizer(n, max_length=max_context_length, truncation=True)
-            for n in negative_ctxs
-        ]
-        hard_negative_ctxs = [
-            tokenizer(h, max_length=max_context_length, truncation=True)
-            for h in hard_negative_ctxs
-        ]
-
-        context = positive_ctxs + negative_ctxs + hard_negative_ctxs
-        if max_contexts != -1:
-            context = context[:max_contexts]
-        output = {
-            "question": question,
-            "context": context,
-            "positives": set([p["text"].strip() for p in sample["positive_ctxs"]]),
-            "positive_ctxs": positive_ctxs,
-            "negative_ctxs": negative_ctxs,
-            "hard_negative_ctxs": hard_negative_ctxs,
-            "positive_index_end": len(positive_ctxs),
-        }
-        return output
-
-    def add_sampled_negatives_to_data(
-        self,
-        data,
-        tokenizer: tr.PreTrainedTokenizer,
-        context_manager: Labels,
-        sample_by_frequency: bool = True,
-        max_negatives_to_sample: int = 64,
-        *args,
-        **kwargs,
-    ) -> Any:
-        if sample_by_frequency:
-            logger.log("Computing contexts frequencies")
-            context_frequencies = self.compute_contexts_frequency(data, context_manager)
-            # get only those contexts that have frequency > 0
-            context_idx_above_zero = [
-                idx for idx, freq in enumerate(context_frequencies) if freq > 0
-            ]
-            # build a reduced context_manager for sampling negatives
-            sampled_context_manager = Labels()
-            sampled_context_manager.add_labels(
-                [
-                    context_manager.get_label_from_index(idx)
-                    for idx in context_idx_above_zero
-                ]
-            )
-            context_frequencies = self.compute_contexts_frequency(
-                data, sampled_context_manager
-            )
-        else:
-            context_frequencies = None
-            sampled_context_manager = context_manager
-        sample_space_size = sampled_context_manager.get_label_size()
-        logger.log(f"Sampling negative contexts from {sample_space_size} samples")
-        # update the samples with the sampled negatives
-        data = data.map(
-            partial(
-                self.sample_negatives,
-                tokenizer=tokenizer,
-                sample_space_size=sample_space_size,
-                context_frequencies=context_frequencies,
-                context_manager=sampled_context_manager,
-                max_negatives_to_sample=max_negatives_to_sample,
-            ),
-            keep_in_memory=True,
-            num_proc=psutil.cpu_count(),
-        )
-        return data
-
-    @staticmethod
-    def sample_negatives(
-        sample: Dict[str, Any],
-        tokenizer: tr.PreTrainedTokenizer,
-        context_manager: Labels,
-        sample_space_size: int,
-        context_frequencies: np.array,
-        max_negatives_to_sample: int = 0,
-        max_context_length: int = 128,
-    ):
-        """
-        Sample negatives and add them to the sample.
-        """
-
-        # TODO: make faster sampling
-        negative_sampler = NegativeSampler(sample_space_size, context_frequencies)
-
-        positives_contexts_ids = sample["positive_ctxs"]
-        negative_contexts_ids = sample["negative_ctxs"]
-        hard_negative_contexts_ids = sample["hard_negative_ctxs"]
-
-        positives = sample["positives"]
-        positive_indices = [context_manager.get_index_from_label(p) for p in positives]
-
-        actual_number_of_contexts = (
-            len(positives_contexts_ids)
-            + len(negative_contexts_ids)
-            + len(hard_negative_contexts_ids)
-        )
-
-        sampled_negative_contexts = []
-        if max_negatives_to_sample > 0:
-            if actual_number_of_contexts < max_negatives_to_sample:
-                remaining_contexts = max_negatives_to_sample - actual_number_of_contexts
-                sampled = negative_sampler(remaining_contexts, exclude=positive_indices)
-                sampled_negative_contexts += [
-                    context_manager.get_label_from_index(s) for s in sampled[0]
-                ]
-
-        sampled_negative_ids = [
-            tokenizer(n, max_length=max_context_length, truncation=True)
-            for n in sampled_negative_contexts
-        ]
-        negative_contexts_ids += sampled_negative_ids
-        context = (
-            positives_contexts_ids + negative_contexts_ids + hard_negative_contexts_ids
-        )
-        sample["context"] = context
-        return sample
-
-    @staticmethod
-    def compute_contexts_frequency(data, context_manager) -> np.array:
-        """
-        Compute the frequency of each context in the dataset.
-        """
-        if context_manager is None:
-            raise ValueError(
-                "Context manager is required to compute the frequency of contexts"
-            )
-        frequency = np.zeros(context_manager.get_label_size())
-        for sample in data:
-            for context in sample["positives"]:
-                contex_index = context_manager.get_index_from_label(context)
-                frequency[contex_index] += 1
-        # normalize the frequency
-        frequency = frequency / frequency.sum()
-        return frequency
-
-    @staticmethod
-    def pad_sequence(
-        sequence: Union[List, torch.Tensor],
-        length: int,
-        value: Any = None,
-        pad_to_left: bool = False,
-    ) -> Union[List, torch.Tensor]:
-        """
-        Pad the input to the specified length with the given value.
-
-        Args:
-            sequence (:obj:`List`, :obj:`torch.Tensor`):
-                Element to pad, it can be either a :obj:`List` or a :obj:`torch.Tensor`.
-            length (:obj:`int`, :obj:`str`, optional, defaults to :obj:`subtoken`):
-                Length after pad.
-            value (:obj:`Any`, optional):
-                Value to use as padding.
-            pad_to_left (:obj:`bool`, optional, defaults to :obj:`False`):
-                If :obj:`True`, pads to the left, right otherwise.
-
-        Returns:
-            :obj:`List`, :obj:`torch.Tensor`: The padded sequence.
-
-        """
-        padding = [value] * abs(length - len(sequence))
-        if isinstance(sequence, torch.Tensor):
-            if len(sequence.shape) > 1:
-                raise ValueError(
-                    f"Sequence tensor must be 1D. Current shape is `{len(sequence.shape)}`"
-                )
-            padding = torch.as_tensor(padding)
-        if pad_to_left:
-            if isinstance(sequence, torch.Tensor):
-                return torch.cat((padding, sequence), -1)
-            return padding + sequence
-        if isinstance(sequence, torch.Tensor):
-            return torch.cat((sequence, padding), -1)
-        return sequence + padding
-
-    def convert_to_batch(
-        self, samples: Any, *args, **kwargs
-    ) -> Dict[str, torch.Tensor]:
-        """
-        Convert the list of samples to a batch.
-
-        Args:
-            samples (:obj:`List`):
-                List of samples to convert to a batch.
-
-        Returns:
-            :obj:`Dict[str, torch.Tensor]`: The batch.
-        """
-        # invert questions from list of dict to dict of list
-        samples = {k: [d[k] for d in samples] for k in samples[0]}
-        # get max length of questions
-        max_len = max(len(x) for x in samples["input_ids"])
-        # pad the questions
-        for key in samples:
-            if key in self.padding_ops:
-                samples[key] = torch.as_tensor(
-                    [self.padding_ops[key](b, max_len) for b in samples[key]]
-                )
-        return samples
-
-    def save_data(
-        self, path: Union[str, os.PathLike], remove_columns: Optional[List[str]] = None
-    ) -> None:
-        """
-        Save the samples to a file.
-
-        Args:
-            path (:obj:`str`):
-                Path to the file where to save the dataset.
-        """
-        if remove_columns is None:
-            remove_columns = []
-        with open(path, "w") as f:
-            for sample in self.data:
-                sample["question"] = self.tokenizer.decode(sample["question"]["input_ids"])
-                # remove columns if needed
-                for key in remove_columns:
-                    if key in sample:
-                        sample.pop(key)
-                json.dump(sample, f, indent=2)
-    
-        # for sample in self.data:
-            
-
-        # with open(path, "w") as f:
-        #     for i in range(len(samples["question"])):
-        #         dump = {
-        #             k: v[i] if isinstance(v, list) else v for k, v in samples.items()
-        #         }
-        #         json.dump(dump, f, indent=2)
-
-    def update_data(
-        self,
-        names: Union[str, List[str]],
-        columns: Union[List[Any], List[List[Any]]],
-        overwrite: bool = False,
-    ):
-        """
-        Update the data with the given column.
-
-        Args:
-            names (:obj:`str` or :obj:`List[str]`):
-                Name of the column to update.
-            columns (:obj:`List[Any]` or :obj:`List[List[Any]]`):
-                List of values to update.
-            overwrite (:obj:`bool`, `optional`, defaults to :obj:`False`):
-                Whether to overwrite the column if it already exists.
-        """
-        # TODO: augment data if overwrite is False and the column already exists
-        if isinstance(names, str):
-            names = [names]
-            # TODO: check if it's a list of list in a prettier way
-            if len(names) != len(columns):
-                columns = [columns]
-
-        if len(names) != len(columns):
-            raise ValueError(
-                "The number of columns to update must be equal to the number of names."
-            )
-
-        for name, column in zip(names, columns):
-            if name in self.data.column_names:
-                if not overwrite:
-                    raise ValueError(
-                        "The dataset already contains a column named `name`, you can force the update by "
-                        "setting `overwrite=True`."
-                    )
-                self.data = self.data.remove_columns(name)
-            self.data = self.data.add_column(name=name, column=column)
 
     def collate_fn(self, batch: Any, *args, **kwargs) -> Any:
         questions = [sample["question"] for sample in batch]
@@ -635,7 +322,6 @@ class InBatchNegativesDPRIterableDataset(DPRIterableDataset):
         sample_by_frequency: bool = False,
         contexts_path: Union[str, os.PathLike] = None,
         tokenizer: Optional[Union[str, tr.PreTrainedTokenizer]] = None,
-        *args,
         **kwargs,
     ):
         super().__init__(
@@ -653,7 +339,6 @@ class InBatchNegativesDPRIterableDataset(DPRIterableDataset):
             sample_by_frequency,
             contexts_path,
             tokenizer,
-            *args,
             **kwargs,
         )
 
@@ -723,7 +408,7 @@ class InBatchNegativesDPRIterableDataset(DPRIterableDataset):
         return ModelInputs(model_inputs)
 
 
-class DPRDataset(BaseDataset):
+class DPRDataset(BaseDataset, DPRMixin):
     def __init__(
         self,
         name: str,
@@ -785,7 +470,7 @@ class DPRDataset(BaseDataset):
             }
         self.data = self.load(path, tokenizer=self.tokenizer, shuffle=shuffle)
         if self.max_negatives_to_sample > 0:
-            self.data = self.add_sampled_negatives_to_data(
+            self.data = self._sample_dataset_negatives(
                 self.data,
                 self.tokenizer,
                 self.context_manager,
@@ -800,10 +485,6 @@ class DPRDataset(BaseDataset):
         self, index
     ) -> Union[Dict[str, torch.Tensor], Tuple[torch.Tensor, torch.Tensor]]:
         return self.data[index]
-
-    @property
-    def contexts(self):
-        return list(self.context_manager.get_labels().keys())
 
     def load(
         self,
@@ -845,7 +526,7 @@ class DPRDataset(BaseDataset):
         start = time.time()
         data = data.map(
             partial(
-                self.process_sample,
+                self._process_dataset_sample,
                 tokenizer=tokenizer,
                 max_contexts=self.max_contexts,
                 max_positives=self.max_positives,
@@ -857,245 +538,13 @@ class DPRDataset(BaseDataset):
             num_proc=psutil.cpu_count(logical=False),
         )
         # add id if not present
-        if "id" not in data.column_names:
-            data = data.add_column("id", range(len(data)))
+        data = data.add_column("sample_idx", range(len(data)))
         end = time.time()
         logger.log(
             f"Pre-processing [bold cyan]{self.name}[/bold cyan] "
             f"data took [bold]{end - start:.2f}[/bold] seconds"
         )
         return data
-
-    @staticmethod
-    def process_sample(
-        sample: Dict,
-        tokenizer: tr.PreTrainedTokenizer,
-        max_positives: int,
-        max_negatives: int,
-        max_hard_negatives: int,
-        max_contexts: int = -1,
-        max_question_length: int = 256,
-        max_context_length: int = 128,
-    ) -> Dict:
-        positive_ctxs = [p["text"].strip() for p in sample["positive_ctxs"]]
-        if max_positives != -1:
-            positive_ctxs = positive_ctxs[:max_positives]
-        negative_ctxs = [n["text"].strip() for n in sample["negative_ctxs"]]
-        if max_negatives != -1:
-            negative_ctxs = negative_ctxs[:max_negatives]
-        hard_negative_ctxs = [h["text"].strip() for h in sample["hard_negative_ctxs"]]
-        if max_hard_negatives != -1:
-            hard_negative_ctxs = hard_negative_ctxs[:max_hard_negatives]
-
-        question = tokenizer(
-            sample["question"], max_length=max_question_length, truncation=True
-        )
-        positive_ctxs = [
-            tokenizer(p, max_length=max_context_length, truncation=True)
-            for p in positive_ctxs
-        ]
-        negative_ctxs = [
-            tokenizer(n, max_length=max_context_length, truncation=True)
-            for n in negative_ctxs
-        ]
-        hard_negative_ctxs = [
-            tokenizer(h, max_length=max_context_length, truncation=True)
-            for h in hard_negative_ctxs
-        ]
-
-        context = positive_ctxs + negative_ctxs + hard_negative_ctxs
-        if max_contexts != -1:
-            context = context[:max_contexts]
-        output = {
-            "question": question,
-            "context": context,
-            "positives": set([p["text"].strip() for p in sample["positive_ctxs"]]),
-            "positive_ctxs": positive_ctxs,
-            "negative_ctxs": negative_ctxs,
-            "hard_negative_ctxs": hard_negative_ctxs,
-            "positive_index_end": len(positive_ctxs),
-        }
-        return output
-
-    def add_sampled_negatives_to_data(
-        self,
-        data,
-        tokenizer: tr.PreTrainedTokenizer,
-        context_manager: Labels,
-        sample_by_frequency: bool = True,
-        max_negatives_to_sample: int = 64,
-        *args,
-        **kwargs,
-    ) -> Any:
-        if sample_by_frequency:
-            logger.log("Computing contexts frequencies")
-            context_frequencies = self.compute_contexts_frequency(data, context_manager)
-            # get only those contexts that have frequency > 0
-            context_idx_above_zero = [
-                idx for idx, freq in enumerate(context_frequencies) if freq > 0
-            ]
-            # build a reduced context_manager for sampling negatives
-            sampled_context_manager = Labels()
-            sampled_context_manager.add_labels(
-                [
-                    context_manager.get_label_from_index(idx)
-                    for idx in context_idx_above_zero
-                ]
-            )
-            context_frequencies = self.compute_contexts_frequency(
-                data, sampled_context_manager
-            )
-        else:
-            context_frequencies = None
-            sampled_context_manager = context_manager
-        sample_space_size = sampled_context_manager.get_label_size()
-        logger.log(f"Sampling negative contexts from {sample_space_size} samples")
-        # update the samples with the sampled negatives
-        data = data.map(
-            partial(
-                self.sample_negatives,
-                tokenizer=tokenizer,
-                sample_space_size=sample_space_size,
-                context_frequencies=context_frequencies,
-                context_manager=sampled_context_manager,
-                max_negatives_to_sample=max_negatives_to_sample,
-            ),
-            keep_in_memory=True,
-            num_proc=psutil.cpu_count(),
-        )
-        return data
-
-    @staticmethod
-    def sample_negatives(
-        sample: Dict[str, Any],
-        tokenizer: tr.PreTrainedTokenizer,
-        context_manager: Labels,
-        sample_space_size: int,
-        context_frequencies: np.array,
-        max_negatives_to_sample: int = 0,
-        max_context_length: int = 128,
-    ):
-        """
-        Sample negatives and add them to the sample.
-        """
-
-        # TODO: make faster sampling
-        negative_sampler = NegativeSampler(sample_space_size, context_frequencies)
-
-        positives_contexts_ids = sample["positive_ctxs"]
-        negative_contexts_ids = sample["negative_ctxs"]
-        hard_negative_contexts_ids = sample["hard_negative_ctxs"]
-
-        positives = sample["positives"]
-        positive_indices = [context_manager.get_index_from_label(p) for p in positives]
-
-        actual_number_of_contexts = (
-            len(positives_contexts_ids)
-            + len(negative_contexts_ids)
-            + len(hard_negative_contexts_ids)
-        )
-
-        sampled_negative_contexts = []
-        if max_negatives_to_sample > 0:
-            if actual_number_of_contexts < max_negatives_to_sample:
-                remaining_contexts = max_negatives_to_sample - actual_number_of_contexts
-                sampled = negative_sampler(remaining_contexts, exclude=positive_indices)
-                sampled_negative_contexts += [
-                    context_manager.get_label_from_index(s) for s in sampled[0]
-                ]
-
-        sampled_negative_ids = [
-            tokenizer(n, max_length=max_context_length, truncation=True)
-            for n in sampled_negative_contexts
-        ]
-        negative_contexts_ids += sampled_negative_ids
-        context = (
-            positives_contexts_ids + negative_contexts_ids + hard_negative_contexts_ids
-        )
-        sample["context"] = context
-        return sample
-
-    @staticmethod
-    def compute_contexts_frequency(data, context_manager) -> np.array:
-        """
-        Compute the frequency of each context in the dataset.
-        """
-        if context_manager is None:
-            raise ValueError(
-                "Context manager is required to compute the frequency of contexts"
-            )
-        frequency = np.zeros(context_manager.get_label_size())
-        for sample in data:
-            for context in sample["positives"]:
-                contex_index = context_manager.get_index_from_label(context)
-                frequency[contex_index] += 1
-        # normalize the frequency
-        frequency = frequency / frequency.sum()
-        return frequency
-
-    @staticmethod
-    def pad_sequence(
-        sequence: Union[List, torch.Tensor],
-        length: int,
-        value: Any = None,
-        pad_to_left: bool = False,
-    ) -> Union[List, torch.Tensor]:
-        """
-        Pad the input to the specified length with the given value.
-
-        Args:
-            sequence (:obj:`List`, :obj:`torch.Tensor`):
-                Element to pad, it can be either a :obj:`List` or a :obj:`torch.Tensor`.
-            length (:obj:`int`, :obj:`str`, optional, defaults to :obj:`subtoken`):
-                Length after pad.
-            value (:obj:`Any`, optional):
-                Value to use as padding.
-            pad_to_left (:obj:`bool`, optional, defaults to :obj:`False`):
-                If :obj:`True`, pads to the left, right otherwise.
-
-        Returns:
-            :obj:`List`, :obj:`torch.Tensor`: The padded sequence.
-
-        """
-        padding = [value] * abs(length - len(sequence))
-        if isinstance(sequence, torch.Tensor):
-            if len(sequence.shape) > 1:
-                raise ValueError(
-                    f"Sequence tensor must be 1D. Current shape is `{len(sequence.shape)}`"
-                )
-            padding = torch.as_tensor(padding)
-        if pad_to_left:
-            if isinstance(sequence, torch.Tensor):
-                return torch.cat((padding, sequence), -1)
-            return padding + sequence
-        if isinstance(sequence, torch.Tensor):
-            return torch.cat((sequence, padding), -1)
-        return sequence + padding
-
-    def convert_to_batch(
-        self, samples: Any, *args, **kwargs
-    ) -> Dict[str, torch.Tensor]:
-        """
-        Convert the list of samples to a batch.
-
-        Args:
-            samples (:obj:`List`):
-                List of samples to convert to a batch.
-
-        Returns:
-            :obj:`Dict[str, torch.Tensor]`: The batch.
-        """
-        # invert questions from list of dict to dict of list
-        samples = {k: [d[k] for d in samples] for k in samples[0]}
-        # get max length of questions
-        max_len = max(len(x) for x in samples["input_ids"])
-        # pad the questions
-        for key in samples:
-            if key in self.padding_ops:
-                samples[key] = torch.as_tensor(
-                    [self.padding_ops[key](b, max_len) for b in samples[key]]
-                )
-        return samples
 
     def save_data(
         self, path: Union[str, os.PathLike], remove_columns: Optional[List[str]] = None
@@ -1193,7 +642,7 @@ class DPRDataset(BaseDataset):
             "contexts": ModelInputs(contexts),
             "labels": labels,
             "positives": positives,
-            "id": [sample["id"] for sample in batch],
+            "sample_idx": [sample["sample_idx"] for sample in batch],
         }
         return ModelInputs(model_inputs)
 
@@ -1293,7 +742,7 @@ class InBatchNegativesDPRDataset(DPRDataset):
             "contexts": ModelInputs(contexts),
             "labels": labels,
             "positives": positives,
-            "id": [sample["id"] for sample in batch],
+            "sample_idx": [sample["sample_idx"] for sample in batch],
         }
         return ModelInputs(model_inputs)
 
@@ -1373,7 +822,7 @@ class SampledNegativesDPRDataset(DPRDataset):
             "contexts": ModelInputs(contexts),
             "labels": augmented_labels if augmented_labels is not None else labels,
             "positives": positives,
-            "id": [sample["id"] for sample in batch],
+            "sample_idx": [sample["sample_idx"] for sample in batch],
         }
         if contexts_per_question is not None:
             model_inputs["contexts_per_question"] = contexts_per_question

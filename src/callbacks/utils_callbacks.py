@@ -1,25 +1,15 @@
 import os
-import time
-from collections import defaultdict
-from functools import partial
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Union, Tuple
+from typing import Any, Dict, Optional, Union
 
-import hydra
 import pytorch_lightning as pl
 import torch
-import transformers as tr
-from omegaconf import DictConfig
-from torch.utils.data import DataLoader, Dataset
-from tqdm import tqdm
 
 from callbacks.base import NLPTemplateCallback, PredictionCallback, Stage
-from data.datasets import BaseDataset, DPRDataset
-from models.model import GoldenRetriever
 from utils.logging import get_console_logger
-from utils.model_inputs import ModelInputs
 
 logger = get_console_logger()
+
 
 class SavePredictionCallback(NLPTemplateCallback):
     def __init__(
@@ -146,4 +136,6 @@ class ShuffleTrainDatasetCallback(pl.Callback):
     ):
         if self.verbose:
             logger.log(f"Shuffling train dataset at epoch {trainer.current_epoch}")
-        trainer.datamodule.train_dataset.shuffle_data(seed=self.seed + trainer.current_epoch)
+        trainer.datamodule.train_dataset.shuffle_data(
+            seed=self.seed + trainer.current_epoch
+        )
