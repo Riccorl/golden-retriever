@@ -12,6 +12,10 @@ from optimum.onnxruntime.configuration import (
 )
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+# from speedster import optimize_model
+# from nebullvm.operations.inference_learners.huggingface import (
+#     HuggingFaceInferenceLearner,
+# )
 
 from data.datasets import BaseDataset
 from data.labels import Labels
@@ -26,7 +30,9 @@ class SentenceEncoder(torch.nn.Module):
     def __init__(
         self,
         language_model: Union[
-            str, tr.PreTrainedModel, ORTModelForFeatureExtraction
+            str,
+            tr.PreTrainedModel,
+            ORTModelForFeatureExtraction
         ] = "sentence-transformers/all-MiniLM-12-v2",
         pooling_strategy: str = "mean",
         load_ort_model: bool = False,
@@ -161,22 +167,7 @@ class GoldenRetriever(torch.nn.Module):
         if question_encodings is None:
             question_encodings = self.question_encoder(**questions)
         if contexts_encodings is None:
-            print(questions["input_ids"].shape)
-            print(contexts["input_ids"].shape)
-            # if batch size is too large, split the contexts into smaller batches
-            if contexts["input_ids"].shape[0] > 32:
-                contexts_encodings = []
-                for i in range(0, contexts["input_ids"].shape[0], 32):
-                    contexts_encodings.append(
-                        self.context_encoder(
-                            input_ids=contexts["input_ids"][i : i + 32],
-                            attention_mask=contexts["attention_mask"][i : i + 32],
-                            token_type_ids=contexts["token_type_ids"][i : i + 32],
-                        )
-                    )
-                contexts_encodings = torch.cat(contexts_encodings, dim=0)
-            else:
-                contexts_encodings = self.context_encoder(**contexts)
+            contexts_encodings = self.context_encoder(**contexts)
 
         if contexts_per_question is not None:
             # multiply each question encoding with a contexs_per_question encodings
@@ -445,7 +436,7 @@ class GoldenRetriever(torch.nn.Module):
 
     @staticmethod
     def _load_ort_optimized_encoder(
-        encoder: SentenceEncoder, provider: str = "CUDAExecutionProvider"
+        encoder: SentenceEncoder, provider: str = "TensorrtExecutionProvider"
     ) -> SentenceEncoder:
         temp_dir = tempfile.mkdtemp()
         encoder.language_model.save_pretrained(temp_dir)
@@ -456,9 +447,52 @@ class GoldenRetriever(torch.nn.Module):
         optimization_config = AutoOptimizationConfig.O4()
         optimizer.optimize(save_dir=temp_dir, optimization_config=optimization_config)
         ort_model = ORTModelForFeatureExtraction.from_pretrained(
-            temp_dir, export=True, provider=provider, use_io_binding=True
+            temp_dir,
+            export=True,
+            provider=provider,
+            use_io_binding=bool(provider == "CUDAExecutionProvider"),
         )
         return SentenceEncoder(
             language_model=ort_model,
             pooling_strategy=encoder.pooling_strategy,
         )
+
+    # @staticmethod
+    # def _load_speedster_optimized_encoder(
+    #     encoder: SentenceEncoder, input_sample: List[ModelInputs]
+    # ) -> HuggingFaceInferenceLearner:
+    #     optimized_model = optimize_model(
+    #         encoder.language_model,
+    #         input_data=input_sample,
+    #         optimization_time="constrained",
+    #         ignore_compressors=["sparseml", "intel_pruning"],
+    #         dynamic_info={
+    #             "inputs": [
+    #                 {
+    #                     0: {
+    #                         "name": "batch",
+    #                         "min_val": 1,
+    #                         "opt_val": 1,
+    #                         "max_val": 8,
+    #                     },
+    #                     2: {
+    #                         "name": "dim_image",
+    #                         "min_val": 128,
+    #                         "opt_val": 256,
+    #                         "max_val": 512,
+    #                     },
+    #                     3: {
+    #                         "name": "dim_image",
+    #                         "min_val": 128,
+    #                         "opt_val": 256,
+    #                         "max_val": 512,
+    #                     },
+    #                 }
+    #             ],
+    #             "outputs": [{0: "batch", 1: "out_dim"}],
+    #         },
+    #     )
+    #     return SentenceEncoder(
+    #         language_model=optimized_model,
+    #         pooling_strategy=encoder.pooling_strategy,
+    #     )

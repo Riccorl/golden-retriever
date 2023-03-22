@@ -16,7 +16,7 @@ pl_trainer:
   strategy: null
   accumulate_grad_batches: 1
   gradient_clip_val: 1.0
-  val_check_interval: 1.0  # you can specify an int "n" here => validation every "n" steps
+  val_check_interval: 1.0 # you can specify an int "n" here => validation every "n" steps
   max_epochs: 40
   deterministic: warn
   fast_dev_run: False
@@ -39,7 +39,7 @@ model_checkpoint_callback:
   mode: max
   verbose: True
   save_top_k: 1
-  filename: 'checkpoint-val_recall@${train.top_k}_{val_recall@${train.top_k}:.4f}-epoch_{epoch:02d}'
+  filename: "checkpoint-val_recall@${train.top_k}_{val_recall@${train.top_k}:.4f}-epoch_{epoch:02d}"
   auto_insert_metric_name: False
 
 prediction_callbacks:
@@ -47,7 +47,7 @@ prediction_callbacks:
     k: ${train.top_k}
     batch_size: 128
     other_callbacks:
-      - _target_: callbacks.custom_callbacks.TopKEvaluationCallback
+      - _target_: callbacks.evaluation_callbacks.TopKEvaluationCallback
         k: ${train.top_k}
   - _target_: callbacks.custom_callbacks.NegativeAugmentationCallback
     k: ${train.top_k}
@@ -58,8 +58,8 @@ prediction_callbacks:
     stages: [val]
     dataset:
       _target_: data.datasets.DPRDataset
-      name: 'train_augmented'
+      name: "train_augmented"
       contexts_path: ${data.contexts_path}
       tokenizer: ${model.language_model}
       path:
-        - 'data/dpr-like/srl/ontonotes/ontonotes.train.pairs.noargm.nolemma.json'
+        - "data/dpr-like/srl/ontonotes/ontonotes.train.pairs.noargm.nolemma.json"

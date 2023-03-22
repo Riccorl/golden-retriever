@@ -1,0 +1,37 @@
+max_contexts_per_batch: 64
+
+datamodule:
+  _target_: data.pl_data_modules.PLDataModule
+  tokenizer: ${model.language_model}
+  datasets:
+    train:
+      _target_: data.datasets.InBatchNegativesDPRIterableDataset
+      name: 'train'
+      contexts_path: ${data_overrides.contexts_path}
+      max_contexts_per_batch: ${data.max_contexts_per_batch}
+      path: ${data_overrides.train_path}
+
+    val:
+      - _target_: data.datasets.InBatchNegativesDPRIterableDataset
+        name: 'val'
+        contexts_path: ${data_overrides.contexts_path}
+        max_contexts_per_batch: ${data.max_contexts_per_batch}
+        path: ${data_overrides.val_path}
+
+    test:
+      - _target_: data.datasets.InBatchNegativesDPRIterableDataset
+        name: 'test'
+        contexts_path: ${data_overrides.contexts_path}
+        max_contexts_per_batch: ${data.max_contexts_per_batch}
+        path: ${data_overrides.test_path}
+
+  batch_sizes:
+    train: 64
+    val: 64
+    test: 64
+
+  num_workers:
+    train: 4
+    val: 4
+    test: 4
+ 

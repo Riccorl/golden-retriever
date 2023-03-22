@@ -22,7 +22,7 @@ defaults:
   - loss: nce_loss
   - optimizer: adamw
   - scheduler: linear_scheduler_with_warmup
-  - data: in_batch_negatives
+  - data: iterable_in_batch_negatives
   - evaluation: default_evaluation
   - logging: wandb_logging
   - override hydra/job_logging: colorlog

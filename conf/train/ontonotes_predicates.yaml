@@ -15,7 +15,7 @@ pl_trainer:
   strategy: null
   accumulate_grad_batches: 1
   gradient_clip_val: 1.0
-  val_check_interval: 0.5  # you can specify an int "n" here => validation every "n" steps
+  val_check_interval: 0.5 # you can specify an int "n" here => validation every "n" steps
   max_epochs: 0
   max_steps: 100_000
   deterministic: warn
@@ -38,7 +38,7 @@ model_checkpoint_callback:
   mode: max
   verbose: True
   save_top_k: 1
-  filename: 'checkpoint-val_recall@${train.top_k}_{val_recall@${train.top_k}:.4f}-epoch_{epoch:02d}'
+  filename: "checkpoint-val_recall@${train.top_k}_{val_recall@${train.top_k}:.4f}-epoch_{epoch:02d}"
   auto_insert_metric_name: False
 
 prediction_callbacks:
@@ -47,11 +47,11 @@ prediction_callbacks:
     batch_size: 128
     use_faiss: False
     other_callbacks:
-      - _target_: callbacks.custom_callbacks.TopKEvaluationCallback
+      - _target_: callbacks.evaluation_callbacks.TopKEvaluationCallback
         k: ${train.top_k}
-      - _target_: callbacks.custom_callbacks.TopKEvaluationCallback
+      - _target_: callbacks.evaluation_callbacks.TopKEvaluationCallback
         k: 50
-      - _target_: callbacks.custom_callbacks.TopKEvaluationCallback
+      - _target_: callbacks.evaluation_callbacks.TopKEvaluationCallback
         k: 20
   - _target_: callbacks.custom_callbacks.NegativeAugmentationCallback
     k: ${train.top_k}
@@ -60,15 +60,14 @@ prediction_callbacks:
     max_negatives: 5
     batch_size: 128
     stages: [val]
-    dataset:
-      _target_: ${data.datamodule.datasets.train._target_}
-      name: 'train_augmented'
-      contexts_path: ${data_overrides.contexts_path}
-      max_question_length: 512
-      max_context_length: 512
-      tokenizer: ${model.language_model}
-      path: ${data_overrides.val_path}
-
+    # dataset:
+    #   _target_: ${data.datamodule.datasets.train._target_}
+    #   name: "train_augmented"
+    #   contexts_path: ${data_overrides.contexts_path}
+    #   max_question_length: 512
+    #   max_context_length: 512
+    #   tokenizer: ${model.language_model}
+    #   path: ${data_overrides.val_path}
 
   # - _target_: callbacks.custom_callbacks.GoldenRetrieverPredictionCallback
   #   k: ${train.top_k}
@@ -82,7 +81,7 @@ prediction_callbacks:
   #     path:
   #       - 'data/dpr-like/srl/ontonotes/ontonotes.train.predicates.json'
   #   other_callbacks:
-  #     - _target_: callbacks.custom_callbacks.TopKEvaluationCallback
+  #     - _target_: callbacks.evaluation_callbacks.TopKEvaluationCallback
   #       k: ${train.top_k}
   #       prefix: "train_eval"
   # - _target_: callbacks.custom_callbacks.NegativeAugmentationCallback

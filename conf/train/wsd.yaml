@@ -15,7 +15,7 @@ pl_trainer:
   strategy: null
   accumulate_grad_batches: 1
   gradient_clip_val: 1.0
-  val_check_interval: 0.5  # you can specify an int "n" here => validation every "n" steps
+  val_check_interval: 1.0 # you can specify an int "n" here => validation every "n" steps
   max_epochs: 0
   max_steps: 100_000
   deterministic: warn
@@ -38,7 +38,7 @@ model_checkpoint_callback:
   mode: max
   verbose: True
   save_top_k: 1
-  filename: 'checkpoint-val_recall@${train.top_k}_{val_recall@${train.top_k}:.4f}-epoch_{epoch:02d}'
+  filename: "checkpoint-val_recall@${train.top_k}_{val_recall@${train.top_k}:.4f}-epoch_{epoch:02d}"
   auto_insert_metric_name: False
 
 prediction_callbacks:
@@ -47,30 +47,25 @@ prediction_callbacks:
     batch_size: 256
     use_faiss: False
     other_callbacks:
-      - _target_: callbacks.custom_callbacks.TopKEvaluationCallback
+      - _target_: callbacks.evaluation_callbacks.TopKEvaluationCallback
         k: ${train.top_k}
         verbose: True
-      - _target_: callbacks.custom_callbacks.TopKEvaluationCallback
+      - _target_: callbacks.evaluation_callbacks.TopKEvaluationCallback
         k: 50
         verbose: True
-      - _target_: callbacks.custom_callbacks.TopKEvaluationCallback
-        k: 20
-        verbose: True
+      # - _target_: callbacks.utils_callbacks.SaveRetrieverCallback
+
   - _target_: callbacks.custom_callbacks.NegativeAugmentationCallback
     k: ${train.top_k}
+    batch_size: 256
+    stages: [val]
     metric_to_monitor: val_recall@${train.top_k}
     threshold: 0.0
     max_negatives: 2
-    batch_size: 256
-    stages: [val]
-    dataset:
-      _target_: ${data.datamodule.datasets.train._target_}
-      name: 'train_augmented'
-      contexts_path: ${data_overrides.contexts_path}
-      max_question_length: 256
-      max_context_length: 256
-      tokenizer: ${model.language_model}
-      path: ${data_overrides.train_path}
-      save_predictions: False
+    refresh_every_n_epochs: 1
+    save_predictions: False
+    remove_columns: []
     other_callbacks:
-      - _target_: callbacks.custom_callbacks.FreeUpIndexerVRAMCallback
+      - _target_: callbacks.utils_callbacks.FreeUpIndexerVRAMCallback
+  
+  - _target_: callbacks.utils_callbacks.ShuffleTrainDatasetCallback

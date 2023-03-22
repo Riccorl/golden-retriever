@@ -17,7 +17,7 @@ pl_trainer:
   strategy: null
   accumulate_grad_batches: 1
   gradient_clip_val: 1.0
-  val_check_interval: 1.0  # you can specify an int "n" here => validation every "n" steps
+  val_check_interval: 1.0 # you can specify an int "n" here => validation every "n" steps
   check_val_every_n_epoch: 1
   max_epochs: 0
   max_steps: 100000
@@ -42,7 +42,7 @@ model_checkpoint_callback:
   mode: max
   verbose: True
   save_top_k: 1
-  filename: 'checkpoint-val_recall@${train.top_k}_{val_recall@${train.top_k}:.4f}-epoch_{epoch:02d}'
+  filename: "checkpoint-val_recall@${train.top_k}_{val_recall@${train.top_k}:.4f}-epoch_{epoch:02d}"
   auto_insert_metric_name: False
 
 prediction_callbacks:
@@ -53,10 +53,10 @@ prediction_callbacks:
     save_retriever: True
     move_index_to_cpu: True
     other_callbacks:
-      - _target_: callbacks.custom_callbacks.TopKEvaluationCallback
+      - _target_: callbacks.evaluation_callbacks.TopKEvaluationCallback
         k: ${train.top_k}
         verbose: True
-      - _target_: callbacks.custom_callbacks.TopKEvaluationCallback
+      - _target_: callbacks.evaluation_callbacks.TopKEvaluationCallback
         k: 50
         verbose: True
   - _target_: callbacks.custom_callbacks.NegativeAugmentationCallback
@@ -67,15 +67,15 @@ prediction_callbacks:
     metric_to_monitor: val_recall@${train.top_k}
     threshold: 0.0
     max_negatives: 2
-    dataset:
-      _target_: ${data.datamodule.datasets.train._target_}
-      name: 'train_augmented'
-      contexts_path: ${data_overrides.contexts_path}
-      max_question_length: 256
-      max_context_length: 256
-      tokenizer: ${model.language_model}
-      path: ${data_overrides.train_path}
+    # dataset:
+    #   _target_: ${data.datamodule.datasets.train._target_}
+    #   name: "train_augmented"
+    #   contexts_path: ${data_overrides.contexts_path}
+    #   max_question_length: 256
+    #   max_context_length: 256
+    #   tokenizer: ${model.language_model}
+    #   path: ${data_overrides.train_path}
     save_predictions: True
     remove_columns: []
     other_callbacks:
-      - _target_: callbacks.custom_callbacks.FreeUpIndexerVRAMCallback
+      - _target_: callbacks.utils_callbacks.FreeUpIndexerVRAMCallback

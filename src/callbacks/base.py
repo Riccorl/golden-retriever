@@ -19,19 +19,6 @@ class Stage(enum.Enum):
     TEST = "test"
 
 
-class NLPTemplateCallback:
-    def __call__(
-        self,
-        trainer: pl.Trainer,
-        pl_module: pl.LightningModule,
-        stage: Union[str, Stage],
-        predictions: Dict[str, Any],
-        *args,
-        **kwargs,
-    ) -> Any:
-        raise NotImplementedError
-
-
 class PredictionCallback(pl.Callback):
     def __init__(
         self,
@@ -68,9 +55,23 @@ class PredictionCallback(pl.Callback):
     ):
         predictions = self(trainer, pl_module, Stage.VALIDATION)
         for callback in self.other_callbacks:
-            callback(trainer, pl_module, Stage.VALIDATION, predictions)
+            callback(trainer, pl_module, Stage.VALIDATION, predictions, self)
 
     def on_test_epoch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule):
         predictions = self(trainer, pl_module, Stage.TEST)
         for callback in self.other_callbacks:
-            callback(trainer, pl_module, Stage.TEST, predictions)
+            callback(trainer, pl_module, Stage.TEST, predictions, self)
+
+
+class NLPTemplateCallback:
+    def __call__(
+        self,
+        trainer: pl.Trainer,
+        pl_module: pl.LightningModule,
+        stage: Union[str, Stage],
+        callback: PredictionCallback,
+        predictions: Dict[str, Any],
+        *args,
+        **kwargs,
+    ) -> Any:
+        raise NotImplementedError

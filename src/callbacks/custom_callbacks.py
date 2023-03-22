@@ -1,3 +1,4 @@
+import os
 import time
 from collections import defaultdict
 from functools import partial
@@ -26,11 +27,10 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         self,
         k: int = 100,
         batch_size: int = 32,
-        num_workers: int = 4,
+        num_workers: int = 0,
         use_faiss: bool = False,
         move_index_to_cpu: bool = True,
         force_reindex: bool = True,
-        save_retriever: bool = False,
         retriever_dir: Optional[Path] = None,
         save_predictions: bool = True,
         predictions_dir: Optional[Path] = None,
@@ -38,6 +38,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         stages: Set[Union[str, Stage]] = None,
         other_callbacks: Optional[List[DictConfig]] = None,
         dataset: Optional[Union[DictConfig, BaseDataset]] = None,
+        dataloader: Optional[DataLoader] = None,
         *args,
         **kwargs,
     ):
@@ -48,11 +49,11 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         self.use_faiss = use_faiss
         self.move_index_to_cpu = move_index_to_cpu
         self.force_reindex = force_reindex
-        self.save_retriever = save_retriever
         self.retriever_dir = retriever_dir
         self.save_predictions = save_predictions
         self.predictions_dir = predictions_dir
         self.dataset = dataset
+        self.dataloader = dataloader
 
         if remove_columns is None:
             remove_columns = [
@@ -87,7 +88,13 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         tokenizer = trainer.datamodule.tokenizer
 
         datasets, dataloaders = self._get_datasets_and_dataloaders(
-            self.dataset, self.batch_size, self.num_workers, stage, trainer, tokenizer
+            self.dataset,
+            self.dataloader,
+            self.batch_size,
+            self.num_workers,
+            stage,
+            trainer,
+            tokenizer,
         )
 
         # set the model to eval mode
@@ -125,7 +132,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                 collate_fn=collate_fn,
                 force_reindex=force_reindex,
                 use_faiss=self.use_faiss,
-                use_gpu=use_gpu,  # (pl_module.device.type == "cuda"),
+                use_gpu=use_gpu,
                 move_index_to_cpu=self.move_index_to_cpu,
             )
 
@@ -165,7 +172,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                     # add the predictions to the list
                     predictions.append(
                         {
-                            "id": batch.id[sample_idx],
+                            "sample_idx": batch.sample_idx[sample_idx],
                             "gold": gold_contexts,
                             "predictions": retrieved_contexts[sample_idx],
                             "correct": [
@@ -186,25 +193,11 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                 pl_module.to(pl_module_original_device)
 
             # update the dataset with the predictions
-            new_names = ["gold", "predictions", "correct", "wrong"]
-            new_columns = [[p[name] for p in predictions] for name in new_names]
-            datasets[dataloader_idx].update_data(new_names, new_columns, overwrite=True)
-
-            # write the predictions to a file inside the experiment folder
-            if self.save_retriever:
-                if self.retriever_dir is None and trainer.logger is None:
-                    logger.log(
-                        "You need to specify an output directory (`retriever_dir`) or a logger to save the retriever."
-                    )
-                else:
-                    if self.retriever_dir is not None:
-                        retriever_folder = Path(self.retriever_dir)
-                    else:
-                        retriever_folder = (
-                            Path(trainer.logger.experiment.dir) / "retriever"
-                        )
-                        retriever_folder.mkdir(exist_ok=True)
-                    retriever.save(retriever_folder)
+            for sample, prediction in zip(datasets[dataloader_idx], predictions):
+                sample["gold"] = prediction["gold"]
+                sample["predictions"] = prediction["predictions"]
+                sample["correct"] = prediction["correct"]
+                sample["wrong"] = prediction["wrong"]
 
             # write the predictions to a file inside the experiment folder
             if self.predictions_dir is None and trainer.logger is None:
@@ -276,6 +269,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
     @staticmethod
     def _get_datasets_and_dataloaders(
         dataset: Optional[Union[Dataset, DictConfig]],
+        dataloader: Optional[DataLoader],
         batch_size: int,
         num_workers: int,
         stage: Stage,
@@ -308,16 +302,19 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
             if isinstance(dataset, DictConfig):
                 dataset = hydra.utils.instantiate(dataset, _recursive_=False)
             datasets = [dataset]
-            dataloaders = [
-                DataLoader(
-                    datasets[0],
-                    batch_size=batch_size,
-                    shuffle=False,
-                    num_workers=num_workers,
-                    pin_memory=True,
-                    collate_fn=partial(datasets[0].collate_fn, tokenizer=tokenizer),
-                )
-            ]
+            if dataloader is not None:
+                dataloaders = [dataloader]
+            else:
+                dataloaders = [
+                    DataLoader(
+                        datasets[0],
+                        batch_size=batch_size,
+                        shuffle=False,
+                        num_workers=num_workers,
+                        pin_memory=True,
+                        collate_fn=partial(datasets[0].collate_fn, tokenizer=tokenizer),
+                    )
+                ]
         else:
             # get the dataloaders and datasets from the datamodule
             datasets = (
@@ -353,6 +350,7 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
         metric_to_monitor: str = "val_loss",
         threshold: float = 0.8,
         max_negatives: int = 5,
+        refresh_every_n_epochs: int = 1,
         *args,
         **kwargs,
     ):
@@ -377,6 +375,7 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
         self.metric_to_monitor = metric_to_monitor
         self.threshold = threshold
         self.max_negatives = max_negatives
+        self.refresh_every_n_epochs = refresh_every_n_epochs
 
     @torch.no_grad()
     def __call__(
@@ -398,199 +397,74 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
         if trainer.logged_metrics[self.metric_to_monitor] < self.threshold:
             return {}
 
+        if trainer.current_epoch % self.refresh_every_n_epochs != 0:
+            return {}
+
         logger.log(
             f"Metric {self.metric_to_monitor} is above threshold {self.threshold}. Computing hard negatives."
         )
 
+        self.dataset = trainer.datamodule.train_dataset
+        self.dataloader = trainer.datamodule.train_dataloader()
+
         predictions = super().__call__(trainer, pl_module, stage, *args, **kwargs)
-        for _, samples in predictions.items():
-            # create a defaultdict of defaultdicts to store the augmented contexts
-            # retrieved_hard_negatives = defaultdict(lambda: defaultdict(list))
-            retrieved_hard_negatives = []
-            for s_idx, sample in enumerate(samples):
-                top_k_contexts = sample["predictions"]
-                gold_contexts = sample["gold"]
+        for _, prediction_samples in predictions.items():
+            # store the predictions in a dictionary for faster access based on the sample index
+            predictions_dict = {p["sample_idx"]: p for p in prediction_samples}
+            for sample in self.dataset.data:
+                if sample["sample_idx"] not in predictions_dict:
+                    raise ValueError(
+                        f"Sample with index {sample['sample_idx']} not found in predictions."
+                    )
+                prediction = predictions_dict[sample["sample_idx"]]
+                top_k_contexts = prediction["predictions"]
+                gold_contexts = prediction["gold"]
                 # get the ids of the max_negatives wrong contexts with the highest similarity
                 wrong_contexts = [
                     context_id
                     for context_id in top_k_contexts
                     if context_id not in gold_contexts
                 ][: self.max_negatives]
-                # add the wrong contexts to the dataset sample
-                # sample_idx_in_dataset = sample["id"]
                 wrong_contexts_ids = trainer.datamodule.tokenizer(
                     wrong_contexts,
                     max_length=trainer.datamodule.train_dataset.max_context_length,
                     truncation=True,
                 )
-                retrieved_hard_negatives.append(
-                    [
-                        {
-                            "input_ids": wrong_contexts_ids["input_ids"][c_index],
-                            "attention_mask": wrong_contexts_ids["attention_mask"][
-                                c_index
-                            ],
-                            "token_type_ids": wrong_contexts_ids["token_type_ids"][
-                                c_index
-                            ],
-                        }
-                        for c_index in range(len(wrong_contexts))
-                    ]
-                )
-            logger.log(f"Adding hard negatives to the dataset.")
-            trainer.datamodule.train_dataset.update_data(
-                "retrieved_hard_negatives", retrieved_hard_negatives, overwrite=True
-            )
+                sample["retrieved_hard_negatives"] = {
+                    "input_ids": [],
+                    "attention_mask": [],
+                    "token_type_ids": [],
+                }
+                for c_index in range(len(wrong_contexts)):
+                    sample["retrieved_hard_negatives"]["input_ids"].append(
+                        wrong_contexts_ids["input_ids"][c_index]
+                    )
+                    sample["retrieved_hard_negatives"]["attention_mask"].append(
+                        wrong_contexts_ids["attention_mask"][c_index]
+                    )
+                    if "token_type_ids" in wrong_contexts_ids:
+                        sample["retrieved_hard_negatives"]["token_type_ids"].append(
+                            wrong_contexts_ids["token_type_ids"][c_index]
+                        )
+                #     retrieved_hard_negatives[sample_idx_in_dataset]["input_ids"].append(
+                #         wrong_contexts_ids["input_ids"][c_index]
+                #     )
+                #     retrieved_hard_negatives[sample_idx_in_dataset][
+                #         "attention_mask"
+                #     ].append(wrong_contexts_ids["attention_mask"][c_index])
+                #     if "token_type_ids" in wrong_contexts_ids:
+                #         retrieved_hard_negatives[sample_idx_in_dataset][
+                #             "token_type_ids"
+                #         ].append(wrong_contexts_ids["token_type_ids"][c_index])
+
+            # order retrieved_hard_negatives by sample_idx_in_dataset and get the values
+            # retrieved_hard_negatives = [
+            #     retrieved_hard_negatives[i]
+            #     for i in sorted(retrieved_hard_negatives.keys())
+            # ]
+            # logger.log(f"Adding hard negatives to the dataset.")
+            # trainer.datamodule.train_dataset.update_data(
+            #     "retrieved_hard_negatives", retrieved_hard_negatives, overwrite=True
+            # )
 
         return predictions
-
-
-class TopKEvaluationCallback(NLPTemplateCallback):
-    def __init__(
-        self,
-        k: int = 100,
-        prefix: Optional[str] = None,
-        verbose: bool = False,
-        *args,
-        **kwargs,
-    ):
-        super().__init__()
-        self.k = k
-        self.prefix = prefix
-        self.verbose = verbose
-
-    @torch.no_grad()
-    def __call__(
-        self,
-        trainer: pl.Trainer,
-        pl_module: pl.LightningModule,
-        stage: Union[str, Stage],
-        predictions: Dict,
-        *args,
-        **kwargs,
-    ) -> dict:
-        if self.verbose:
-            logger.log(f"Computing recall@{self.k}")
-
-        # metrics to return
-        metrics = {}
-
-        if stage not in [Stage.VALIDATION, Stage.TEST]:
-            raise ValueError(
-                f"Stage {stage} not supported, only `validation` and `test` are supported."
-            )
-
-        for dataloader_idx, samples in predictions.items():
-            hits, total = 0, 0
-            for sample in samples:
-                # compute the recall at k
-                # cut the predictions to the first k elements
-                predictions = sample["predictions"][: self.k]
-                hits += len(set(predictions) & set(sample["gold"]))
-                total += len(set(sample["gold"]))
-
-            # compute the mean recall at k
-            recall_at_k = hits / total
-            metrics[f"recall@{self.k}_{dataloader_idx}"] = recall_at_k
-        metrics[f"recall@{self.k}"] = sum(metrics.values()) / len(metrics)
-
-        if self.prefix is not None:
-            metrics = {f"{self.prefix}_{k}": v for k, v in metrics.items()}
-        else:
-            metrics = {f"{stage.value}_{k}": v for k, v in metrics.items()}
-        pl_module.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
-
-        if self.verbose:
-            logger.log(
-                f"Recall@{self.k} on {stage.value}: {metrics[f'{stage.value}_recall@{self.k}']}"
-            )
-
-        return metrics
-
-
-class NYTTopKEvaluationCallback(TopKEvaluationCallback):
-    def __init__(
-        self,
-        label_mapping: Dict[str, List[str]],
-        k: int = 100,
-        batch_size: int = 32,
-        *args,
-        **kwargs,
-    ):
-        super().__init__(k, batch_size, *args, **kwargs)
-        self.label_mapping = label_mapping
-        # invert the label mapping
-        self.inverted_label_mapping = {
-            description: label
-            for label, descriptions in label_mapping.items()
-            for description in descriptions
-        }
-
-    @torch.no_grad()
-    def __call__(
-        self,
-        trainer: pl.Trainer,
-        pl_module: pl.LightningModule,
-        stage: Union[str, Stage],
-        predictions: Dict,
-        *args,
-        **kwargs,
-    ) -> dict:
-        logger.log(f"Computing recall@{self.k}")
-
-        # metrics to return
-        metrics = {}
-
-        if stage not in [Stage.VALIDATION, Stage.TEST]:
-            raise ValueError(
-                f"Stage {stage} not supported, only `validation` and `test` are supported."
-            )
-
-        for dataloader_idx, samples in predictions.items():
-            # now compute the question embeddings and compute the top-k accuracy
-            logger.log(f"Computing recall@{self.k} for dataloader {dataloader_idx}")
-            hits, total = 0, 0
-            for sample in samples:
-                gold_contexts = sample["gold"]
-                gold_labels = [
-                    label
-                    for label, descriptions in self.label_mapping.items()
-                    if set(descriptions) & set(gold_contexts)
-                ]
-                # get the top_k context ids
-                top_k_contexts = sample["predictions"]
-                top_k_labels = [
-                    self.inverted_label_mapping[context_id]
-                    for context_id in top_k_contexts
-                ]
-                # remove duplicates and preserve the order
-                top_k_labels = list(dict.fromkeys(top_k_labels))
-                top_k_labels = top_k_labels[: self.k]
-                # compute
-                hits += len(set(top_k_labels) & set(gold_labels))
-                total += len(set(gold_labels))
-
-            # compute the mean recall at k
-            recall_at_k = hits / total
-            metrics[f"recall@{self.k}_{dataloader_idx}"] = recall_at_k
-        metrics[f"recall@{self.k}"] = sum(metrics.values()) / len(metrics)
-
-        metrics = {f"{stage.value}_{k}": v for k, v in metrics.items()}
-        pl_module.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
-        return metrics
-
-
-class FreeUpIndexerVRAMCallback(NLPTemplateCallback):
-    def __call__(
-        self,
-        trainer: pl.Trainer,
-        pl_module: pl.LightningModule,
-        stage: Union[str, Stage],
-        predictions: Dict[str, Any],
-        *args,
-        **kwargs,
-    ) -> Any:
-        logger.log("Freeing up GPU memory")
-        # remove the index from the GPU memory
-        pl_module.model._context_embeddings = None
-        torch.cuda.empty_cache()
