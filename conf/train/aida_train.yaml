@@ -50,8 +50,7 @@ prediction_callbacks:
     k: ${train.top_k}
     batch_size: 256
     use_faiss: False
-    save_retriever: True
-    move_index_to_cpu: True
+    move_index_to_cpu: False
     other_callbacks:
       - _target_: callbacks.evaluation_callbacks.TopKEvaluationCallback
         k: ${train.top_k}
@@ -59,23 +58,19 @@ prediction_callbacks:
       - _target_: callbacks.evaluation_callbacks.TopKEvaluationCallback
         k: 50
         verbose: True
+      - _target_: callbacks.utils_callbacks.SavePredictionsCallback
+  
+  - _target_: callbacks.utils_callbacks.SaveRetrieverCallback
+
   - _target_: callbacks.custom_callbacks.NegativeAugmentationCallback
     k: ${train.top_k}
     batch_size: 256
-    move_index_to_cpu: True
     stages: [val]
     metric_to_monitor: val_recall@${train.top_k}
     threshold: 0.0
     max_negatives: 3
-    # dataset:
-    #   _target_: ${data.datamodule.datasets.train._target_}
-    #   name: "train_augmented"
-    #   contexts_path: ${data_overrides.contexts_path}
-    #   max_question_length: 256
-    #   max_context_length: 256
-    #   tokenizer: ${model.language_model}
-    #   path: ${data_overrides.train_path}
-    save_predictions: True
-    remove_columns: []
+    refresh_every_n_epochs: 1
     other_callbacks:
       - _target_: callbacks.utils_callbacks.FreeUpIndexerVRAMCallback
+  
+  - _target_: callbacks.utils_callbacks.ShuffleTrainDatasetCallback
