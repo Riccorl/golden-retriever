@@ -108,7 +108,7 @@ class SaveRetrieverCallback(pl.Callback):
         checkpoint: Dict[str, Any],
         *args,
         **kwargs,
-    ) -> dict:
+    ):
         if self.saving_dir is None and trainer.logger is None:
             logger.log(
                 "You need to specify an output directory (`saving_dir`) or a logger to save the retriever."

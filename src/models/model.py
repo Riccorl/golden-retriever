@@ -19,7 +19,6 @@ from models.faiss_indexer import FaissIndexer
 from utils.logging import get_console_logger
 from utils.model_inputs import ModelInputs
 
-
 logger = get_console_logger()
 
 

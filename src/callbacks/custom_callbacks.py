@@ -1,19 +1,16 @@
-from collections import defaultdict
 import time
-from functools import partial
+from collections import defaultdict
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Union, Tuple
+from typing import List, Optional, Set, Union
 
-import hydra
 import pytorch_lightning as pl
 import torch
-import transformers as tr
 from omegaconf import DictConfig
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from callbacks.base import PredictionCallback, Stage
-from data.datasets import BaseDataset, DPRDataset
+from data.datasets import BaseDataset
 from models.model import GoldenRetriever
 from utils.logging import get_console_logger
 from utils.model_inputs import ModelInputs
@@ -170,37 +167,6 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
             if pl_module_original_device != pl_module.device:
                 pl_module.to(pl_module_original_device)
 
-            # update the dataset with the predictions
-            # for sample, prediction in zip(datasets[dataloader_idx], predictions):
-            #     sample["gold"] = prediction["gold"]
-            #     sample["predictions"] = prediction["predictions"]
-            #     sample["correct"] = prediction["correct"]
-            #     sample["wrong"] = prediction["wrong"]
-
-            # write the predictions to a file inside the experiment folder
-            # if self.predictions_dir is None and trainer.logger is None:
-            #     logger.log(
-            #         "You need to specify an output directory (`predictions_dir`) or a logger to save the predictions."
-            #     )
-            # else:
-            #     # save to file
-            #     if self.save_predictions:
-            #         if self.predictions_dir is not None:
-            #             prediction_folder = Path(self.predictions_dir)
-            #         else:
-            #             prediction_folder = (
-            #                 Path(trainer.logger.experiment.dir) / "predictions"
-            #             )
-            #             prediction_folder.mkdir(exist_ok=True)
-            #         predictions_path = (
-            #             prediction_folder
-            #             / f"{datasets[dataloader_idx].name}_{dataloader_idx}.json"
-            #         )
-            #         logger.log(f"Saving predictions to {predictions_path}")
-            #         datasets[dataloader_idx].save_data(
-            #             predictions_path, remove_columns=self.remove_columns
-            #         )
-
         # return the predictions
         return dataloader_predictions
 
@@ -350,6 +316,6 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
                     "retrieved_hard_negatives"
                 ] = retrieved_hard_negatives
             logger.log(f"Adding hard negatives to the dataset.")
-            self.dataset.add_fields_to_samples(update_dict)
+            self.datasets[0].add_fields_to_samples(update_dict)
 
         return predictions
