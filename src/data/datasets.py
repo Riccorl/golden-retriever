@@ -3,7 +3,7 @@ import os
 import time
 from functools import partial
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Sequence, Tuple, Union, Optional
+from typing import Any, Dict, Iterator, List, Sequence, Tuple, Union, Optional, Callable
 
 import psutil
 import torch
@@ -115,6 +115,55 @@ class GenerativeDataset(IterableDataset):
         # if self.shuffle:
         #   random.shuffle(data)
         raise NotImplementedError
+
+
+class DPRLoadMixin:
+    @staticmethod
+    def load_data(
+        paths: Union[str, os.PathLike, List[str], List[os.PathLike]],
+        tokenizer: tr.PreTrainedTokenizer,
+        shuffle: bool,
+        process_sample_fn: Callable,
+        max_positives: int,
+        max_negatives: int,
+        max_hard_negatives: int,
+        max_contexts: int,
+        max_question_length: int,
+        max_context_length: int,
+        *args,
+        **kwargs,
+    ) -> Any:
+        # The data is a list of dictionaries, each dictionary is a sample
+        # Each sample has the following keys:
+        #   - "question": the question
+        #   - "answers": a list of answers
+        #   - "positive_ctxs": a list of positive contexts
+        #   - "negative_ctxs": a list of negative contexts
+        #   - "hard_negative_ctxs": a list of hard negative contexts
+        # use the huggingface dataset library to load the data, by default it will load the
+        # data in a dict with the key being "train". datasets needs str paths and not Path
+        data = load_dataset("json", data_files=[str(p) for p in paths])["train"]
+        data = data.map(
+            partial(
+                process_sample_fn,
+                tokenizer=tokenizer,
+                max_positives=max_positives,
+                max_negatives=max_negatives,
+                max_hard_negatives=max_hard_negatives,
+                max_contexts=max_contexts,
+                max_question_length=max_question_length,
+                max_context_length=max_context_length,
+            ),
+            keep_in_memory=True,
+            load_from_cache_file=True,
+            num_proc=psutil.cpu_count(),
+        )
+        # shuffle the data
+        if shuffle:
+            data.shuffle(seed=42)
+        # add id if not present
+        data = data.add_column("sample_idx", range(len(data)))
+        return data
 
 
 class DPRCollateMixin:
@@ -265,7 +314,7 @@ class SampledNegativesCollateMixin:
         return ModelInputs(model_inputs)
 
 
-class DPRIterableDataset(GenerativeDataset, DPRMixin, DPRCollateMixin):
+class DPRIterableDataset(GenerativeDataset, DPRMixin, DPRCollateMixin, DPRLoadMixin):
     def __init__(
         self,
         name: str,
@@ -357,8 +406,16 @@ class DPRIterableDataset(GenerativeDataset, DPRMixin, DPRCollateMixin):
                 "hard_negative_ctxs",
                 "retrieved_hard_negatives",
             }:
-                contexts_in_batch.add(
-                    sample[context_type] for sample in batch if context_type in sample
+                # yes it's a bit ugly but it works :)
+                # count the number of contexts in the batch and stop if we reach the limit
+                # we use a set to avoid counting the same context twice
+                # we use a tuple because set doesn't support lists
+                # we use input_ids as discriminator
+                contexts_in_batch |= set(
+                    tuple(s["input_ids"])
+                    for sample in batch
+                    if context_type in sample
+                    for s in sample[context_type]
                 )
         # drop last cause might be too short and result in issues (nan if we are using amp)
         if not self.drop_last_batch and len(batch) > 0:
@@ -382,44 +439,24 @@ class DPRIterableDataset(GenerativeDataset, DPRMixin, DPRCollateMixin):
             if not path.exists():
                 raise ValueError(f"{path} does not exist")
 
-        # The data is a list of dictionaries, each dictionary is a sample
-        # Each sample has the following keys:
-        #   - "question": the question
-        #   - "answers": a list of answers
-        #   - "positive_ctxs": a list of positive contexts
-        #   - "negative_ctxs": a list of negative contexts
-        #   - "hard_negative_ctxs": a list of hard negative contexts
-        # use the huggingface dataset library to load the data, by default it will load the
-        # data in a dict with the key being "train". datasets needs str paths and not Path
-        data = load_dataset("json", data_files=[str(p) for p in paths])["train"]
-
-        if not tokenizer:
-            raise ValueError("Tokenizer is required for pre-processing")
-
-        if shuffle:
-            # shuffle the data
-            self.shuffle_data(seed=42)
-
         # measure how long the preprocessing takes
         start = time.time()
-        data = data.map(
-            partial(
-                self._process_dataset_sample,
-                tokenizer=tokenizer,
-                max_positives=self.max_positives,
-                max_negatives=self.max_negatives,
-                max_hard_negatives=self.max_hard_negatives,
-                max_contexts=self.max_contexts,
-                max_question_length=self.max_question_length,
-                max_context_length=self.max_context_length,
-            ),
-            keep_in_memory=True,
-            load_from_cache_file=True,
-            num_proc=psutil.cpu_count(logical=False),
+
+        data = self.load_data(
+            paths,
+            tokenizer,
+            shuffle,
+            self._process_dataset_sample,
+            self.max_positives,
+            self.max_negatives,
+            self.max_hard_negatives,
+            self.max_contexts,
+            self.max_question_length,
+            self.max_context_length,
         )
-        # add id if not present
-        data = data.add_column("sample_idx", range(len(data)))
+        # convert to iterable dataset
         data = data.to_iterable_dataset(num_shards=4)
+
         end = time.time()
         logger.log(
             f"Pre-processing [bold cyan]{self.name}[/bold cyan] "
@@ -589,41 +626,22 @@ class DPRDataset(BaseDataset, DPRMixin, DPRCollateMixin):
             if not path.exists():
                 raise ValueError(f"{path} does not exist")
 
-        # The data is a list of dictionaries, each dictionary is a sample
-        # Each sample has the following keys:
-        #   - "question": the question
-        #   - "answers": a list of answers
-        #   - "positive_ctxs": a list of positive contexts
-        #   - "negative_ctxs": a list of negative contexts
-        #   - "hard_negative_ctxs": a list of hard negative contexts
-        # use the huggingface dataset library to load the data, by default it will load the
-        # data in a dict with the key being "train". datasets needs str paths and not Path
-        data = load_dataset("json", data_files=[str(p) for p in paths])["train"]
-
-        if not tokenizer:
-            raise ValueError("Tokenizer is required for pre-processing")
-        # Pre-process the data
-        if shuffle:
-            # shuffle the data
-            data = data.shuffle(seed=42)
-
         # measure how long the preprocessing takes
         start = time.time()
-        data = data.map(
-            partial(
-                self._process_dataset_sample,
-                tokenizer=tokenizer,
-                max_contexts=self.max_contexts,
-                max_positives=self.max_positives,
-                max_negatives=self.max_negatives,
-                max_hard_negatives=self.max_hard_negatives,
-            ),
-            keep_in_memory=True,
-            load_from_cache_file=True,
-            num_proc=psutil.cpu_count(logical=False),
+
+        data = self.load_data(
+            paths,
+            tokenizer,
+            shuffle,
+            self._process_dataset_sample,
+            self.max_positives,
+            self.max_negatives,
+            self.max_hard_negatives,
+            self.max_contexts,
+            self.max_question_length,
+            self.max_context_length,
         )
-        # add id if not present
-        data = data.add_column("sample_idx", range(len(data)))
+
         end = time.time()
         logger.log(
             f"Pre-processing [bold cyan]{self.name}[/bold cyan] "

@@ -32,13 +32,16 @@ class DPRMixin:
         max_question_length: int = 256,
         max_context_length: int = 128,
     ):
-        positive_ctxs = [p["text"].strip() for p in sample["positive_ctxs"]]
+        # remove duplicates and limit the number of contexts
+        positive_ctxs = list(set([p["text"].strip() for p in sample["positive_ctxs"]]))
         if max_positives != -1:
             positive_ctxs = positive_ctxs[:max_positives]
-        negative_ctxs = [n["text"].strip() for n in sample["negative_ctxs"]]
+        negative_ctxs = list(set([n["text"].strip() for n in sample["negative_ctxs"]]))
         if max_negatives != -1:
             negative_ctxs = negative_ctxs[:max_negatives]
-        hard_negative_ctxs = [h["text"].strip() for h in sample["hard_negative_ctxs"]]
+        hard_negative_ctxs = list(set(
+            [h["text"].strip() for h in sample["hard_negative_ctxs"]]
+        ))
         if max_hard_negatives != -1:
             hard_negative_ctxs = hard_negative_ctxs[:max_hard_negatives]
 
