@@ -49,6 +49,10 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
         stage: Union[str, Stage],
+        datasets: Optional[
+            Union[DictConfig, BaseDataset, List[DictConfig], List[BaseDataset]]
+        ] = None,
+        dataloaders: Optional[Union[DataLoader, List[DataLoader]]] = None,
         *args,
         **kwargs,
     ) -> dict:
@@ -63,8 +67,8 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         tokenizer = trainer.datamodule.tokenizer
 
         self.datasets, self.dataloaders = self._get_datasets_and_dataloaders(
-            self.datasets,
-            self.dataloaders,
+            self.datasets or datasets,
+            self.dataloaders or dataloaders,
             stage,
             trainer,
             dataloader_kwargs={
@@ -277,45 +281,49 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
             f"Metric {self.metric_to_monitor} is above threshold {self.threshold}. Computing hard negatives."
         )
 
-        # use the train dataset and dataloader as target for predictions
-        # since it is expected that self.datasets and self.dataloaders are lists
-        # we need to wrap the train dataset and dataloader in a list
-        self.datasets = [trainer.datamodule.train_dataset]
-        self.dataloaders = [trainer.datamodule.train_dataloader()]
-
-        predictions = super().__call__(trainer, pl_module, stage, *args, **kwargs)
-        for dataloader_idx, prediction_samples in predictions.items():
-            # store the predictions in a dictionary for faster access based on the sample index
-            update_dict = defaultdict(lambda: defaultdict(list))
-            for prediction in prediction_samples:
-                top_k_contexts = prediction["predictions"]
-                gold_contexts = prediction["gold"]
-                # get the ids of the max_negatives wrong contexts with the highest similarity
-                wrong_contexts = [
-                    context_id
-                    for context_id in top_k_contexts
-                    if context_id not in gold_contexts
-                ][: self.max_negatives]
-                wrong_contexts_ids = trainer.datamodule.tokenizer(
-                    wrong_contexts,
-                    max_length=trainer.datamodule.train_dataset.max_context_length,
-                    truncation=True,
-                )
-                retrieved_hard_negatives = []
-                for c_index in range(len(wrong_contexts)):
-                    p_dict = {
-                        "input_ids": wrong_contexts_ids["input_ids"][c_index],
-                        "attention_mask": wrong_contexts_ids["attention_mask"][c_index],
-                    }
-                    if "token_type_ids" in wrong_contexts_ids:
-                        p_dict["token_type_ids"] = wrong_contexts_ids["token_type_ids"][
-                            c_index
-                        ]
-                    retrieved_hard_negatives.append(p_dict)
-                update_dict[prediction["sample_idx"]][
-                    "retrieved_hard_negatives"
-                ] = retrieved_hard_negatives
-            logger.log(f"Adding hard negatives to the dataset.")
-            self.datasets[0].add_fields_to_samples(update_dict)
+        predictions = super().__call__(
+            trainer,
+            pl_module,
+            stage,
+            datasets=trainer.datamodule.train_dataset,
+            dataloaders=trainer.datamodule.train_dataloader(),
+            *args,
+            **kwargs,
+        )
+        # predictions is a dict with the dataloader index as key and the predictions as value
+        # since we only have one dataloader, we can get the predictions directly
+        predictions = list(predictions.values())[0]
+        # store the predictions in a dictionary for faster access based on the sample index
+        update_dict = defaultdict(lambda: defaultdict(list))
+        for prediction in predictions:
+            top_k_contexts = prediction["predictions"]
+            gold_contexts = prediction["gold"]
+            # get the ids of the max_negatives wrong contexts with the highest similarity
+            wrong_contexts = [
+                context_id
+                for context_id in top_k_contexts
+                if context_id not in gold_contexts
+            ][: self.max_negatives]
+            wrong_contexts_ids = trainer.datamodule.tokenizer(
+                wrong_contexts,
+                max_length=trainer.datamodule.train_dataset.max_context_length,
+                truncation=True,
+            )
+            retrieved_hard_negatives = []
+            for c_index in range(len(wrong_contexts)):
+                p_dict = {
+                    "input_ids": wrong_contexts_ids["input_ids"][c_index],
+                    "attention_mask": wrong_contexts_ids["attention_mask"][c_index],
+                }
+                if "token_type_ids" in wrong_contexts_ids:
+                    p_dict["token_type_ids"] = wrong_contexts_ids["token_type_ids"][
+                        c_index
+                    ]
+                retrieved_hard_negatives.append(p_dict)
+            update_dict[prediction["sample_idx"]][
+                "retrieved_hard_negatives"
+            ] = retrieved_hard_negatives
+        logger.log(f"Adding hard negatives to the dataset.")
+        trainer.datamodule.train_dataset.add_fields_to_samples(update_dict)
 
         return predictions
