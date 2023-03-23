@@ -254,31 +254,6 @@ class DPRMixin:
                 )
         return samples
 
-    def save_data(
-        self, path: Union[str, os.PathLike], remove_columns: Optional[List[str]] = None
-    ) -> None:
-        """
-        Save the samples to a file.
-
-        Args:
-            path (:obj:`str`):
-                Path to the file where to save the dataset.
-            remove_columns (:obj:`str`):
-                Data not to save on disk
-        """
-        if remove_columns is None:
-            remove_columns = []
-        with open(path, "w") as f:
-            for sample in self.data:
-                sample["question"] = self.tokenizer.decode(
-                    sample["question"]["input_ids"]
-                )
-                # remove columns if needed
-                for key in remove_columns:
-                    if key in sample:
-                        sample.pop(key)
-                json.dump(sample, f, indent=2)
-
     def add_fields_to_samples(
         self,
         updates: Dict[int, Dict[str, Any]],

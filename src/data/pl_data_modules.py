@@ -21,9 +21,9 @@ class PLDataModule(pl.LightningDataModule):
     def __init__(
         self,
         datasets: DictConfig,
-        batch_sizes: DictConfig,
-        num_workers: DictConfig,
-        tokenizer: Union[str, tr.PreTrainedTokenizer],
+        batch_sizes: Optional[DictConfig] = None,
+        num_workers: Optional[DictConfig] = None,
+        tokenizer: Union[str, tr.PreTrainedTokenizer] = None,
         labels: Labels = None,
         *args,
         **kwargs,
@@ -39,11 +39,13 @@ class PLDataModule(pl.LightningDataModule):
         # label file
         self.labels: Labels = labels
         # tokenizer
-        self.tokenizer = (
-            tokenizer
-            if isinstance(tokenizer, tr.PreTrainedTokenizer)
-            else tr.AutoTokenizer.from_pretrained(tokenizer)
-        )
+        self.tokenizer: tr.PreTrainedTokenizer = None
+        if tokenizer is not None:
+            self.tokenizer = (
+                tokenizer
+                if isinstance(tokenizer, tr.PreTrainedTokenizer)
+                else tr.AutoTokenizer.from_pretrained(tokenizer)
+            )
 
     def build_labels(self) -> Labels:
         """

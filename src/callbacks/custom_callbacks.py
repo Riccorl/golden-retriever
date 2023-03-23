@@ -2,7 +2,7 @@ from collections import defaultdict
 import time
 from functools import partial
 from pathlib import Path
-from typing import List, Optional, Set, Union, Tuple
+from typing import Any, Dict, List, Optional, Set, Union, Tuple
 
 import hydra
 import pytorch_lightning as pl
@@ -31,9 +31,6 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         move_index_to_cpu: bool = True,
         force_reindex: bool = True,
         retriever_dir: Optional[Path] = None,
-        save_predictions: bool = True,
-        predictions_dir: Optional[Path] = None,
-        remove_columns: Optional[List[str]] = None,
         stages: Set[Union[str, Stage]] = None,
         other_callbacks: Optional[List[DictConfig]] = None,
         dataset: Optional[Union[DictConfig, BaseDataset]] = None,
@@ -41,31 +38,13 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         *args,
         **kwargs,
     ):
-        super().__init__(stages, other_callbacks)
+        super().__init__(batch_size, stages, other_callbacks, dataset, dataloader)
         self.k = k
-        self.batch_size = batch_size
         self.num_workers = num_workers
         self.use_faiss = use_faiss
         self.move_index_to_cpu = move_index_to_cpu
         self.force_reindex = force_reindex
         self.retriever_dir = retriever_dir
-        self.save_predictions = save_predictions
-        self.predictions_dir = predictions_dir
-        self.dataset = dataset
-        self.dataloader = dataloader
-
-        if remove_columns is None:
-            remove_columns = [
-                "context",
-                "positives",
-                "negatives",
-                "wrong",
-                "positive_ctxs",
-                "negative_ctxs",
-                "hard_negative_ctxs",
-                "positive_index_end",
-            ]
-        self.remove_columns = remove_columns
 
     @torch.no_grad()
     def __call__(
@@ -86,14 +65,18 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         # get the tokenizer
         tokenizer = trainer.datamodule.tokenizer
 
-        datasets, dataloaders = self._get_datasets_and_dataloaders(
-            self.dataset,
-            self.dataloader,
-            self.batch_size,
-            self.num_workers,
+        self.datasets, self.dataloaders = self._get_datasets_and_dataloaders(
+            self.datasets,
+            self.dataloaders,
             stage,
             trainer,
-            tokenizer,
+            dataloader_kwargs={
+                "batch_size": self.batch_size,
+                "num_workers": self.num_workers,
+                "pin_memory": True,
+                "shuffle": False,
+            },
+            collate_fn_kwargs={"tokenizer": tokenizer},
         )
 
         # set the model to eval mode
@@ -104,22 +87,22 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         # here we will store the samples with predictions for each dataloader
         dataloader_predictions = {}
         # compute the context embeddings index for each dataloader
-        for dataloader_idx, dataloader in enumerate(dataloaders):
+        for dataloader_idx, dataloader in enumerate(self.dataloaders):
+            current_dataset = self.datasets[dataloader_idx]
             logger.log(
-                f"Computing context embeddings for dataset {datasets[dataloader_idx].name}"
+                f"Computing context embeddings for dataset {current_dataset.name}"
             )
-            contexts = self._get_contexts_dataloader(datasets[dataloader_idx], trainer)
+            contexts = self._get_contexts_dataloader(current_dataset, trainer)
 
             collate_fn = lambda x: ModelInputs(
                 tokenizer(
                     x,
                     truncation=True,
                     padding=True,
-                    max_length=datasets[dataloader_idx].max_context_length,
+                    max_length=current_dataset.max_context_length,
                     return_tensors="pt",
                 )
             )
-            use_gpu = (pl_module.device.type == "cuda") if not self.use_faiss else False
             if self.retriever_dir is not None and trainer.current_epoch == 0:
                 force_reindex = False
             else:
@@ -131,7 +114,6 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                 collate_fn=collate_fn,
                 force_reindex=force_reindex,
                 use_faiss=self.use_faiss,
-                use_gpu=use_gpu,
                 move_index_to_cpu=self.move_index_to_cpu,
             )
 
@@ -144,9 +126,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                 pl_module.to("cpu")
 
             # now compute the question embeddings and compute the top-k accuracy
-            logger.log(
-                f"Computing predictions for dataset {datasets[dataloader_idx].name}"
-            )
+            logger.log(f"Computing predictions for dataset {current_dataset.name}")
             predictions = []
             start = time.time()
             for batch in tqdm(dataloader, desc="Retrieving contexts"):
@@ -169,21 +149,20 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                     # wrong predictions are the contexts that are in the top-k and are not gold
                     wrong_indices = set(retrieved_index) - set(gold_context_indices)
                     # add the predictions to the list
-                    predictions.append(
-                        {
-                            "sample_idx": batch.sample_idx[sample_idx],
-                            "gold": gold_contexts,
-                            "predictions": retrieved_contexts[sample_idx],
-                            "correct": [
-                                retriever.get_context_from_index(i)
-                                for i in correct_indices
-                            ],
-                            "wrong": [
-                                retriever.get_context_from_index(i)
-                                for i in wrong_indices
-                            ],
-                        }
-                    )
+                    prediction_output = {
+                        "sample_idx": batch.sample_idx[sample_idx],
+                        "gold": gold_contexts,
+                        "predictions": retrieved_contexts[sample_idx],
+                        "correct": [
+                            retriever.get_context_from_index(i) for i in correct_indices
+                        ],
+                        "wrong": [
+                            retriever.get_context_from_index(i) for i in wrong_indices
+                        ],
+                    }
+                    if "id" in batch:
+                        prediction_output["id"] = batch.id[sample_idx]
+                    predictions.append(prediction_output)
             end = time.time()
             logger.log("Time to retrieve:", end - start)
             dataloader_predictions[dataloader_idx] = predictions
@@ -192,35 +171,35 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                 pl_module.to(pl_module_original_device)
 
             # update the dataset with the predictions
-            for sample, prediction in zip(datasets[dataloader_idx], predictions):
-                sample["gold"] = prediction["gold"]
-                sample["predictions"] = prediction["predictions"]
-                sample["correct"] = prediction["correct"]
-                sample["wrong"] = prediction["wrong"]
+            # for sample, prediction in zip(datasets[dataloader_idx], predictions):
+            #     sample["gold"] = prediction["gold"]
+            #     sample["predictions"] = prediction["predictions"]
+            #     sample["correct"] = prediction["correct"]
+            #     sample["wrong"] = prediction["wrong"]
 
             # write the predictions to a file inside the experiment folder
-            if self.predictions_dir is None and trainer.logger is None:
-                logger.log(
-                    "You need to specify an output directory (`predictions_dir`) or a logger to save the predictions."
-                )
-            else:
-                # save to file
-                if self.save_predictions:
-                    if self.predictions_dir is not None:
-                        prediction_folder = Path(self.predictions_dir)
-                    else:
-                        prediction_folder = (
-                            Path(trainer.logger.experiment.dir) / "predictions"
-                        )
-                        prediction_folder.mkdir(exist_ok=True)
-                    predictions_path = (
-                        prediction_folder
-                        / f"{datasets[dataloader_idx].name}_{dataloader_idx}.json"
-                    )
-                    logger.log(f"Saving predictions to {predictions_path}")
-                    datasets[dataloader_idx].save_data(
-                        predictions_path, remove_columns=self.remove_columns
-                    )
+            # if self.predictions_dir is None and trainer.logger is None:
+            #     logger.log(
+            #         "You need to specify an output directory (`predictions_dir`) or a logger to save the predictions."
+            #     )
+            # else:
+            #     # save to file
+            #     if self.save_predictions:
+            #         if self.predictions_dir is not None:
+            #             prediction_folder = Path(self.predictions_dir)
+            #         else:
+            #             prediction_folder = (
+            #                 Path(trainer.logger.experiment.dir) / "predictions"
+            #             )
+            #             prediction_folder.mkdir(exist_ok=True)
+            #         predictions_path = (
+            #             prediction_folder
+            #             / f"{datasets[dataloader_idx].name}_{dataloader_idx}.json"
+            #         )
+            #         logger.log(f"Saving predictions to {predictions_path}")
+            #         datasets[dataloader_idx].save_data(
+            #             predictions_path, remove_columns=self.remove_columns
+            #         )
 
         # return the predictions
         return dataloader_predictions
@@ -265,69 +244,6 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
             contexts = dataset.contexts
         return contexts
 
-    @staticmethod
-    def _get_datasets_and_dataloaders(
-        dataset: Optional[Union[Dataset, DictConfig]],
-        dataloader: Optional[DataLoader],
-        batch_size: int,
-        num_workers: int,
-        stage: Stage,
-        trainer: pl.Trainer,
-        tokenizer: tr.PreTrainedTokenizer,
-    ) -> Tuple[List[DPRDataset], List[DataLoader]]:
-        """
-        Get the datasets and dataloaders from the datamodule or from the dataset provided.
-
-        Args:
-            dataset (`Optional[Union[Dataset, DictConfig]]`):
-                The dataset to use. If `None`, the datamodule is used.
-            batch_size (`int`):
-                The batch size to use for the dataloaders.
-            num_workers (`int`):
-                The number of workers to use for the dataloaders.
-            stage (`Stage`):
-                The stage that indicates whether the dataloaders are for validation or testing.
-            trainer (`pl.Trainer`):
-                The trainer that contains the datamodule.
-            tokenizer (`tr.PreTrainedTokenizer`):
-                The tokenizer to use for the dataloaders.
-
-        Returns:
-            `Tuple[List[Dataset], List[DataLoader]]`: The datasets and dataloaders.
-        """
-        # if a dataset is provided, use it
-        if dataset is not None:
-            # get dataset
-            if isinstance(dataset, DictConfig):
-                dataset = hydra.utils.instantiate(dataset, _recursive_=False)
-            datasets = [dataset]
-            if dataloader is not None:
-                dataloaders = [dataloader]
-            else:
-                dataloaders = [
-                    DataLoader(
-                        datasets[0],
-                        batch_size=batch_size,
-                        shuffle=False,
-                        num_workers=num_workers,
-                        pin_memory=True,
-                        collate_fn=partial(datasets[0].collate_fn, tokenizer=tokenizer),
-                    )
-                ]
-        else:
-            # get the dataloaders and datasets from the datamodule
-            datasets = (
-                trainer.datamodule.val_datasets
-                if stage == Stage.VALIDATION
-                else trainer.datamodule.test_datasets
-            )
-            dataloaders = (
-                trainer.val_dataloaders
-                if stage == Stage.VALIDATION
-                else trainer.test_dataloaders
-            )
-        return datasets, dataloaders
-
 
 class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
     def __init__(
@@ -338,11 +254,7 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
         use_faiss: bool = False,
         move_index_to_cpu: bool = False,
         force_reindex: bool = False,
-        save_retriever: bool = False,
         retriever_dir: Optional[Path] = None,
-        save_predictions: bool = False,
-        predictions_dir: Optional[Path] = None,
-        remove_columns: Optional[List[str]] = None,
         stages: Set[Union[str, Stage]] = None,
         other_callbacks: Optional[List[DictConfig]] = None,
         dataset: Optional[Union[DictConfig, BaseDataset]] = None,
@@ -360,11 +272,7 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
             use_faiss=use_faiss,
             move_index_to_cpu=move_index_to_cpu,
             force_reindex=force_reindex,
-            save_retriever=save_retriever,
             retriever_dir=retriever_dir,
-            predictions_dir=predictions_dir,
-            save_predictions=save_predictions,
-            remove_columns=remove_columns,
             stages=stages,
             other_callbacks=other_callbacks,
             dataset=dataset,
@@ -403,8 +311,11 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
             f"Metric {self.metric_to_monitor} is above threshold {self.threshold}. Computing hard negatives."
         )
 
-        self.dataset = trainer.datamodule.train_dataset
-        self.dataloader = trainer.datamodule.train_dataloader()
+        # use the train dataset and dataloader as target for predictions
+        # since it is expected that self.datasets and self.dataloaders are lists
+        # we need to wrap the train dataset and dataloader in a list
+        self.datasets = [trainer.datamodule.train_dataset]
+        self.dataloaders = [trainer.datamodule.train_dataloader()]
 
         predictions = super().__call__(trainer, pl_module, stage, *args, **kwargs)
         for dataloader_idx, prediction_samples in predictions.items():
@@ -425,8 +336,6 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
                     truncation=True,
                 )
                 retrieved_hard_negatives = []
-                # for wrong_context in wrong_contexts:
-                #     retrieved_hard_negatives["context"].append(wrong_context)
                 for c_index in range(len(wrong_contexts)):
                     p_dict = {
                         "input_ids": wrong_contexts_ids["input_ids"][c_index],

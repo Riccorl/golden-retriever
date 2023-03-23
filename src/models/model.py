@@ -92,6 +92,8 @@ class GoldenRetriever(torch.nn.Module):
         question_encoder: SentenceEncoder,
         loss_type: torch.nn.Module,
         context_encoder: Optional[SentenceEncoder] = None,
+        projection_size: Optional[int] = None,
+        projection_dropout: float = 0.1,
         labels: Optional[Labels] = None,
         *args,
         **kwargs,
@@ -108,6 +110,17 @@ class GoldenRetriever(torch.nn.Module):
             context_encoder = question_encoder
         # context encoder model
         self.context_encoder = context_encoder
+
+        # projection layer
+        self.projection_module: Optional[torch.nn.Sequential] = None
+        if projection_size is not None:
+            self.projection_module = torch.nn.Sequential(
+                torch.nn.Linear(
+                    self.context_encoder.language_model.config.hidden_size,
+                    projection_size,
+                ),
+                torch.nn.Dropout(projection_dropout),
+            )
 
         # loss function
         self.loss_type = loss_type
@@ -166,6 +179,10 @@ class GoldenRetriever(torch.nn.Module):
         if contexts_encodings is None:
             contexts_encodings = self.context_encoder(**contexts)
 
+        if self.projection_module is not None:
+            question_encodings = self.projection_module(question_encodings)
+            contexts_encodings = self.projection_module(contexts_encodings)
+
         if contexts_per_question is not None:
             # multiply each question encoding with a contexs_per_question encodings
             concatenated_contexts = torch.stack(
@@ -183,6 +200,8 @@ class GoldenRetriever(torch.nn.Module):
                 # normalize the encodings for cosine similarity
                 question_encodings = F.normalize(question_encodings, p=2, dim=1)
                 contexts_encodings = F.normalize(contexts_encodings, p=2, dim=1)
+
+            # dot product with einsum
             logits = torch.matmul(question_encodings, contexts_encodings.T)
 
         output = {"logits": logits}
@@ -206,7 +225,6 @@ class GoldenRetriever(torch.nn.Module):
         collate_fn: Optional[Callable] = None,
         force_reindex: bool = False,
         use_faiss: bool = False,
-        use_gpu: bool = False,
         use_ort: bool = False,
         move_index_to_cpu: bool = False,
     ):
@@ -433,7 +451,7 @@ class GoldenRetriever(torch.nn.Module):
 
     @staticmethod
     def _load_ort_optimized_encoder(
-        encoder: SentenceEncoder, provider: str = "TensorrtExecutionProvider"
+        encoder: SentenceEncoder, provider: str = "CUDAExecutionProvider"
     ) -> SentenceEncoder:
         temp_dir = tempfile.mkdtemp()
         encoder.language_model.save_pretrained(temp_dir)

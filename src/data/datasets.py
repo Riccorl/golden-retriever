@@ -117,162 +117,7 @@ class GenerativeDataset(IterableDataset):
         raise NotImplementedError
 
 
-class DPRIterableDataset(GenerativeDataset, DPRMixin):
-    def __init__(
-        self,
-        name: str,
-        path: Union[str, os.PathLike, List[str], List[os.PathLike]],
-        shuffle: bool = False,
-        max_contexts_per_batch: int = 32,
-        max_contexts: int = 64,
-        max_positives: int = 1,
-        max_negatives: int = 0,
-        max_hard_negatives: int = 0,
-        max_question_length: int = 256,
-        max_context_length: int = 128,
-        max_negatives_to_sample: int = 0,
-        sample_by_frequency: bool = False,
-        contexts_path: Union[str, os.PathLike] = None,
-        tokenizer: Optional[Union[str, tr.PreTrainedTokenizer]] = None,
-        **kwargs,
-    ):
-        super().__init__(
-            name,
-            path,
-            max_tokens_per_batch=None,
-            shuffle=shuffle,
-            **kwargs,
-        )
-        self.max_contexts_per_batch = max_contexts_per_batch
-        self.max_contexts = max_contexts
-        self.max_positives = max_positives
-        self.max_negatives = max_negatives
-        self.max_hard_negatives = max_hard_negatives
-        self.max_question_length = max_question_length
-        self.max_context_length = max_context_length
-        self.max_negatives_to_sample = max_negatives_to_sample
-        self.sample_by_frequency = sample_by_frequency
-
-        if type(self) == DPRDataset and max_positives != 1:
-            raise ValueError(
-                "DPRDataset only supports one positive per question. "
-                "Please use `InBatchNegativesDPRDataset` or `SampledNegativesDPRDataset` "
-                "for multiple positives."
-            )
-        self.context_manager = Labels()
-        # read contexts from file if provided
-        if contexts_path:
-            with open(self.project_folder / contexts_path, "r") as f:
-                self.context_manager.add_labels(
-                    [line.strip() for line in f.readlines()]
-                )
-
-        self.tokenizer = tokenizer
-        if self.tokenizer is None:
-            self.padding_ops = {}
-        else:
-            if isinstance(self.tokenizer, str):
-                self.tokenizer = tr.AutoTokenizer.from_pretrained(self.tokenizer)
-            self.padding_ops = {
-                "input_ids": partial(
-                    self.pad_sequence,
-                    value=self.tokenizer.pad_token_id,
-                ),
-                # value is None because: (read `pad_sequence` doc)
-                "attention_mask": partial(self.pad_sequence, value=0),
-                "token_type_ids": partial(
-                    self.pad_sequence,
-                    value=self.tokenizer.pad_token_type_id,
-                ),
-            }
-        self.data = self.load(path, tokenizer=self.tokenizer, shuffle=shuffle)
-        if self.max_negatives_to_sample > 0:
-            self.data = self._sample_dataset_negatives(
-                self.data,
-                self.tokenizer,
-                self.context_manager,
-                sample_by_frequency,
-                self.max_negatives_to_sample,
-            )
-
-    def __iter__(self) -> Iterator[Dict[str, torch.Tensor]]:
-        batch = []
-        contexts_in_batch = set()
-        for sample in self.data:
-            if len(contexts_in_batch) >= self.max_contexts_per_batch:
-                yield self.collate_fn(batch)
-                batch = []
-                contexts_in_batch = set()
-            batch.append(sample)
-            contexts_in_batch.add(sample["positives"] for sample in batch)
-        # drop last cause might be too short and result in issues (nan if we are using amp)
-        if not self.drop_last_batch and len(batch) > 0:
-            yield self.collate_fn(batch)
-
-    def load(
-        self,
-        paths: Union[str, os.PathLike, List[str], List[os.PathLike]],
-        tokenizer: tr.PreTrainedTokenizer = None,
-        shuffle: bool = False,
-        *args,
-        **kwargs,
-    ) -> Any:
-        if isinstance(paths, Sequence):
-            paths = [self.project_folder / path for path in paths]
-        else:
-            paths = [self.project_folder / paths]
-
-        # read the data and put it in a placeholder list
-        for path in paths:
-            if not path.exists():
-                raise ValueError(f"{path} does not exist")
-
-        # The data is a list of dictionaries, each dictionary is a sample
-        # Each sample has the following keys:
-        #   - "question": the question
-        #   - "answers": a list of answers
-        #   - "positive_ctxs": a list of positive contexts
-        #   - "negative_ctxs": a list of negative contexts
-        #   - "hard_negative_ctxs": a list of hard negative contexts
-        # use the huggingface dataset library to load the data, by default it will load the
-        # data in a dict with the key being "train". datasets needs str paths and not Path
-        data = load_dataset("json", data_files=[str(p) for p in paths])["train"]
-
-        if not tokenizer:
-            raise ValueError("Tokenizer is required for pre-processing")
-        
-
-        if shuffle:
-            # shuffle the data
-            self.shuffle_data(seed=42)
-
-        # measure how long the preprocessing takes
-        start = time.time()
-        data = data.map(
-            partial(
-                self._process_dataset_sample,
-                tokenizer=tokenizer,
-                max_positives=self.max_positives,
-                max_negatives=self.max_negatives,
-                max_hard_negatives=self.max_hard_negatives,
-                max_contexts=self.max_contexts,
-                max_question_length=self.max_question_length,
-                max_context_length=self.max_context_length,
-            ),
-            keep_in_memory=True,
-            load_from_cache_file=True,
-            num_proc=psutil.cpu_count(logical=False),
-        )
-        # add id if not present
-        data = data.add_column("sample_idx", range(len(data)))
-        data = data.to_iterable_dataset(num_shards=4)
-        end = time.time()
-        logger.log(
-            f"Pre-processing [bold cyan]{self.name}[/bold cyan] "
-            f"data took [bold]{end - start:.2f}[/bold] seconds"
-        )
-        return data
-
+class DPRCollateMixin:
     def collate_fn(self, batch: Any, *args, **kwargs) -> Any:
         questions = [sample["question"] for sample in batch]
         contexts = [sample["context"] for sample in batch]
@@ -306,43 +151,7 @@ class DPRIterableDataset(GenerativeDataset, DPRMixin):
         return ModelInputs(model_inputs)
 
 
-class InBatchNegativesDPRIterableDataset(DPRIterableDataset):
-    def __init__(
-        self,
-        name: str,
-        path: Union[str, os.PathLike, List[str], List[os.PathLike]],
-        shuffle: bool = False,
-        max_contexts_per_batch: int = 64,
-        max_contexts: int = -1,
-        max_positives: int = -1,
-        max_negatives: int = 0,
-        max_hard_negatives: int = 0,
-        max_question_length: int = 256,
-        max_context_length: int = 128,
-        max_negatives_to_sample: int = 0,
-        sample_by_frequency: bool = False,
-        contexts_path: Union[str, os.PathLike] = None,
-        tokenizer: Optional[Union[str, tr.PreTrainedTokenizer]] = None,
-        **kwargs,
-    ):
-        super().__init__(
-            name,
-            path,
-            shuffle,
-            max_contexts_per_batch,
-            max_contexts,
-            max_positives,
-            max_negatives,
-            max_hard_negatives,
-            max_question_length,
-            max_context_length,
-            max_negatives_to_sample,
-            sample_by_frequency,
-            contexts_path,
-            tokenizer,
-            **kwargs,
-        )
-
+class InBatchNegativesCollateMixin:
     def collate_fn(self, batch: Any, *args, **kwargs) -> Any:
         # get data from batch
         questions = [sample["question"] for sample in batch]
@@ -407,7 +216,284 @@ class InBatchNegativesDPRIterableDataset(DPRIterableDataset):
         return ModelInputs(model_inputs)
 
 
-class DPRDataset(BaseDataset, DPRMixin):
+class SampledNegativesCollateMixin:
+    def collate_fn(self, batch: Any, *args, **kwargs) -> Any:
+        questions = [sample["question"] for sample in batch]
+        contexts = [sample["context"] for sample in batch]
+        positives = [sample["positives"] for sample in batch]
+        if "retrieved_hard_negatives" in batch[0]:
+            # add augmented negative contexts to contexts
+            retrieved_hard_negatives = [
+                sample["retrieved_hard_negatives"] for sample in batch
+            ]
+            contexts = [
+                # remove the last len(a) contexts to add the augmented negative context
+                c[: -len(a)] + a
+                for c, a in zip(contexts, retrieved_hard_negatives)
+            ]
+
+        questions = self.convert_to_batch(questions)
+        # first flat the list of lists of contexts
+        contexts = [c for ctxs in contexts for c in ctxs]
+        # invert contexts from list of dict to dict of list
+        contexts = self.convert_to_batch(contexts)
+
+        augmented_labels: Optional[torch.Tensor] = None
+        contexts_per_question = [len(sample["context"]) for sample in batch]
+        labels = [[0] * c for c in contexts_per_question]
+        # pad the labels
+        labels = [
+            self.pad_sequence(l, max(contexts_per_question), value=-100) for l in labels
+        ]
+        # convert to tensor
+        labels = torch.as_tensor(labels)
+        # labels is a mask of positive contexts for each question base on positive_index_end
+        # has shape num_questions x num_contexts
+        positive_index_end = [sample["positive_index_end"] for sample in batch]
+        for i, end in enumerate(positive_index_end):
+            labels[i, :end] = 1
+
+        model_inputs = {
+            "questions": ModelInputs(questions),
+            "contexts": ModelInputs(contexts),
+            "labels": augmented_labels if augmented_labels is not None else labels,
+            "positives": positives,
+            "sample_idx": [sample["sample_idx"] for sample in batch],
+        }
+        if contexts_per_question is not None:
+            model_inputs["contexts_per_question"] = contexts_per_question
+        return ModelInputs(model_inputs)
+
+
+class DPRIterableDataset(GenerativeDataset, DPRMixin, DPRCollateMixin):
+    def __init__(
+        self,
+        name: str,
+        path: Union[str, os.PathLike, List[str], List[os.PathLike]],
+        shuffle: bool = False,
+        max_contexts_per_batch: int = 32,
+        max_contexts: int = 64,
+        max_positives: int = 1,
+        max_negatives: int = 0,
+        max_hard_negatives: int = 0,
+        max_question_length: int = 256,
+        max_context_length: int = 128,
+        max_negatives_to_sample: int = 0,
+        sample_by_frequency: bool = False,
+        contexts_path: Union[str, os.PathLike] = None,
+        tokenizer: Optional[Union[str, tr.PreTrainedTokenizer]] = None,
+        **kwargs,
+    ):
+        super().__init__(
+            name,
+            path,
+            max_tokens_per_batch=None,
+            shuffle=shuffle,
+            **kwargs,
+        )
+        self.max_contexts_per_batch = max_contexts_per_batch
+        self.max_contexts = max_contexts
+        self.max_positives = max_positives
+        self.max_negatives = max_negatives
+        self.max_hard_negatives = max_hard_negatives
+        self.max_question_length = max_question_length
+        self.max_context_length = max_context_length
+        self.max_negatives_to_sample = max_negatives_to_sample
+        self.sample_by_frequency = sample_by_frequency
+
+        if type(self) == DPRDataset and max_positives != 1:
+            raise ValueError(
+                "DPRIterableDataset only supports one positive per question. "
+                "Please use `InBatchNegativesDPRDataset` for multiple positives."
+            )
+        self.context_manager = Labels()
+        # read contexts from file if provided
+        if contexts_path:
+            with open(self.project_folder / contexts_path, "r") as f:
+                self.context_manager.add_labels(
+                    [line.strip() for line in f.readlines()]
+                )
+
+        self.tokenizer = tokenizer
+        if self.tokenizer is None:
+            self.padding_ops = {}
+        else:
+            if isinstance(self.tokenizer, str):
+                self.tokenizer = tr.AutoTokenizer.from_pretrained(self.tokenizer)
+            self.padding_ops = {
+                "input_ids": partial(
+                    self.pad_sequence,
+                    value=self.tokenizer.pad_token_id,
+                ),
+                # value is None because: (read `pad_sequence` doc)
+                "attention_mask": partial(self.pad_sequence, value=0),
+                "token_type_ids": partial(
+                    self.pad_sequence,
+                    value=self.tokenizer.pad_token_type_id,
+                ),
+            }
+        self.data = self.load(path, tokenizer=self.tokenizer, shuffle=shuffle)
+        if self.max_negatives_to_sample > 0:
+            self.data = self._sample_dataset_negatives(
+                self.data,
+                self.tokenizer,
+                self.context_manager,
+                sample_by_frequency,
+                self.max_negatives_to_sample,
+            )
+
+    def __iter__(self) -> Iterator[Dict[str, torch.Tensor]]:
+        batch = []
+        contexts_in_batch = set()
+        for sample in self.data:
+            if len(contexts_in_batch) >= self.max_contexts_per_batch:
+                yield self.collate_fn(batch)
+                batch = []
+                contexts_in_batch = set()
+            batch.append(sample)
+            for context_type in {
+                "positive_ctxs",
+                "negative_ctxs",
+                "hard_negative_ctxs",
+                "retrieved_hard_negatives",
+            }:
+                contexts_in_batch.add(
+                    sample[context_type] for sample in batch if context_type in sample
+                )
+        # drop last cause might be too short and result in issues (nan if we are using amp)
+        if not self.drop_last_batch and len(batch) > 0:
+            yield self.collate_fn(batch)
+
+    def load(
+        self,
+        paths: Union[str, os.PathLike, List[str], List[os.PathLike]],
+        tokenizer: tr.PreTrainedTokenizer = None,
+        shuffle: bool = False,
+        *args,
+        **kwargs,
+    ) -> Any:
+        if isinstance(paths, Sequence):
+            paths = [self.project_folder / path for path in paths]
+        else:
+            paths = [self.project_folder / paths]
+
+        # read the data and put it in a placeholder list
+        for path in paths:
+            if not path.exists():
+                raise ValueError(f"{path} does not exist")
+
+        # The data is a list of dictionaries, each dictionary is a sample
+        # Each sample has the following keys:
+        #   - "question": the question
+        #   - "answers": a list of answers
+        #   - "positive_ctxs": a list of positive contexts
+        #   - "negative_ctxs": a list of negative contexts
+        #   - "hard_negative_ctxs": a list of hard negative contexts
+        # use the huggingface dataset library to load the data, by default it will load the
+        # data in a dict with the key being "train". datasets needs str paths and not Path
+        data = load_dataset("json", data_files=[str(p) for p in paths])["train"]
+
+        if not tokenizer:
+            raise ValueError("Tokenizer is required for pre-processing")
+
+        if shuffle:
+            # shuffle the data
+            self.shuffle_data(seed=42)
+
+        # measure how long the preprocessing takes
+        start = time.time()
+        data = data.map(
+            partial(
+                self._process_dataset_sample,
+                tokenizer=tokenizer,
+                max_positives=self.max_positives,
+                max_negatives=self.max_negatives,
+                max_hard_negatives=self.max_hard_negatives,
+                max_contexts=self.max_contexts,
+                max_question_length=self.max_question_length,
+                max_context_length=self.max_context_length,
+            ),
+            keep_in_memory=True,
+            load_from_cache_file=True,
+            num_proc=psutil.cpu_count(logical=False),
+        )
+        # add id if not present
+        data = data.add_column("sample_idx", range(len(data)))
+        data = data.to_iterable_dataset(num_shards=4)
+        end = time.time()
+        logger.log(
+            f"Pre-processing [bold cyan]{self.name}[/bold cyan] "
+            f"data took [bold]{end - start:.2f}[/bold] seconds"
+        )
+        return data
+
+    def save_data(
+        self, path: Union[str, os.PathLike], remove_columns: Optional[List[str]] = None
+    ) -> None:
+        """
+        Save the samples to a file.
+
+        Args:
+            path (:obj:`str`):
+                Path to the file where to save the dataset.
+            remove_columns (:obj:`str`):
+                Data not to save on disk
+        """
+        if remove_columns is None:
+            remove_columns = []
+        with open(path, "w") as f:
+            for sample in self.data:
+                sample["question"] = self.tokenizer.decode(
+                    sample["question"]["input_ids"]
+                )
+                # remove columns if needed
+                for key in remove_columns:
+                    if key in sample:
+                        sample.pop(key)
+                json.dump(sample, f, indent=2)
+
+
+class InBatchNegativesDPRIterableDataset(
+    DPRIterableDataset, InBatchNegativesCollateMixin
+):
+    def __init__(
+        self,
+        name: str,
+        path: Union[str, os.PathLike, List[str], List[os.PathLike]],
+        shuffle: bool = False,
+        max_contexts_per_batch: int = 64,
+        max_contexts: int = -1,
+        max_positives: int = -1,
+        max_negatives: int = 0,
+        max_hard_negatives: int = 0,
+        max_question_length: int = 256,
+        max_context_length: int = 128,
+        max_negatives_to_sample: int = 0,
+        sample_by_frequency: bool = False,
+        contexts_path: Union[str, os.PathLike] = None,
+        tokenizer: Optional[Union[str, tr.PreTrainedTokenizer]] = None,
+        **kwargs,
+    ):
+        super().__init__(
+            name,
+            path,
+            shuffle,
+            max_contexts_per_batch,
+            max_contexts,
+            max_positives,
+            max_negatives,
+            max_hard_negatives,
+            max_question_length,
+            max_context_length,
+            max_negatives_to_sample,
+            sample_by_frequency,
+            contexts_path,
+            tokenizer,
+            **kwargs,
+        )
+
+
+class DPRDataset(BaseDataset, DPRMixin, DPRCollateMixin):
     def __init__(
         self,
         name: str,
@@ -574,79 +660,8 @@ class DPRDataset(BaseDataset, DPRMixin):
                 }
                 json.dump(dump, f, indent=2)
 
-    def update_data(
-        self,
-        names: Union[str, List[str]],
-        columns: Union[List[Any], List[List[Any]]],
-        overwrite: bool = False,
-    ):
-        """
-        Update the data with the given column.
 
-        Args:
-            names (:obj:`str` or :obj:`List[str]`):
-                Name of the column to update.
-            columns (:obj:`List[Any]` or :obj:`List[List[Any]]`):
-                List of values to update.
-            overwrite (:obj:`bool`, `optional`, defaults to :obj:`False`):
-                Whether to overwrite the column if it already exists.
-        """
-        # TODO: augment data if overwrite is False and the column already exists
-        if isinstance(names, str):
-            names = [names]
-            # TODO: check if it's a list of list in a prettier way
-            if len(names) != len(columns):
-                columns = [columns]
-
-        if len(names) != len(columns):
-            raise ValueError(
-                "The number of columns to update must be equal to the number of names."
-            )
-
-        for name, column in zip(names, columns):
-            if name in self.data.column_names:
-                if not overwrite:
-                    raise ValueError(
-                        "The dataset already contains a column named `name`, you can force the update by "
-                        "setting `overwrite=True`."
-                    )
-                self.data = self.data.remove_columns(name)
-            self.data = self.data.add_column(name=name, column=column)
-
-    def collate_fn(self, batch: Any, *args, **kwargs) -> Any:
-        questions = [sample["question"] for sample in batch]
-        contexts = [sample["context"] for sample in batch]
-        positives = [sample["positives"] for sample in batch]
-
-        questions = self.convert_to_batch(questions)
-        # first flat the list of list of contexts
-        contexts = [c for ctxs in contexts for c in ctxs]
-        # invert contexts from list of dict to dict of list
-        contexts = self.convert_to_batch(contexts)
-
-        # actual positives
-        labels = torch.zeros(
-            questions["input_ids"].shape[0], contexts["input_ids"].shape[0]
-        )
-        positive_index_end = [sample["positive_index_end"] for sample in batch]
-        last_start = 0
-        for i, end in enumerate(positive_index_end):
-            start = 0 if i == 0 else last_start + len(batch[i - 1]["context"])
-            end = end if i == 0 else start + end
-            labels[i, start:end] = 1
-            last_start = start
-
-        model_inputs = {
-            "questions": ModelInputs(questions),
-            "contexts": ModelInputs(contexts),
-            "labels": labels,
-            "positives": positives,
-            "sample_idx": [sample["sample_idx"] for sample in batch],
-        }
-        return ModelInputs(model_inputs)
-
-
-class InBatchNegativesDPRDataset(DPRDataset):
+class InBatchNegativesDPRDataset(DPRDataset, InBatchNegativesCollateMixin):
     def __init__(
         self,
         name: str,
@@ -681,72 +696,8 @@ class InBatchNegativesDPRDataset(DPRDataset):
             **kwargs,
         )
 
-    def collate_fn(self, batch: Any, *args, **kwargs) -> Any:
-        # get data from batch
-        questions = [sample["question"] for sample in batch]
-        positives = [sample["positives"] for sample in batch]
 
-        # this is needed to get the correct labels for each question
-        positives_ctxs = [sample["positive_ctxs"] for sample in batch]
-        negatives_ctxs = [sample["negative_ctxs"] for sample in batch]
-        hard_negatives_ctxs = [sample["hard_negative_ctxs"] for sample in batch]
-        # use negatives from predictions if available
-        if "retrieved_hard_negatives" in batch[0]:
-            # add augmented negative contexts to contexts
-            augmented_negative_contexts = [
-                sample["retrieved_hard_negatives"] for sample in batch
-            ]
-            hard_negatives_ctxs += augmented_negative_contexts
-
-        # convert the questions to a batch
-        questions = self.convert_to_batch(questions)
-
-        # now we need to make the batch of contexts
-        # it can happen that there are duplicate contexts from different questions
-        # so we need to remove them
-        flat_positives = [p for ps in positives_ctxs for p in ps]
-        flat_negatives = [n for ns in negatives_ctxs for n in ns]
-        flat_hard_negatives = [hn for hns in hard_negatives_ctxs for hn in hns]
-        # remove duplicates based on input_ids (input_ids is a list of int)
-        flat_positives = list(
-            {tuple(p["input_ids"]): p for p in flat_positives}.values()
-        )
-        flat_negatives = list(
-            {tuple(n["input_ids"]): n for n in flat_negatives}.values()
-        )
-        flat_hard_negatives = list(
-            {tuple(hn["input_ids"]): hn for hn in flat_hard_negatives}.values()
-        )
-        unique_contexts = flat_positives + flat_negatives + flat_hard_negatives
-        contexts = self.convert_to_batch(unique_contexts)
-        # build an index to map the position of the context in the batch
-        context_index = {
-            tuple(c["input_ids"]): i for i, c in enumerate(unique_contexts)
-        }
-
-        # now we can create the labels
-        labels = torch.zeros(
-            questions["input_ids"].shape[0], contexts["input_ids"].shape[0]
-        )
-        # iterate over the questions and set the labels to 1 if the context is positive
-        for sample_idx in range(len(questions["input_ids"])):
-            for ctx in positives_ctxs[sample_idx]:
-                # get the index of the positive context
-                index = context_index[tuple(ctx["input_ids"])]
-                # set the label to 1
-                labels[sample_idx, index] = 1
-
-        model_inputs = {
-            "questions": ModelInputs(questions),
-            "contexts": ModelInputs(contexts),
-            "labels": labels,
-            "positives": positives,
-            "sample_idx": [sample["sample_idx"] for sample in batch],
-        }
-        return ModelInputs(model_inputs)
-
-
-class SampledNegativesDPRDataset(DPRDataset):
+class SampledNegativesDPRDataset(DPRDataset, SampledNegativesCollateMixin):
     def __init__(
         self,
         name: str,
@@ -779,50 +730,3 @@ class SampledNegativesDPRDataset(DPRDataset):
             contexts_path,
             tokenizer,
         )
-
-    def collate_fn(self, batch: Any, *args, **kwargs) -> Any:
-        questions = [sample["question"] for sample in batch]
-        contexts = [sample["context"] for sample in batch]
-        positives = [sample["positives"] for sample in batch]
-        if "retrieved_hard_negatives" in batch[0]:
-            # add augmented negative contexts to contexts
-            retrieved_hard_negatives = [
-                sample["retrieved_hard_negatives"] for sample in batch
-            ]
-            contexts = [
-                # remove the last len(a) contexts to add the augmented negative context
-                c[: -len(a)] + a
-                for c, a in zip(contexts, retrieved_hard_negatives)
-            ]
-
-        questions = self.convert_to_batch(questions)
-        # first flat the list of lists of contexts
-        contexts = [c for ctxs in contexts for c in ctxs]
-        # invert contexts from list of dict to dict of list
-        contexts = self.convert_to_batch(contexts)
-
-        augmented_labels: Optional[torch.Tensor] = None
-        contexts_per_question = [len(sample["context"]) for sample in batch]
-        labels = [[0] * c for c in contexts_per_question]
-        # pad the labels
-        labels = [
-            self.pad_sequence(l, max(contexts_per_question), value=-100) for l in labels
-        ]
-        # convert to tensor
-        labels = torch.as_tensor(labels)
-        # labels is a mask of positive contexts for each question base on positive_index_end
-        # has shape num_questions x num_contexts
-        positive_index_end = [sample["positive_index_end"] for sample in batch]
-        for i, end in enumerate(positive_index_end):
-            labels[i, :end] = 1
-
-        model_inputs = {
-            "questions": ModelInputs(questions),
-            "contexts": ModelInputs(contexts),
-            "labels": augmented_labels if augmented_labels is not None else labels,
-            "positives": positives,
-            "sample_idx": [sample["sample_idx"] for sample in batch],
-        }
-        if contexts_per_question is not None:
-            model_inputs["contexts_per_question"] = contexts_per_question
-        return ModelInputs(model_inputs)
