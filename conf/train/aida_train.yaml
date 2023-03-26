@@ -68,7 +68,7 @@ prediction_callbacks:
     stages: [val]
     metric_to_monitor: val_recall@${train.top_k}
     threshold: 0.0
-    max_negatives: 3
+    max_negatives: 5
     refresh_every_n_epochs: 1
     other_callbacks:
       - _target_: callbacks.utils_callbacks.FreeUpIndexerVRAMCallback

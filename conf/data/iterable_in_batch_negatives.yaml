@@ -1,4 +1,4 @@
-max_contexts_per_batch: 64
+max_contexts_per_batch: 128
 
 datamodule:
   _target_: data.pl_data_modules.PLDataModule

@@ -572,13 +572,8 @@ class GoldenRetriever(torch.nn.Module):
         # save the config using OmegaConf
         OmegaConf.save(config, output_dir / CONFIG_NAME)
 
-        if self._context_embeddings is None:
-            self._context_embeddings = torch.empty(0)
-            # raise ValueError("The contexts must be indexed before they can be saved.")
-
-        if self._context_index is None:
-            self._context_index = Labels()
-            # raise ValueError("The contexts must be indexed before they can be saved.")
+        if self._context_embeddings is None or self._context_index is None:
+            raise ValueError("The contexts must be indexed before they can be saved.")
 
         # save the current state of the retriever
         logger.log(f"Saving retriever state to {output_dir / WEIGHTS_NAME}")
