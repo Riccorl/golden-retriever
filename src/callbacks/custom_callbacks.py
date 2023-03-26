@@ -12,8 +12,8 @@ from tqdm import tqdm
 from callbacks.base import PredictionCallback, Stage
 from data.datasets import BaseDataset
 from models.model import GoldenRetriever
-from utils.logging import get_console_logger
-from utils.model_inputs import ModelInputs
+from common.logging import get_console_logger
+from common.model_inputs import ModelInputs
 
 logger = get_console_logger()
 

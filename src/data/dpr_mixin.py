@@ -8,7 +8,7 @@ import transformers as tr
 
 from data.labels import Labels
 from data.sampler import NegativeSampler
-from utils.logging import get_console_logger
+from common.logging import get_console_logger
 
 logger = get_console_logger()
 

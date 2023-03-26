@@ -12,7 +12,7 @@ from torch.utils.data import DataLoader, Dataset
 
 from data.datasets import GenerativeDataset
 from data.labels import Labels
-from utils.logging import get_console_logger
+from common.logging import get_console_logger
 
 logger = get_console_logger()
 

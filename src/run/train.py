@@ -17,7 +17,7 @@ from rich.pretty import pprint
 
 from data.pl_data_modules import PLDataModule
 from models.pl_modules import GoldenRetrieverPLModule
-from utils.logging import get_console_logger
+from common.logging import get_console_logger
 
 logger = get_console_logger()
 
@@ -37,9 +37,10 @@ def train(conf: omegaconf.DictConfig) -> None:
         conf.train.pl_trainer.devices = 1
         conf.train.pl_trainer.strategy = None
         conf.train.pl_trainer.precision = 32
-        conf.data.datamodule.num_workers = {
-            k: 0 for k in conf.data.datamodule.num_workers
-        }
+        if "num_workers" in conf.data.datamodule:
+            conf.data.datamodule.num_workers = {
+                k: 0 for k in conf.data.datamodule.num_workers
+            }
         # Switch wandb to offline mode to prevent online logging
         conf.logging.log = None
         # remove model checkpoint callback

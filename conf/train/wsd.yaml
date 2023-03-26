@@ -65,7 +65,7 @@ prediction_callbacks:
     metric_to_monitor: val_recall@${train.top_k}
     threshold: 0.85
     max_negatives: 2
-    refresh_every_n_epochs: 1
+    refresh_every_n_epochs: 5
     other_callbacks:
       - _target_: callbacks.utils_callbacks.FreeUpIndexerVRAMCallback
   

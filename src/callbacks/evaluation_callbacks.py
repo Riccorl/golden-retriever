@@ -4,7 +4,7 @@ import pytorch_lightning as pl
 import torch
 
 from callbacks.base import NLPTemplateCallback, Stage
-from utils.logging import get_console_logger
+from common.logging import get_console_logger
 
 logger = get_console_logger()
 

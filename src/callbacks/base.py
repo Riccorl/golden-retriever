@@ -9,7 +9,7 @@ from omegaconf import DictConfig
 from torch.utils.data import DataLoader, Dataset
 
 from data.datasets import BaseDataset
-from utils.logging import get_console_logger
+from common.logging import get_console_logger
 
 logger = get_console_logger()
 

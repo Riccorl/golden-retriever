@@ -1,23 +1,31 @@
 import json
+import os
 import tempfile
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
+import hydra
+import psutil
 import torch
 import torch.nn.functional as F
 import transformers as tr
+from omegaconf import OmegaConf
 from optimum.onnxruntime import ORTModelForFeatureExtraction, ORTOptimizer
-from optimum.onnxruntime.configuration import (
-    AutoOptimizationConfig,
-)
+from optimum.onnxruntime.configuration import AutoOptimizationConfig
+from rich.pretty import pprint
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+from common.logging import get_console_logger
+from common.model_inputs import ModelInputs
+from common.utils import CONFIG_NAME, WEIGHTS_NAME
 from data.datasets import BaseDataset
 from data.labels import Labels
 from models.faiss_indexer import FaissIndexer
-from utils.logging import get_console_logger
-from utils.model_inputs import ModelInputs
+
+INDEX_NAME = "index.json"
+INDEX_VECTOR_NAME = "index.pt"
+FAISS_INDEX_NAME = "faiss_index.bin"
 
 logger = get_console_logger()
 
@@ -44,11 +52,16 @@ class SentenceEncoder(torch.nn.Module):
                 self.language_model = tr.AutoModel.from_pretrained(language_model)
         else:
             self.language_model = language_model
-        self.pooling_strategy = pooling_strategy
 
         if freeze and not isinstance(self.language_model, ORTModelForFeatureExtraction):
             for param in self.language_model.parameters():
                 param.requires_grad = False
+
+        # save the other parameters
+        self.language_model_name = self.language_model.config._name_or_path
+        self.pooling_strategy = pooling_strategy
+        self.load_ort_model = load_ort_model
+        self.freeze = freeze
 
     def forward(
         self,
@@ -84,22 +97,36 @@ class SentenceEncoder(torch.nn.Module):
                 f"Pooling strategy {pooling_strategy} not supported, use 'cls' or 'mean'"
             )
 
+    @property
+    def config(self) -> Dict[str, Any]:
+        """
+        Return the configuration of the model.
+
+        Returns:
+            `Dict[str, Any]`: The configuration of the model.
+        """
+        return {
+            "_target_": f"{self.__class__.__module__}.{self.__class__.__name__}",
+            "language_model": self.language_model_name,
+            "pooling_strategy": self.pooling_strategy,
+            "load_ort_model": self.load_ort_model,
+            "freeze": self.freeze,
+        }
+
 
 class GoldenRetriever(torch.nn.Module):
     def __init__(
         self,
         question_encoder: SentenceEncoder,
-        loss_type: torch.nn.Module,
+        loss_type: Optional[torch.nn.Module] = None,
         context_encoder: Optional[SentenceEncoder] = None,
         projection_size: Optional[int] = None,
         projection_dropout: float = 0.1,
-        labels: Optional[Labels] = None,
+        context_index: Optional[Labels] = None,
         *args,
         **kwargs,
     ):
         super().__init__()
-        if labels is not None:
-            self.labels = labels
 
         # question encoder model
         self.question_encoder = question_encoder
@@ -111,6 +138,8 @@ class GoldenRetriever(torch.nn.Module):
         self.context_encoder = context_encoder
 
         # projection layer
+        self.projection_size = projection_size
+        self.projection_dropout = projection_dropout
         self.projection_module: Optional[torch.nn.Sequential] = None
         if projection_size is not None:
             self.projection_module = torch.nn.Sequential(
@@ -125,10 +154,9 @@ class GoldenRetriever(torch.nn.Module):
         self.loss_type = loss_type
 
         # indexer stuff, lazy loaded
+        self._context_index: Optional[Labels] = context_index
         self._context_embeddings: Optional[torch.Tensor] = None
-        self._context_index: Optional[Dict[int, str]] = None
-        self._reverse_context_index: Optional[Dict[str, int]] = None
-        self.faiss_indexer: Optional[FaissIndexer] = None
+        self._faiss_indexer: Optional[FaissIndexer] = None
 
     def forward(
         self,
@@ -206,6 +234,10 @@ class GoldenRetriever(torch.nn.Module):
         output = {"logits": logits}
 
         if return_loss and labels is not None:
+            if self.loss_type is None:
+                raise ValueError(
+                    "If `return_loss` is set to `True`, `loss_type` must be provided"
+                )
             if isinstance(self.loss_type, torch.nn.NLLLoss):
                 labels = labels.argmax(dim=1)
                 logits = F.log_softmax(logits, dim=1)
@@ -220,7 +252,7 @@ class GoldenRetriever(torch.nn.Module):
         self,
         contexts: List[str],
         batch_size: int = 32,
-        num_workers: int = 8,
+        num_workers: int = 0,
         collate_fn: Optional[Callable] = None,
         force_reindex: bool = False,
         use_faiss: bool = False,
@@ -243,8 +275,6 @@ class GoldenRetriever(torch.nn.Module):
                 Whether to force reindexing even if the contexts are already indexed.
             use_faiss (`bool`):
                 Whether to use faiss for the indexing.
-            use_gpu (`bool`):
-                Whether to use the GPU for the indexing.
             use_ort (`bool`):
                 Whether to use onnxruntime for the indexing.
             move_index_to_cpu (`bool`):
@@ -298,11 +328,12 @@ class GoldenRetriever(torch.nn.Module):
         self._context_embeddings = None
         self._context_embeddings = torch.stack(context_embeddings, dim=0)
         # Create a dictionary mapping the context index to the context
-        self._context_index = {i: context for i, context in enumerate(contexts)}
-        # reverse the context index
-        self._reverse_context_index = {v: k for k, v in self._context_index.items()}
-        if use_faiss and self.faiss_indexer is None:
-            self.faiss_indexer = FaissIndexer(
+        self._context_index = Labels()
+        self._context_index.add_labels(
+            {context: i for i, context in enumerate(contexts)}
+        )
+        if use_faiss and self._faiss_indexer is None:
+            self._faiss_indexer = FaissIndexer(
                 self._context_embeddings, use_gpu=move_index_to_cpu
             )
 
@@ -338,8 +369,8 @@ class GoldenRetriever(torch.nn.Module):
             model_inputs["attention_mask"] = attention_mask
         if token_type_ids is not None:
             model_inputs["token_type_ids"] = token_type_ids
-        if self.faiss_indexer is not None:
-            top_k: torch.Tensor = self.faiss_indexer.search(
+        if self._faiss_indexer is not None:
+            top_k: torch.Tensor = self._faiss_indexer.search(
                 self.question_encoder(**model_inputs), k=k
             )
         else:
@@ -368,7 +399,10 @@ class GoldenRetriever(torch.nn.Module):
         # get int values
         top_k: List[List[int]] = top_k.cpu().tolist()
         # Retrieve the contexts corresponding to the indices
-        contexts = [[self._context_index[i] for i in indices] for indices in top_k]
+        contexts = [
+            [self._context_index.get_label_from_index(i) for i in indices]
+            for indices in top_k
+        ]
         return contexts, top_k
 
     def get_index_from_context(self, context: str) -> int:
@@ -386,11 +420,7 @@ class GoldenRetriever(torch.nn.Module):
             raise ValueError(
                 "The contexts must be indexed before they can be retrieved."
             )
-        if context not in self._reverse_context_index:
-            raise ValueError(
-                f"The context '{context}' is not in the index. Please index the context before retrieving it."
-            )
-        return self._reverse_context_index[context]
+        return self._context_index.get_index_from_label(context)
 
     def get_context_from_index(self, index: int) -> str:
         """
@@ -407,11 +437,41 @@ class GoldenRetriever(torch.nn.Module):
             raise ValueError(
                 "The contexts must be indexed before they can be retrieved."
             )
-        if index not in self._context_index:
+        return self._context_index.get_label_from_index(index)
+
+    def get_vector_from_index(self, index: int) -> torch.Tensor:
+        """
+        Get the context vector from the index.
+
+        Args:
+            index (`int`):
+                The index of the context.
+
+        Returns:
+            `torch.Tensor`: The context vector.
+        """
+        if self._context_embeddings is None:
             raise ValueError(
-                f"The index '{index}' is not in the index. Please index the context before retrieving it."
+                "The contexts must be indexed before they can be retrieved."
             )
-        return self._context_index[index]
+        return self._context_embeddings[index]
+
+    def get_vector_from_context(self, context: str) -> torch.Tensor:
+        """
+        Get the context vector from the context.
+
+        Args:
+            context (`str`):
+                The context.
+
+        Returns:
+            `torch.Tensor`: The context vector.
+        """
+        if self._context_embeddings is None:
+            raise ValueError(
+                "The contexts must be indexed before they can be retrieved."
+            )
+        return self.get_vector_from_index(self.get_index_from_context(context))
 
     @property
     def context_embeddings(self) -> torch.Tensor:
@@ -427,31 +487,23 @@ class GoldenRetriever(torch.nn.Module):
         """
         return self._context_index
 
-    def save(self, output_dir: str):
-        """
-        Save the retriever to disk.
-        """
-        if self._context_embeddings is None:
-            raise ValueError("The contexts must be indexed before they can be saved.")
-        logger.log(f"Saving retriever to {output_dir}")
-        # create the output directory
-        output_dir = Path(output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
-        # save the current state of the retriever
-        torch.save(self.state_dict(), output_dir / "retriever.pt")
-        # save the context embeddings
-        torch.save(self._context_embeddings, output_dir / "index.pt")
-        # save the context index
-        with open(output_dir / "index.json", "w") as f:
-            json.dump(self._context_index, f)
-        # save the faiss indexer
-        if self.faiss_indexer is not None:
-            self.faiss_indexer.save(output_dir / "faiss_indexer.pt")
-
     @staticmethod
     def _load_ort_optimized_encoder(
-        encoder: SentenceEncoder, provider: str = "CUDAExecutionProvider"
+        encoder: SentenceEncoder, provider: str = "CPUExecutionProvider"
     ) -> SentenceEncoder:
+        """
+        Load an optimized ONNX Runtime encoder.
+
+        Args:
+            encoder (`SentenceEncoder`):
+                The encoder to optimize.
+            provider (`str`, optional):
+                The ONNX Runtime provider to use. Defaults to "CPUExecutionProvider".
+
+        Returns:
+            `SentenceEncoder`: The optimized encoder.
+        """
+
         temp_dir = tempfile.mkdtemp()
         encoder.language_model.save_pretrained(temp_dir)
         ort_model = ORTModelForFeatureExtraction.from_pretrained(
@@ -470,3 +522,173 @@ class GoldenRetriever(torch.nn.Module):
             language_model=ort_model,
             pooling_strategy=encoder.pooling_strategy,
         )
+
+    @property
+    def config(self) -> Dict[str, Any]:
+        """
+        The configuration of the retriever.
+
+        Returns:
+            `Dict[str, Any]`: The configuration of the retriever.
+        """
+        return {
+            "_target_": f"{self.__class__.__module__}.{self.__class__.__name__}",
+            "question_encoder": self.question_encoder.config,
+            "context_encoder": self.context_encoder.config,
+            "loss_type": {
+                "_target_": f"{self.loss_type.__class__.__module__}.{self.loss_type.__class__.__name__}"
+            },
+            "projection_size": self.projection_size,
+            "projection_dropout": self.projection_dropout,
+            # context_index is not saved because it might be too large
+            "context_index": None,
+        }
+
+    def save_pretrained(self, output_dir: str, config: Optional[Dict[str, Any]] = None):
+        """
+        Save the retriever to a directory.
+
+        Args:
+            output_dir (`str`):
+                The directory to save the retriever to.
+            config (`Optional[Dict[str, Any]]`, `optional`):
+                The configuration to save. If `None`, the current configuration of the retriever will be
+                saved. Defaults to `None`.
+        """
+
+        if config is None:
+            # create a default config
+            config = self.config
+
+        # create the output directory
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        logger.log(f"Saving retriever to {output_dir}")
+        logger.log(f"Saving config to {output_dir / CONFIG_NAME}")
+        # pretty print the config
+        pprint(config, console=logger, expand_all=True)
+
+        # save the config using OmegaConf
+        OmegaConf.save(config, output_dir / CONFIG_NAME)
+
+        if self._context_embeddings is None:
+            self._context_embeddings = torch.empty(0)
+            # raise ValueError("The contexts must be indexed before they can be saved.")
+
+        if self._context_index is None:
+            self._context_index = Labels()
+            # raise ValueError("The contexts must be indexed before they can be saved.")
+
+        # save the current state of the retriever
+        logger.log(f"Saving retriever state to {output_dir / WEIGHTS_NAME}")
+        torch.save(self.state_dict(), output_dir / WEIGHTS_NAME)
+        # save the context embeddings
+        logger.log(f"Saving context embeddings to {output_dir / INDEX_VECTOR_NAME}")
+        torch.save(self._context_embeddings, output_dir / INDEX_VECTOR_NAME)
+        # save the context index
+        logger.log(f"Saving context index to {output_dir / INDEX_NAME}")
+        self._context_index.save(output_dir / INDEX_NAME)
+        # save the faiss indexer
+        if self._faiss_indexer is not None:
+            logger.log(f"Saving faiss index to {output_dir / FAISS_INDEX_NAME}")
+            self._faiss_indexer.save(output_dir / FAISS_INDEX_NAME)
+
+        logger.log("Saving retriever to disk done.")
+
+    @classmethod
+    def from_pretrained(
+        cls,
+        model_dir: Union[str, Path],
+        weights_file: str = WEIGHTS_NAME,
+        strict: bool = True,
+        device: str = "cpu",
+        load_faiss_index: bool = False,
+        *args,
+        **kwargs,
+    ) -> "GoldenRetriever":
+        """
+        Load a retriever from disk.
+
+        Args:
+            model_dir (`str` or `Path`):
+                The path to the directory containing the retriever files.
+            weights_file (`str`, optional):
+                The name of the file containing the retriever weights. Defaults to `WEIGHTS_NAME`.
+            strict (`bool`, optional):
+                Whether to raise an error if the state dict of the saved retriever does not
+                match the state dict of the current retriever. Defaults to `True`.
+            device (`str`, optional):
+                The device to load the retriever to. Defaults to `cpu`.
+            load_faiss_index (`bool`, optional):
+                Whether to load the faiss index. Defaults to `False`.
+            *args:
+                Additional positional arguments.
+            **kwargs:
+                Additional keyword arguments.
+
+        Returns:
+            `GoldenRetriever`: The retriever.
+        """
+
+        # get model stuff
+        if device == "cpu":
+            num_threads = os.getenv(
+                "TORCH_NUM_THREADS", psutil.cpu_count(logical=False)
+            )
+            torch.set_num_threads(num_threads)
+            logger.log(f"Model is running on {num_threads} threads")
+
+        # prepare model dir path
+        if isinstance(model_dir, str):
+            model_dir = Path(model_dir)
+
+        # parse config file
+        config_path = model_dir / CONFIG_NAME
+        if not config_path.exists():
+            raise FileNotFoundError(
+                f"Model configuration file not found at {config_path}."
+            )
+        config = OmegaConf.load(config_path)
+        pprint(OmegaConf.to_container(config), console=logger, expand_all=True)
+
+        # load the index vocabulary
+        context_index = Labels.from_file(model_dir / INDEX_NAME)
+
+        weights_path = model_dir / WEIGHTS_NAME
+
+        # load model from config
+        logger.log("Loading model")
+        model = hydra.utils.instantiate(
+            config, context_index=context_index, *args, **kwargs
+        )
+        # load model weights
+        model_state = torch.load(weights_path, map_location=device)
+        missing_keys, unexpected_keys = model.load_state_dict(
+            model_state, strict=strict
+        )
+        if unexpected_keys or missing_keys:
+            logger.log(
+                f"Error loading state dict for {model.__class__.__name__}\n\t"
+                f"Missing keys: {missing_keys}\n\t"
+                f"Unexpected keys: {unexpected_keys}"
+            )
+
+        # run some checks
+        index_vectors = model_dir / INDEX_VECTOR_NAME
+        faiss_index_vectors = model_dir / FAISS_INDEX_NAME
+        if load_faiss_index and not faiss_index_vectors.exists():
+            raise ValueError(f"Faiss index `{faiss_index_vectors}` does not exist.")
+        if not index_vectors.exists():
+            raise ValueError(f"Index vectors `{index_vectors}` does not exist.")
+        if not (model_dir / INDEX_NAME).exists():
+            raise ValueError(f"Index `{model_dir / INDEX_NAME}` does not exist.")
+
+        # select between faiss and dense index
+        if load_faiss_index:
+            model._faiss_indexer = FaissIndexer.load(faiss_index_vectors)
+        else:
+            model._context_embeddings = torch.load(index_vectors)
+
+        model.to(device)
+        return model

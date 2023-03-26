@@ -7,7 +7,7 @@ import pytorch_lightning as pl
 import torch
 
 from callbacks.base import NLPTemplateCallback, PredictionCallback, Stage
-from utils.logging import get_console_logger
+from common.logging import get_console_logger
 
 logger = get_console_logger()
 
@@ -121,7 +121,7 @@ class SaveRetrieverCallback(pl.Callback):
                 retriever_folder.mkdir(exist_ok=True)
             if self.verbose:
                 logger.log(f"Saving retriever to {retriever_folder}")
-            pl_module.model.save(retriever_folder)
+            pl_module.model.save_pretrained(retriever_folder)
 
     def on_save_checkpoint(
         self,

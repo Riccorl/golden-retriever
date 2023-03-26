@@ -13,8 +13,8 @@ from torch.utils.data import Dataset, IterableDataset
 
 from data.dpr_mixin import DPRMixin
 from data.labels import Labels
-from utils.logging import get_console_logger
-from utils.model_inputs import ModelInputs
+from common.logging import get_console_logger
+from common.model_inputs import ModelInputs
 
 logger = get_console_logger()
 
@@ -166,155 +166,7 @@ class DPRLoadMixin:
         return data
 
 
-class DPRCollateMixin:
-    def collate_fn(self, batch: Any, *args, **kwargs) -> Any:
-        questions = [sample["question"] for sample in batch]
-        contexts = [sample["context"] for sample in batch]
-        positives = [sample["positives"] for sample in batch]
-
-        questions = self.convert_to_batch(questions)
-        # first flat the list of list of contexts
-        contexts = [c for ctxs in contexts for c in ctxs]
-        # invert contexts from list of dict to dict of list
-        contexts = self.convert_to_batch(contexts)
-
-        # actual positives
-        labels = torch.zeros(
-            questions["input_ids"].shape[0], contexts["input_ids"].shape[0]
-        )
-        positive_index_end = [sample["positive_index_end"] for sample in batch]
-        last_start = 0
-        for i, end in enumerate(positive_index_end):
-            start = 0 if i == 0 else last_start + len(batch[i - 1]["context"])
-            end = end if i == 0 else start + end
-            labels[i, start:end] = 1
-            last_start = start
-
-        model_inputs = {
-            "questions": ModelInputs(questions),
-            "contexts": ModelInputs(contexts),
-            "labels": labels,
-            "positives": positives,
-            "sample_idx": [sample["sample_idx"] for sample in batch],
-        }
-        return ModelInputs(model_inputs)
-
-
-class InBatchNegativesCollateMixin:
-    def collate_fn(self, batch: Any, *args, **kwargs) -> Any:
-        # get data from batch
-        questions = [sample["question"] for sample in batch]
-        positives = [sample["positives"] for sample in batch]
-
-        # this is needed to get the correct labels for each question
-        positives_ctxs = [sample["positive_ctxs"] for sample in batch]
-        negatives_ctxs = [sample["negative_ctxs"] for sample in batch]
-        hard_negatives_ctxs = [sample["hard_negative_ctxs"] for sample in batch]
-        # use negatives from predictions if available
-        if "retrieved_hard_negatives" in batch[0]:
-            # add augmented negative contexts to contexts
-            hard_negatives_ctxs += [
-                sample["retrieved_hard_negatives"] for sample in batch
-            ]
-
-        # convert the questions to a batch
-        questions = self.convert_to_batch(questions)
-
-        # now we need to make the batch of contexts
-        # it can happen that there are duplicate contexts from different questions
-        # so we need to remove them
-        flat_positives = [p for ps in positives_ctxs for p in ps]
-        flat_negatives = [n for ns in negatives_ctxs for n in ns]
-        flat_hard_negatives = [hn for hns in hard_negatives_ctxs for hn in hns]
-        # remove duplicates based on input_ids (input_ids is a list of int)
-        flat_positives = list(
-            {tuple(p["input_ids"]): p for p in flat_positives}.values()
-        )
-        flat_negatives = list(
-            {tuple(n["input_ids"]): n for n in flat_negatives}.values()
-        )
-        flat_hard_negatives = list(
-            {tuple(hn["input_ids"]): hn for hn in flat_hard_negatives}.values()
-        )
-        unique_contexts = flat_positives + flat_negatives + flat_hard_negatives
-        contexts = self.convert_to_batch(unique_contexts)
-        # build an index to map the position of the context in the batch
-        context_index = {
-            tuple(c["input_ids"]): i for i, c in enumerate(unique_contexts)
-        }
-
-        # now we can create the labels
-        labels = torch.zeros(
-            questions["input_ids"].shape[0], contexts["input_ids"].shape[0]
-        )
-        # iterate over the questions and set the labels to 1 if the context is positive
-        for sample_idx in range(len(questions["input_ids"])):
-            for ctx in positives_ctxs[sample_idx]:
-                # get the index of the positive context
-                index = context_index[tuple(ctx["input_ids"])]
-                # set the label to 1
-                labels[sample_idx, index] = 1
-
-        model_inputs = {
-            "questions": ModelInputs(questions),
-            "contexts": ModelInputs(contexts),
-            "labels": labels,
-            "positives": positives,
-            "sample_idx": [sample["sample_idx"] for sample in batch],
-        }
-        return ModelInputs(model_inputs)
-
-
-class SampledNegativesCollateMixin:
-    def collate_fn(self, batch: Any, *args, **kwargs) -> Any:
-        questions = [sample["question"] for sample in batch]
-        contexts = [sample["context"] for sample in batch]
-        positives = [sample["positives"] for sample in batch]
-        if "retrieved_hard_negatives" in batch[0]:
-            # add augmented negative contexts to contexts
-            retrieved_hard_negatives = [
-                sample["retrieved_hard_negatives"] for sample in batch
-            ]
-            contexts = [
-                # remove the last len(a) contexts to add the augmented negative context
-                c[: -len(a)] + a
-                for c, a in zip(contexts, retrieved_hard_negatives)
-            ]
-
-        questions = self.convert_to_batch(questions)
-        # first flat the list of lists of contexts
-        contexts = [c for ctxs in contexts for c in ctxs]
-        # invert contexts from list of dict to dict of list
-        contexts = self.convert_to_batch(contexts)
-
-        augmented_labels: Optional[torch.Tensor] = None
-        contexts_per_question = [len(sample["context"]) for sample in batch]
-        labels = [[0] * c for c in contexts_per_question]
-        # pad the labels
-        labels = [
-            self.pad_sequence(l, max(contexts_per_question), value=-100) for l in labels
-        ]
-        # convert to tensor
-        labels = torch.as_tensor(labels)
-        # labels is a mask of positive contexts for each question base on positive_index_end
-        # has shape num_questions x num_contexts
-        positive_index_end = [sample["positive_index_end"] for sample in batch]
-        for i, end in enumerate(positive_index_end):
-            labels[i, :end] = 1
-
-        model_inputs = {
-            "questions": ModelInputs(questions),
-            "contexts": ModelInputs(contexts),
-            "labels": augmented_labels if augmented_labels is not None else labels,
-            "positives": positives,
-            "sample_idx": [sample["sample_idx"] for sample in batch],
-        }
-        if contexts_per_question is not None:
-            model_inputs["contexts_per_question"] = contexts_per_question
-        return ModelInputs(model_inputs)
-
-
-class DPRIterableDataset(GenerativeDataset, DPRMixin, DPRCollateMixin, DPRLoadMixin):
+class DPRIterableDataset(GenerativeDataset, DPRMixin, DPRLoadMixin):
     def __init__(
         self,
         name: str,
@@ -421,6 +273,38 @@ class DPRIterableDataset(GenerativeDataset, DPRMixin, DPRCollateMixin, DPRLoadMi
         if not self.drop_last_batch and len(batch) > 0:
             yield self.collate_fn(batch)
 
+    def collate_fn(self, batch: Any, *args, **kwargs) -> Any:
+        questions = [sample["question"] for sample in batch]
+        contexts = [sample["context"] for sample in batch]
+        positives = [sample["positives"] for sample in batch]
+
+        questions = self.convert_to_batch(questions)
+        # first flat the list of list of contexts
+        contexts = [c for ctxs in contexts for c in ctxs]
+        # invert contexts from list of dict to dict of list
+        contexts = self.convert_to_batch(contexts)
+
+        # actual positives
+        labels = torch.zeros(
+            questions["input_ids"].shape[0], contexts["input_ids"].shape[0]
+        )
+        positive_index_end = [sample["positive_index_end"] for sample in batch]
+        last_start = 0
+        for i, end in enumerate(positive_index_end):
+            start = 0 if i == 0 else last_start + len(batch[i - 1]["context"])
+            end = end if i == 0 else start + end
+            labels[i, start:end] = 1
+            last_start = start
+
+        model_inputs = {
+            "questions": ModelInputs(questions),
+            "contexts": ModelInputs(contexts),
+            "labels": labels,
+            "positives": positives,
+            "sample_idx": [sample["sample_idx"] for sample in batch],
+        }
+        return ModelInputs(model_inputs)
+
     def load(
         self,
         paths: Union[str, os.PathLike, List[str], List[os.PathLike]],
@@ -490,9 +374,7 @@ class DPRIterableDataset(GenerativeDataset, DPRMixin, DPRCollateMixin, DPRLoadMi
                 json.dump(sample, f, indent=2)
 
 
-class InBatchNegativesDPRIterableDataset(
-    DPRIterableDataset, InBatchNegativesCollateMixin
-):
+class InBatchNegativesDPRIterableDataset(DPRIterableDataset):
     def __init__(
         self,
         name: str,
@@ -529,8 +411,71 @@ class InBatchNegativesDPRIterableDataset(
             **kwargs,
         )
 
+    def collate_fn(self, batch: Any, *args, **kwargs) -> Any:
+        # get data from batch
+        questions = [sample["question"] for sample in batch]
+        positives = [sample["positives"] for sample in batch]
 
-class DPRDataset(BaseDataset, DPRMixin, DPRCollateMixin):
+        # this is needed to get the correct labels for each question
+        positives_ctxs = [sample["positive_ctxs"] for sample in batch]
+        negatives_ctxs = [sample["negative_ctxs"] for sample in batch]
+        hard_negatives_ctxs = [sample["hard_negative_ctxs"] for sample in batch]
+        # use negatives from predictions if available
+        if "retrieved_hard_negatives" in batch[0]:
+            # add augmented negative contexts to contexts
+            hard_negatives_ctxs += [
+                sample["retrieved_hard_negatives"] for sample in batch
+            ]
+
+        # convert the questions to a batch
+        questions = self.convert_to_batch(questions)
+
+        # now we need to make the batch of contexts
+        # it can happen that there are duplicate contexts from different questions
+        # so we need to remove them
+        flat_positives = [p for ps in positives_ctxs for p in ps]
+        flat_negatives = [n for ns in negatives_ctxs for n in ns]
+        flat_hard_negatives = [hn for hns in hard_negatives_ctxs for hn in hns]
+        # remove duplicates based on input_ids (input_ids is a list of int)
+        flat_positives = list(
+            {tuple(p["input_ids"]): p for p in flat_positives}.values()
+        )
+        flat_negatives = list(
+            {tuple(n["input_ids"]): n for n in flat_negatives}.values()
+        )
+        flat_hard_negatives = list(
+            {tuple(hn["input_ids"]): hn for hn in flat_hard_negatives}.values()
+        )
+        unique_contexts = flat_positives + flat_negatives + flat_hard_negatives
+        contexts = self.convert_to_batch(unique_contexts)
+        # build an index to map the position of the context in the batch
+        context_index = {
+            tuple(c["input_ids"]): i for i, c in enumerate(unique_contexts)
+        }
+
+        # now we can create the labels
+        labels = torch.zeros(
+            questions["input_ids"].shape[0], contexts["input_ids"].shape[0]
+        )
+        # iterate over the questions and set the labels to 1 if the context is positive
+        for sample_idx in range(len(questions["input_ids"])):
+            for ctx in positives_ctxs[sample_idx]:
+                # get the index of the positive context
+                index = context_index[tuple(ctx["input_ids"])]
+                # set the label to 1
+                labels[sample_idx, index] = 1
+
+        model_inputs = {
+            "questions": ModelInputs(questions),
+            "contexts": ModelInputs(contexts),
+            "labels": labels,
+            "positives": positives,
+            "sample_idx": [sample["sample_idx"] for sample in batch],
+        }
+        return ModelInputs(model_inputs)
+
+
+class DPRDataset(BaseDataset, DPRMixin):
     def __init__(
         self,
         name: str,
@@ -608,6 +553,38 @@ class DPRDataset(BaseDataset, DPRMixin, DPRCollateMixin):
     ) -> Union[Dict[str, torch.Tensor], Tuple[torch.Tensor, torch.Tensor]]:
         return self.data[index]
 
+    def collate_fn(self, batch: Any, *args, **kwargs) -> Any:
+        questions = [sample["question"] for sample in batch]
+        contexts = [sample["context"] for sample in batch]
+        positives = [sample["positives"] for sample in batch]
+
+        questions = self.convert_to_batch(questions)
+        # first flat the list of list of contexts
+        contexts = [c for ctxs in contexts for c in ctxs]
+        # invert contexts from list of dict to dict of list
+        contexts = self.convert_to_batch(contexts)
+
+        # actual positives
+        labels = torch.zeros(
+            questions["input_ids"].shape[0], contexts["input_ids"].shape[0]
+        )
+        positive_index_end = [sample["positive_index_end"] for sample in batch]
+        last_start = 0
+        for i, end in enumerate(positive_index_end):
+            start = 0 if i == 0 else last_start + len(batch[i - 1]["context"])
+            end = end if i == 0 else start + end
+            labels[i, start:end] = 1
+            last_start = start
+
+        model_inputs = {
+            "questions": ModelInputs(questions),
+            "contexts": ModelInputs(contexts),
+            "labels": labels,
+            "positives": positives,
+            "sample_idx": [sample["sample_idx"] for sample in batch],
+        }
+        return ModelInputs(model_inputs)
+
     def load(
         self,
         paths: Union[str, os.PathLike, List[str], List[os.PathLike]],
@@ -679,7 +656,7 @@ class DPRDataset(BaseDataset, DPRMixin, DPRCollateMixin):
                 json.dump(dump, f, indent=2)
 
 
-class InBatchNegativesDPRDataset(DPRDataset, InBatchNegativesCollateMixin):
+class InBatchNegativesDPRDataset(DPRDataset):
     def __init__(
         self,
         name: str,
@@ -714,8 +691,71 @@ class InBatchNegativesDPRDataset(DPRDataset, InBatchNegativesCollateMixin):
             **kwargs,
         )
 
+    def collate_fn(self, batch: Any, *args, **kwargs) -> Any:
+        # get data from batch
+        questions = [sample["question"] for sample in batch]
+        positives = [sample["positives"] for sample in batch]
 
-class SampledNegativesDPRDataset(DPRDataset, SampledNegativesCollateMixin):
+        # this is needed to get the correct labels for each question
+        positives_ctxs = [sample["positive_ctxs"] for sample in batch]
+        negatives_ctxs = [sample["negative_ctxs"] for sample in batch]
+        hard_negatives_ctxs = [sample["hard_negative_ctxs"] for sample in batch]
+        # use negatives from predictions if available
+        if "retrieved_hard_negatives" in batch[0]:
+            # add augmented negative contexts to contexts
+            hard_negatives_ctxs += [
+                sample["retrieved_hard_negatives"] for sample in batch
+            ]
+
+        # convert the questions to a batch
+        questions = self.convert_to_batch(questions)
+
+        # now we need to make the batch of contexts
+        # it can happen that there are duplicate contexts from different questions
+        # so we need to remove them
+        flat_positives = [p for ps in positives_ctxs for p in ps]
+        flat_negatives = [n for ns in negatives_ctxs for n in ns]
+        flat_hard_negatives = [hn for hns in hard_negatives_ctxs for hn in hns]
+        # remove duplicates based on input_ids (input_ids is a list of int)
+        flat_positives = list(
+            {tuple(p["input_ids"]): p for p in flat_positives}.values()
+        )
+        flat_negatives = list(
+            {tuple(n["input_ids"]): n for n in flat_negatives}.values()
+        )
+        flat_hard_negatives = list(
+            {tuple(hn["input_ids"]): hn for hn in flat_hard_negatives}.values()
+        )
+        unique_contexts = flat_positives + flat_negatives + flat_hard_negatives
+        contexts = self.convert_to_batch(unique_contexts)
+        # build an index to map the position of the context in the batch
+        context_index = {
+            tuple(c["input_ids"]): i for i, c in enumerate(unique_contexts)
+        }
+
+        # now we can create the labels
+        labels = torch.zeros(
+            questions["input_ids"].shape[0], contexts["input_ids"].shape[0]
+        )
+        # iterate over the questions and set the labels to 1 if the context is positive
+        for sample_idx in range(len(questions["input_ids"])):
+            for ctx in positives_ctxs[sample_idx]:
+                # get the index of the positive context
+                index = context_index[tuple(ctx["input_ids"])]
+                # set the label to 1
+                labels[sample_idx, index] = 1
+
+        model_inputs = {
+            "questions": ModelInputs(questions),
+            "contexts": ModelInputs(contexts),
+            "labels": labels,
+            "positives": positives,
+            "sample_idx": [sample["sample_idx"] for sample in batch],
+        }
+        return ModelInputs(model_inputs)
+
+
+class SampledNegativesDPRDataset(DPRDataset):
     def __init__(
         self,
         name: str,
@@ -748,3 +788,50 @@ class SampledNegativesDPRDataset(DPRDataset, SampledNegativesCollateMixin):
             contexts_path,
             tokenizer,
         )
+
+    def collate_fn(self, batch: Any, *args, **kwargs) -> Any:
+        questions = [sample["question"] for sample in batch]
+        contexts = [sample["context"] for sample in batch]
+        positives = [sample["positives"] for sample in batch]
+        if "retrieved_hard_negatives" in batch[0]:
+            # add augmented negative contexts to contexts
+            retrieved_hard_negatives = [
+                sample["retrieved_hard_negatives"] for sample in batch
+            ]
+            contexts = [
+                # remove the last len(a) contexts to add the augmented negative context
+                c[: -len(a)] + a
+                for c, a in zip(contexts, retrieved_hard_negatives)
+            ]
+
+        questions = self.convert_to_batch(questions)
+        # first flat the list of lists of contexts
+        contexts = [c for ctxs in contexts for c in ctxs]
+        # invert contexts from list of dict to dict of list
+        contexts = self.convert_to_batch(contexts)
+
+        augmented_labels: Optional[torch.Tensor] = None
+        contexts_per_question = [len(sample["context"]) for sample in batch]
+        labels = [[0] * c for c in contexts_per_question]
+        # pad the labels
+        labels = [
+            self.pad_sequence(l, max(contexts_per_question), value=-100) for l in labels
+        ]
+        # convert to tensor
+        labels = torch.as_tensor(labels)
+        # labels is a mask of positive contexts for each question base on positive_index_end
+        # has shape num_questions x num_contexts
+        positive_index_end = [sample["positive_index_end"] for sample in batch]
+        for i, end in enumerate(positive_index_end):
+            labels[i, :end] = 1
+
+        model_inputs = {
+            "questions": ModelInputs(questions),
+            "contexts": ModelInputs(contexts),
+            "labels": augmented_labels if augmented_labels is not None else labels,
+            "positives": positives,
+            "sample_idx": [sample["sample_idx"] for sample in batch],
+        }
+        if contexts_per_question is not None:
+            model_inputs["contexts_per_question"] = contexts_per_question
+        return ModelInputs(model_inputs)
