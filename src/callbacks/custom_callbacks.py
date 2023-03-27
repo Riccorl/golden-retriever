@@ -105,6 +105,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                     return_tensors="pt",
                 )
             )
+
             # check if we need to reindex the contexts and
             # also if we need to load the retriever from disk
             if self.retriever_dir is not None and trainer.current_epoch == 0:

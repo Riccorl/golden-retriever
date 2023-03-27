@@ -23,6 +23,13 @@ STAGES_COMPATIBILITY_MAP = {
     "test": RunningStage.TESTING,
 }
 
+DEFAULT_STAGES = {
+    RunningStage.VALIDATING,
+    RunningStage.TESTING,
+    RunningStage.SANITY_CHECKING,
+    RunningStage.PREDICTING,
+}
+
 
 class PredictionCallback(pl.Callback):
     def __init__(
@@ -43,7 +50,7 @@ class PredictionCallback(pl.Callback):
 
         # callback initialization
         if stages is None:
-            stages = {RunningStage.VALIDATING, RunningStage.TESTING}
+            stages = DEFAULT_STAGES
 
         # compatibily stuff
         stages = {STAGES_COMPATIBILITY_MAP.get(stage, stage) for stage in stages}
@@ -137,14 +144,14 @@ class PredictionCallback(pl.Callback):
         else:
             # get the dataloaders and datasets from the datamodule
             datasets = (
-                trainer.datamodule.val_datasets
-                if trainer.state.stage == RunningStage.VALIDATING
-                else trainer.datamodule.test_datasets
+                trainer.datamodule.test_datasets
+                if trainer.state.stage == RunningStage.TESTING
+                else trainer.datamodule.val_datasets
             )
             dataloaders = (
-                trainer.val_dataloaders
-                if trainer.state.stage == RunningStage.VALIDATING
-                else trainer.test_dataloaders
+                trainer.test_dataloaders
+                if trainer.state.stage == RunningStage.TESTING
+                else trainer.val_dataloaders
             )
         return datasets, dataloaders
 

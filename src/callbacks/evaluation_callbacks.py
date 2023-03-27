@@ -4,7 +4,7 @@ import pytorch_lightning as pl
 from pytorch_lightning.trainer.states import RunningStage
 import torch
 
-from callbacks.base import NLPTemplateCallback
+from callbacks.base import DEFAULT_STAGES, NLPTemplateCallback
 from common.logging import get_console_logger
 
 logger = get_console_logger()
@@ -40,7 +40,7 @@ class TopKEvaluationCallback(NLPTemplateCallback):
         metrics = {}
 
         stage = trainer.state.stage
-        if stage not in {RunningStage.VALIDATING, RunningStage.TESTING}:
+        if stage not in DEFAULT_STAGES:
             raise ValueError(
                 f"Stage {stage} not supported, only `validate` and `test` are supported."
             )
@@ -106,7 +106,7 @@ class NYTTopKEvaluationCallback(TopKEvaluationCallback):
         metrics = {}
 
         stage = trainer.state.stage
-        if stage not in {RunningStage.VALIDATING, RunningStage.TESTING}:
+        if stage not in DEFAULT_STAGES:
             raise ValueError(
                 f"Stage {stage} not supported, only `validate` and `test` are supported."
             )

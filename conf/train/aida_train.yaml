@@ -30,19 +30,18 @@ pl_trainer:
 # "early_stopping_callback: null" will disable early stopping
 early_stopping_callback:
   _target_: pytorch_lightning.callbacks.EarlyStopping
-  monitor: val_recall@${train.top_k}
+  monitor: validate_recall@${train.top_k}
   mode: max
   patience: 15
-
 # model_checkpoint_callback
 # "model_checkpoint_callback: null" will disable model checkpointing
 model_checkpoint_callback:
   _target_: pytorch_lightning.callbacks.ModelCheckpoint
-  monitor: val_recall@${train.top_k}
+  monitor: validate_recall@${train.top_k}
   mode: max
   verbose: True
   save_top_k: 1
-  filename: "checkpoint-val_recall@${train.top_k}_{val_recall@${train.top_k}:.4f}-epoch_{epoch:02d}"
+  filename: "checkpoint-validate_recall@${train.top_k}_{validate_recall@${train.top_k}:.4f}-epoch_{epoch:02d}"
   auto_insert_metric_name: False
 
 prediction_callbacks:
@@ -66,7 +65,7 @@ prediction_callbacks:
     k: ${train.top_k}
     batch_size: 256
     stages: [validate]
-    metric_to_monitor: val_recall@${train.top_k}
+    metric_to_monitor: validate_recall@${train.top_k}
     threshold: 0.0
     max_negatives: 5
     refresh_every_n_epochs: 1
