@@ -6,7 +6,7 @@ from typing import Any, Dict, Optional, Union
 import pytorch_lightning as pl
 import torch
 
-from callbacks.base import NLPTemplateCallback, PredictionCallback, Stage
+from callbacks.base import NLPTemplateCallback, PredictionCallback
 from common.logging import get_console_logger
 
 logger = get_console_logger()
@@ -29,7 +29,6 @@ class SavePredictionsCallback(NLPTemplateCallback):
         self,
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
-        stage: Union[str, Stage],
         predictions: Dict,
         callback: PredictionCallback,
         *args,

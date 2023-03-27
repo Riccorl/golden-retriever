@@ -9,11 +9,14 @@ from omegaconf import DictConfig
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from callbacks.base import PredictionCallback, Stage
+from callbacks.base import PredictionCallback
 from common.logging import get_console_logger
 from common.model_inputs import ModelInputs
 from data.datasets import BaseDataset
 from models.model import GoldenRetriever
+
+from pytorch_lightning.trainer.states import RunningStage
+
 
 logger = get_console_logger()
 
@@ -28,7 +31,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         move_index_to_cpu: bool = True,
         force_reindex: bool = True,
         retriever_dir: Optional[Path] = None,
-        stages: Set[Union[str, Stage]] = None,
+        stages: Set[Union[str, RunningStage]] = None,
         other_callbacks: Optional[List[DictConfig]] = None,
         dataset: Optional[Union[DictConfig, BaseDataset]] = None,
         dataloader: Optional[DataLoader] = None,
@@ -48,7 +51,6 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         self,
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
-        stage: Union[str, Stage],
         datasets: Optional[
             Union[DictConfig, BaseDataset, List[DictConfig], List[BaseDataset]]
         ] = None,
@@ -56,8 +58,8 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         *args,
         **kwargs,
     ) -> dict:
+        stage = trainer.state.stage
         logger.log(f"Computing predictions for stage {stage.value}")
-
         if stage not in self.stages:
             raise ValueError(
                 f"Stage {stage} not supported, only {self.stages} are supported"
@@ -69,7 +71,6 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         self.datasets, self.dataloaders = self._get_datasets_and_dataloaders(
             self.datasets or datasets,
             self.dataloaders or dataloaders,
-            stage,
             trainer,
             dataloader_kwargs={
                 "batch_size": self.batch_size,
@@ -104,10 +105,20 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                     return_tensors="pt",
                 )
             )
+            # check if we need to reindex the contexts and
+            # also if we need to load the retriever from disk
             if self.retriever_dir is not None and trainer.current_epoch == 0:
                 force_reindex = False
             else:
                 force_reindex = self.force_reindex
+
+            if (
+                not force_reindex
+                and self.retriever_dir is not None
+                and stage == RunningStage.TESTING
+            ):
+                retriever = retriever.from_pretrained(self.retriever_dir)
+
             retriever.index(
                 contexts,
                 batch_size=self.batch_size,
@@ -225,7 +236,7 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
         move_index_to_cpu: bool = False,
         force_reindex: bool = False,
         retriever_dir: Optional[Path] = None,
-        stages: Set[Union[str, Stage]] = None,
+        stages: Set[Union[str, RunningStage]] = None,
         other_callbacks: Optional[List[DictConfig]] = None,
         dataset: Optional[Union[DictConfig, BaseDataset]] = None,
         metric_to_monitor: str = "val_loss",
@@ -259,10 +270,10 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
         self,
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
-        stage: Union[str, Stage],
         *args,
         **kwargs,
     ) -> dict:
+        stage = trainer.state.stage
         if stage not in self.stages:
             return {}
 
@@ -284,7 +295,6 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
         predictions = super().__call__(
             trainer,
             pl_module,
-            stage,
             datasets=trainer.datamodule.train_dataset,
             dataloaders=trainer.datamodule.train_dataloader(),
             *args,

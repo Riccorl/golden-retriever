@@ -594,7 +594,6 @@ class GoldenRetriever(torch.nn.Module):
     def from_pretrained(
         cls,
         model_dir: Union[str, Path],
-        weights_file: str = WEIGHTS_NAME,
         strict: bool = True,
         device: str = "cpu",
         load_faiss_index: bool = False,
@@ -607,8 +606,6 @@ class GoldenRetriever(torch.nn.Module):
         Args:
             model_dir (`str` or `Path`):
                 The path to the directory containing the retriever files.
-            weights_file (`str`, optional):
-                The name of the file containing the retriever weights. Defaults to `WEIGHTS_NAME`.
             strict (`bool`, optional):
                 Whether to raise an error if the state dict of the saved retriever does not
                 match the state dict of the current retriever. Defaults to `True`.

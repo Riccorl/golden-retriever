@@ -1,9 +1,10 @@
 from typing import Dict, List, Optional, Union
 
 import pytorch_lightning as pl
+from pytorch_lightning.trainer.states import RunningStage
 import torch
 
-from callbacks.base import NLPTemplateCallback, Stage
+from callbacks.base import NLPTemplateCallback
 from common.logging import get_console_logger
 
 logger = get_console_logger()
@@ -28,7 +29,6 @@ class TopKEvaluationCallback(NLPTemplateCallback):
         self,
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
-        stage: Union[str, Stage],
         predictions: Dict,
         *args,
         **kwargs,
@@ -39,9 +39,10 @@ class TopKEvaluationCallback(NLPTemplateCallback):
         # metrics to return
         metrics = {}
 
-        if stage not in [Stage.VALIDATION, Stage.TEST]:
+        stage = trainer.state.stage
+        if stage not in {RunningStage.VALIDATING, RunningStage.TESTING}:
             raise ValueError(
-                f"Stage {stage} not supported, only `validation` and `test` are supported."
+                f"Stage {stage} not supported, only `validate` and `test` are supported."
             )
 
         for dataloader_idx, samples in predictions.items():
@@ -95,7 +96,6 @@ class NYTTopKEvaluationCallback(TopKEvaluationCallback):
         self,
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
-        stage: Union[str, Stage],
         predictions: Dict,
         *args,
         **kwargs,
@@ -105,9 +105,10 @@ class NYTTopKEvaluationCallback(TopKEvaluationCallback):
         # metrics to return
         metrics = {}
 
-        if stage not in [Stage.VALIDATION, Stage.TEST]:
+        stage = trainer.state.stage
+        if stage not in {RunningStage.VALIDATING, RunningStage.TESTING}:
             raise ValueError(
-                f"Stage {stage} not supported, only `validation` and `test` are supported."
+                f"Stage {stage} not supported, only `validate` and `test` are supported."
             )
 
         for dataloader_idx, samples in predictions.items():

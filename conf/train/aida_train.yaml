@@ -65,7 +65,7 @@ prediction_callbacks:
   - _target_: callbacks.custom_callbacks.NegativeAugmentationCallback
     k: ${train.top_k}
     batch_size: 256
-    stages: [val]
+    stages: [validate]
     metric_to_monitor: val_recall@${train.top_k}
     threshold: 0.0
     max_negatives: 5

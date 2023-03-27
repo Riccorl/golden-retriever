@@ -11,20 +11,24 @@ from torch.utils.data import DataLoader, Dataset
 from common.logging import get_console_logger
 from data.datasets import BaseDataset
 
+
+from pytorch_lightning.trainer.states import RunningStage
+
 logger = get_console_logger()
 
 
-class Stage(enum.Enum):
-    TRAIN = "train"
-    VALIDATION = "val"
-    TEST = "test"
+STAGES_COMPATIBILITY_MAP = {
+    "train": RunningStage.TRAINING,
+    "val": RunningStage.VALIDATING,
+    "test": RunningStage.TESTING,
+}
 
 
 class PredictionCallback(pl.Callback):
     def __init__(
         self,
         batch_size: int = 32,
-        stages: Set[Union[str, Stage]] = None,
+        stages: Set[Union[str, RunningStage]] = None,
         other_callbacks: Optional[List[DictConfig]] = None,
         datasets: Optional[Union[DictConfig, BaseDataset]] = None,
         dataloaders: Optional[Union[DataLoader, List[DataLoader]]] = None,
@@ -39,8 +43,11 @@ class PredictionCallback(pl.Callback):
 
         # callback initialization
         if stages is None:
-            stages = {Stage.VALIDATION, Stage.TEST}
-        self.stages = [Stage(stage) for stage in stages]
+            stages = {RunningStage.VALIDATING, RunningStage.TESTING}
+
+        # compatibily stuff
+        stages = {STAGES_COMPATIBILITY_MAP.get(stage, stage) for stage in stages}
+        self.stages = [RunningStage(stage) for stage in stages]
         self.other_callbacks = other_callbacks or []
         for i, callback in enumerate(self.other_callbacks):
             if isinstance(callback, DictConfig):
@@ -53,7 +60,6 @@ class PredictionCallback(pl.Callback):
         self,
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
-        stage: Union[str, Stage],
         *args,
         **kwargs,
     ) -> Any:
@@ -63,23 +69,21 @@ class PredictionCallback(pl.Callback):
     def on_validation_epoch_end(
         self, trainer: pl.Trainer, pl_module: pl.LightningModule
     ):
-        predictions = self(trainer, pl_module, Stage.VALIDATION)
+        predictions = self(trainer, pl_module)
         for callback in self.other_callbacks:
             callback(
                 trainer=trainer,
                 pl_module=pl_module,
-                stage=Stage.VALIDATION,
                 callback=self,
                 predictions=predictions,
             )
 
     def on_test_epoch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule):
-        predictions = self(trainer, pl_module, Stage.TEST)
+        predictions = self(trainer, pl_module)
         for callback in self.other_callbacks:
             callback(
                 trainer=trainer,
                 pl_module=pl_module,
-                stage=Stage.TEST,
                 callback=self,
                 predictions=predictions,
             )
@@ -88,7 +92,6 @@ class PredictionCallback(pl.Callback):
     def _get_datasets_and_dataloaders(
         dataset: Optional[Union[Dataset, DictConfig]],
         dataloader: Optional[DataLoader],
-        stage: Stage,
         trainer: pl.Trainer,
         dataloader_kwargs: Optional[Dict[str, Any]] = None,
         collate_fn: Optional[Callable] = None,
@@ -135,12 +138,12 @@ class PredictionCallback(pl.Callback):
             # get the dataloaders and datasets from the datamodule
             datasets = (
                 trainer.datamodule.val_datasets
-                if stage == Stage.VALIDATION
+                if trainer.state.stage == RunningStage.VALIDATING
                 else trainer.datamodule.test_datasets
             )
             dataloaders = (
                 trainer.val_dataloaders
-                if stage == Stage.VALIDATION
+                if trainer.state.stage == RunningStage.VALIDATING
                 else trainer.test_dataloaders
             )
         return datasets, dataloaders
@@ -151,7 +154,6 @@ class NLPTemplateCallback:
         self,
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
-        stage: Union[str, Stage],
         callback: PredictionCallback,
         predictions: Dict[str, Any],
         *args,
