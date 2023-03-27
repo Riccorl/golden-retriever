@@ -14,7 +14,7 @@ pl_trainer:
   accelerator: gpu
   devices: 1
   num_nodes: 1
-  strategy: null
+  strategy: auto
   accumulate_grad_batches: 1
   gradient_clip_val: 1.0
   val_check_interval: 1.0 # you can specify an int "n" here => validation every "n" steps
@@ -24,7 +24,7 @@ pl_trainer:
   deterministic: True
   fast_dev_run: False
   precision: 32
-  resume_from_checkpoint: null
+  ckpt_path: null
 
 # early stopping callback
 # "early_stopping_callback: null" will disable early stopping
@@ -45,31 +45,31 @@ model_checkpoint_callback:
   auto_insert_metric_name: False
 
 prediction_callbacks:
-  - _target_: callbacks.custom_callbacks.GoldenRetrieverPredictionCallback
+  - _target_: golden_retriever.callbacks.custom_callbacks.GoldenRetrieverPredictionCallback
     k: ${train.top_k}
     batch_size: 256
     use_faiss: False
     move_index_to_cpu: False
     other_callbacks:
-      - _target_: callbacks.evaluation_callbacks.TopKEvaluationCallback
+      - _target_: golden_retriever.callbacks.evaluation_callbacks.TopKEvaluationCallback
         k: ${train.top_k}
         verbose: True
-      - _target_: callbacks.evaluation_callbacks.TopKEvaluationCallback
+      - _target_: golden_retriever.callbacks.evaluation_callbacks.TopKEvaluationCallback
         k: 50
         verbose: True
-      - _target_: callbacks.utils_callbacks.SavePredictionsCallback
-  
-  - _target_: callbacks.utils_callbacks.SaveRetrieverCallback
+      - _target_: golden_retriever.callbacks.utils_callbacks.SavePredictionsCallback
 
-  - _target_: callbacks.custom_callbacks.NegativeAugmentationCallback
+  - _target_: golden_retriever.callbacks.utils_callbacks.SaveRetrieverCallback
+
+  - _target_: golden_retriever.callbacks.custom_callbacks.NegativeAugmentationCallback
     k: ${train.top_k}
     batch_size: 256
-    stages: [validate]
+    stages: [ validate ]
     metric_to_monitor: validate_recall@${train.top_k}
     threshold: 0.0
     max_negatives: 5
     refresh_every_n_epochs: 1
     other_callbacks:
-      - _target_: callbacks.utils_callbacks.FreeUpIndexerVRAMCallback
-  
-  - _target_: callbacks.utils_callbacks.ShuffleTrainDatasetCallback
+      - _target_: golden_retriever.callbacks.utils_callbacks.FreeUpIndexerVRAMCallback
+
+  - _target_: golden_retriever.callbacks.utils_callbacks.ShuffleTrainDatasetCallback

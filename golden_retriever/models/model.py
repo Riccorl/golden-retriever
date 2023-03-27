@@ -9,18 +9,25 @@ import torch
 import torch.nn.functional as F
 import transformers as tr
 from omegaconf import OmegaConf
-from optimum.onnxruntime import ORTModelForFeatureExtraction, ORTOptimizer
-from optimum.onnxruntime.configuration import AutoOptimizationConfig
 from rich.pretty import pprint
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from common.logging import get_console_logger
-from common.model_inputs import ModelInputs
-from common.utils import CONFIG_NAME, WEIGHTS_NAME
-from data.datasets import BaseDataset
-from data.labels import Labels
-from models.faiss_indexer import FaissIndexer
+from golden_retriever.common.logging import get_console_logger
+from golden_retriever.common.model_inputs import ModelInputs
+from golden_retriever.common.utils import (
+    CONFIG_NAME,
+    WEIGHTS_NAME,
+    is_package_available,
+)
+from golden_retriever.data.datasets import BaseDataset
+from golden_retriever.data.labels import Labels
+from golden_retriever.models.faiss_indexer import FaissIndexer
+
+# check if ORT is available
+if is_package_available("onnxruntime"):
+    from optimum.onnxruntime import ORTModelForFeatureExtraction, ORTOptimizer
+    from optimum.onnxruntime.configuration import AutoOptimizationConfig
 
 INDEX_NAME = "index.json"
 INDEX_VECTOR_NAME = "index.pt"
@@ -33,8 +40,9 @@ class SentenceEncoder(torch.nn.Module):
     def __init__(
         self,
         language_model: Union[
-            str, tr.PreTrainedModel, ORTModelForFeatureExtraction
+            str, tr.PreTrainedModel, "ORTModelForFeatureExtraction"
         ] = "sentence-transformers/all-MiniLM-12-v2",
+        from_pretrained: bool = True,
         pooling_strategy: str = "mean",
         load_ort_model: bool = False,
         freeze: bool = False,
@@ -48,7 +56,12 @@ class SentenceEncoder(torch.nn.Module):
                     language_model, from_transformers=True
                 )
             else:
-                self.language_model = tr.AutoModel.from_pretrained(language_model)
+                if from_pretrained:
+                    self.language_model = tr.AutoModel.from_pretrained(language_model)
+                else:
+                    self.language_model = tr.AutoModel.from_config(
+                        tr.AutoConfig.from_pretrained(language_model)
+                    )
         else:
             self.language_model = language_model
 
@@ -156,6 +169,10 @@ class GoldenRetriever(torch.nn.Module):
         self._context_index: Optional[Labels] = context_index
         self._context_embeddings: Optional[torch.Tensor] = None
         self._faiss_indexer: Optional[FaissIndexer] = None
+
+        # lazy load the tokenizer for inference
+        self._question_tokenizer: Optional[tr.PreTrainedTokenizer] = None
+        self._context_tokenizer: Optional[tr.PreTrainedTokenizer] = None
 
     def forward(
         self,
@@ -283,9 +300,7 @@ class GoldenRetriever(torch.nn.Module):
             return
 
         if collate_fn is None:
-            tokenizer = tr.AutoTokenizer.from_pretrained(
-                self.context_encoder.language_model.pretrained_model_name_or_path
-            )
+            tokenizer = self.context_tokenizer
             collate_fn = lambda x: ModelInputs(
                 {
                     tokenizer(
@@ -293,7 +308,7 @@ class GoldenRetriever(torch.nn.Module):
                         padding=True,
                         return_tensors="pt",
                         truncation=True,
-                        max_length=self.model.max_length,
+                        max_length=tokenizer.model_max_length,
                     )
                 }
             )
@@ -338,7 +353,8 @@ class GoldenRetriever(torch.nn.Module):
 
     def retrieve(
         self,
-        input_ids: torch.Tensor,
+        text: Optional[Union[str, List[str]]] = None,
+        input_ids: Optional[torch.Tensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
         token_type_ids: Optional[torch.Tensor] = None,
         k: int = 5,
@@ -347,6 +363,8 @@ class GoldenRetriever(torch.nn.Module):
         Retrieve the contexts for the questions.
 
         Args:
+            text (`Optional[Union[str, List[str]]]`):
+                The questions to retrieve the contexts for.
             input_ids (`torch.Tensor`):
                 The input ids of the questions.
             attention_mask (`torch.Tensor`):
@@ -363,11 +381,27 @@ class GoldenRetriever(torch.nn.Module):
             raise ValueError(
                 "The contexts must be indexed before they can be retrieved."
             )
-        model_inputs = {"input_ids": input_ids}
-        if attention_mask is not None:
-            model_inputs["attention_mask"] = attention_mask
-        if token_type_ids is not None:
-            model_inputs["token_type_ids"] = token_type_ids
+        if text is None and input_ids is None:
+            raise ValueError(
+                "Either `text` or `input_ids` must be provided to retrieve the contexts."
+            )
+        if text is not None:
+            if isinstance(text, str):
+                text = [text]
+            tokenizer = self.question_tokenizer
+            model_inputs = tokenizer(
+                text,
+                padding=True,
+                return_tensors="pt",
+                truncation=True,
+                max_length=tokenizer.model_max_length,
+            )
+        else:
+            model_inputs = ModelInputs({"input_ids": input_ids})
+            if attention_mask is not None:
+                model_inputs["attention_mask"] = attention_mask
+            if token_type_ids is not None:
+                model_inputs["token_type_ids"] = token_type_ids
         if self._faiss_indexer is not None:
             top_k: torch.Tensor = self._faiss_indexer.search(
                 self.question_encoder(**model_inputs), k=k
@@ -375,8 +409,10 @@ class GoldenRetriever(torch.nn.Module):
         else:
             # check if the device of the context embeddings is the same
             # as the device of the input ids
-            if self._context_embeddings.device != input_ids.device:
-                self._context_embeddings = self._context_embeddings.to(input_ids.device)
+            if self._context_embeddings.device != model_inputs.input_ids.device:
+                self._context_embeddings = self._context_embeddings.to(
+                    model_inputs.input_ids.device
+                )
             model_inputs = {
                 "questions": model_inputs,
                 "contexts_encodings": self._context_embeddings,
@@ -471,6 +507,56 @@ class GoldenRetriever(torch.nn.Module):
                 "The contexts must be indexed before they can be retrieved."
             )
         return self.get_vector_from_index(self.get_index_from_context(context))
+
+    @property
+    def question_tokenizer(self) -> tr.PreTrainedTokenizer:
+        """
+        The question tokenizer.
+        """
+        if self._question_tokenizer:
+            return self._question_tokenizer
+
+        if (
+            self.question_encoder.language_model_name
+            == self.question_encoder.language_model_name
+        ):
+            if not self._question_tokenizer:
+                self._question_tokenizer = tr.AutoTokenizer.from_pretrained(
+                    self.question_encoder.language_model_name
+                )
+            self._context_tokenizer = self._question_tokenizer
+            return self._question_tokenizer
+
+        if not self._question_tokenizer:
+            self._question_tokenizer = tr.AutoTokenizer.from_pretrained(
+                self.question_encoder.language_model_name
+            )
+        return self._question_tokenizer
+
+    @property
+    def context_tokenizer(self) -> tr.PreTrainedTokenizer:
+        """
+        The context tokenizer.
+        """
+        if self._context_tokenizer:
+            return self._context_tokenizer
+
+        if (
+            self.question_encoder.language_model_name
+            == self.context_encoder.language_model_name
+        ):
+            if not self._question_tokenizer:
+                self._question_tokenizer = tr.AutoTokenizer.from_pretrained(
+                    self.question_encoder.language_model_name
+                )
+            self._context_tokenizer = self._question_tokenizer
+            return self._context_tokenizer
+
+        if not self._context_tokenizer:
+            self._context_tokenizer = tr.AutoTokenizer.from_pretrained(
+                self.context_encoder.language_model_name
+            )
+        return self._context_tokenizer
 
     @property
     def context_embeddings(self) -> torch.Tensor:
@@ -568,6 +654,10 @@ class GoldenRetriever(torch.nn.Module):
         # pretty print the config
         pprint(config, console=logger, expand_all=True)
 
+        # override the from_pretrained parameter of the encoders
+        # we don't want to load the pretrained weights from HF Hub when loading the retriever
+        config["question_encoder"]["from_pretrained"] = False
+        config["context_encoder"]["from_pretrained"] = False
         # save the config using OmegaConf
         OmegaConf.save(config, output_dir / CONFIG_NAME)
 
@@ -679,7 +769,7 @@ class GoldenRetriever(torch.nn.Module):
         if load_faiss_index:
             model._faiss_indexer = FaissIndexer.load(faiss_index_vectors)
         else:
-            model._context_embeddings = torch.load(index_vectors)
+            model._context_embeddings = torch.load(index_vectors, map_location=device)
 
         model.to(device)
         return model

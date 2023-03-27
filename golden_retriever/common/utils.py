@@ -1,3 +1,4 @@
+import importlib.util
 import json
 from pathlib import Path
 from typing import Union, Any, Optional
@@ -7,6 +8,16 @@ WEIGHTS_NAME = "weights.pt"
 ONNX_WEIGHTS_NAME = "weights.onnx"
 CONFIG_NAME = "config.yaml"
 LABELS_NAME = "labels.json"
+
+
+def is_package_available(package_name: str) -> bool:
+    """
+    Check if a package is available.
+
+    Args:
+        package_name (`str`): The name of the package to check.
+    """
+    return importlib.util.find_spec(package_name) is not None
 
 
 def load_json(path: Union[str, Path]) -> Any:

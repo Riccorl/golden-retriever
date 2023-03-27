@@ -5,8 +5,8 @@ import pytorch_lightning as pl
 import torch
 from omegaconf import DictConfig
 
-from common.model_inputs import ModelInputs
-from data.labels import Labels
+from golden_retriever.common.model_inputs import ModelInputs
+from golden_retriever.data.labels import Labels
 
 
 class GoldenRetrieverPLModule(pl.LightningModule):

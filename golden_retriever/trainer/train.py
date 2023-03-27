@@ -15,9 +15,9 @@ from pytorch_lightning.callbacks import (
 from pytorch_lightning.loggers import WandbLogger
 from rich.pretty import pprint
 
-from common.logging import get_console_logger
-from data.pl_data_modules import PLDataModule
-from models.pl_modules import GoldenRetrieverPLModule
+from golden_retriever.common.logging import get_console_logger
+from golden_retriever.data.pl_data_modules import PLDataModule
+from golden_retriever.models.pl_modules import GoldenRetrieverPLModule
 
 logger = get_console_logger()
 
@@ -35,7 +35,7 @@ def train(conf: omegaconf.DictConfig) -> None:
         # Debuggers don't like GPUs nor multiprocessing
         # conf.train.pl_trainer.accelerator = "cpu"
         conf.train.pl_trainer.devices = 1
-        conf.train.pl_trainer.strategy = None
+        conf.train.pl_trainer.strategy = "auto"
         conf.train.pl_trainer.precision = 32
         if "num_workers" in conf.data.datamodule:
             conf.data.datamodule.num_workers = {

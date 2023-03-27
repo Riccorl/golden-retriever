@@ -1,21 +1,21 @@
 datamodule:
-  _target_: data.pl_data_modules.PLDataModule
+  _target_: golden_retriever.golden_retriever.data.pl_data_modules.PLDataModule
   tokenizer: ${model.language_model}
   datasets:
     train:
-      _target_: data.datasets.DPRDataset
+      _target_: golden_retriever.data.datasetsDPRDataset
       name: 'train'
       contexts_path: ${data_overrides.contexts_path}
       path: ${data_overrides.train_path}
 
     val:
-      - _target_: data.datasets.DPRDataset
+      - _target_: golden_retriever.data.datasets.DPRDataset
         name: 'val'
         contexts_path: ${data_overrides.contexts_path}
         path: ${data_overrides.val_path}
 
     test:
-      - _target_: data.datasets.DPRDataset
+      - _target_: golden_retriever.data.datasets.DPRDataset
         name: 'test'
         contexts_path: ${data_overrides.contexts_path}
         path: ${data_overrides.test_path}

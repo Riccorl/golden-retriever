@@ -6,9 +6,9 @@ import psutil
 import torch
 import transformers as tr
 
-from common.logging import get_console_logger
-from data.labels import Labels
-from data.sampler import NegativeSampler
+from golden_retriever.common.logging import get_console_logger
+from golden_retriever.data.labels import Labels
+from golden_retriever.data.sampler import NegativeSampler
 
 logger = get_console_logger()
 

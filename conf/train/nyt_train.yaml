@@ -13,7 +13,7 @@ pl_trainer:
   accelerator: gpu
   devices: 1
   num_nodes: 1
-  strategy: null
+  strategy: auto
   accumulate_grad_batches: 1
   gradient_clip_val: 1.0
   val_check_interval: 0.5  # you can specify an int "n" here => validation every "n" steps
@@ -21,7 +21,7 @@ pl_trainer:
   deterministic: warn
   fast_dev_run: False
   precision: 32
-  resume_from_checkpoint: null
+  ckpt_path: null
 
 # early stopping callback
 # "early_stopping_callback: null" will disable early stopping
@@ -43,12 +43,12 @@ model_checkpoint_callback:
   auto_insert_metric_name: False
 
 prediction_callbacks:
-  - _target_: callbacks.custom_callbacks.GoldenRetrieverPredictionCallback
+  - _target_: golden_retriever.callbacks.custom_callbacks.GoldenRetrieverPredictionCallback
     k: 100
     batch_size: 64
     use_faiss: True
     other_callbacks:
-      - _target_: callbacks.custom_callbacks.NYTTopKEvaluationCallback
+      - _target_: golden_retriever.callbacks.custom_callbacks.NYTTopKEvaluationCallback
         k: ${train.top_k}
         label_mapping:
           /people/person/nationality:

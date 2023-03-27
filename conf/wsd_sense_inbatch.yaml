@@ -32,14 +32,14 @@ data:
   datamodule:
     datasets:
       train:
-        _target_: data.datasets.InBatchNegativesDPRDataset
+        _target_: golden_retriever.data.datasetsInBatchNegativesDPRDataset
         name: 'train'
         contexts_path: ${data_overrides.contexts_path}
         sample_by_frequency: True
         path: ${data_overrides.train_path}
 
       val:
-        - _target_: data.datasets.InBatchNegativesDPRDataset
+        - _target_: golden_retriever.data.datasetsInBatchNegativesDPRDataset
           name: 'val'
           contexts_path: ${data_overrides.contexts_path}
           max_question_length: 256
@@ -47,7 +47,7 @@ data:
           path: ${data_overrides.val_path}
 
       test:
-        - _target_: data.datasets.InBatchNegativesDPRDataset
+        - _target_: golden_retriever.data.datasetsInBatchNegativesDPRDataset
           name: 'test'
           contexts_path: ${data_overrides.contexts_path}
           max_question_length: 256

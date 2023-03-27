@@ -1,25 +1,25 @@
 max_contexts: 64
 
 datamodule:
-  _target_: data.pl_data_modules.PLDataModule
+  _target_: golden_retriever.data.pl_data_modules.PLDataModule
   tokenizer: ${model.language_model}
   datasets:
     train:
-      _target_: data.datasets.SampledNegativesDPRDataset
+      _target_: golden_retriever.data.datasets.SampledNegativesDPRDataset
       name: 'train'
       contexts_path: ${data_overrides.contexts_path}
       max_contexts: ${data.max_contexts}
       path: ${data_overrides.train_path}
 
     val:
-      - _target_: data.datasets.SampledNegativesDPRDataset
+      - _target_: golden_retriever.data.datasets.SampledNegativesDPRDataset
         name: 'val'
         contexts_path: ${data_overrides.contexts_path}
         max_contexts: ${data.max_contexts}
         path: ${data_overrides.val_path}
 
     test:
-      - _target_: data.datasets.SampledNegativesDPRDataset
+      - _target_: golden_retriever.data.datasets.SampledNegativesDPRDataset
         name: 'test'
         contexts_path: ${data_overrides.contexts_path}
         max_contexts: ${data.max_contexts}

@@ -9,11 +9,11 @@ from omegaconf import DictConfig
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from callbacks.base import PredictionCallback
-from common.logging import get_console_logger
-from common.model_inputs import ModelInputs
-from data.datasets import BaseDataset
-from models.model import GoldenRetriever
+from golden_retriever.callbacks.base import PredictionCallback
+from golden_retriever.common.logging import get_console_logger
+from golden_retriever.common.model_inputs import ModelInputs
+from golden_retriever.data.datasets import BaseDataset
+from golden_retriever.models.model import GoldenRetriever
 
 from pytorch_lightning.trainer.states import RunningStage
 

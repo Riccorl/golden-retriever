@@ -6,7 +6,7 @@ from typing import Any, Union
 import torch
 from lightning_fabric.utilities import move_data_to_device
 
-from common.logging import get_console_logger
+from golden_retriever.common.logging import get_console_logger
 
 logger = get_console_logger()
 

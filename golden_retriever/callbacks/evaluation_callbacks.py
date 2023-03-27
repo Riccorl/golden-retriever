@@ -1,11 +1,10 @@
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional
 
 import pytorch_lightning as pl
-from pytorch_lightning.trainer.states import RunningStage
 import torch
 
-from callbacks.base import DEFAULT_STAGES, NLPTemplateCallback
-from common.logging import get_console_logger
+from golden_retriever.callbacks.base import DEFAULT_STAGES, NLPTemplateCallback
+from golden_retriever.common.logging import get_console_logger
 
 logger = get_console_logger()
 
