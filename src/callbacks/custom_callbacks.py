@@ -10,10 +10,10 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from callbacks.base import PredictionCallback, Stage
-from data.datasets import BaseDataset
-from models.model import GoldenRetriever
 from common.logging import get_console_logger
 from common.model_inputs import ModelInputs
+from data.datasets import BaseDataset
+from models.model import GoldenRetriever
 
 logger = get_console_logger()
 
@@ -89,7 +89,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         dataloader_predictions = {}
         # compute the context embeddings index for each dataloader
         for dataloader_idx, dataloader in enumerate(self.dataloaders):
-            current_dataset = self.datasets[dataloader_idx]
+            current_dataset: BaseDataset = self.datasets[dataloader_idx]
             logger.log(
                 f"Computing context embeddings for dataset {current_dataset.name}"
             )

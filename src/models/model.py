@@ -1,4 +1,3 @@
-import json
 import os
 import tempfile
 from pathlib import Path
@@ -58,7 +57,7 @@ class SentenceEncoder(torch.nn.Module):
                 param.requires_grad = False
 
         # save the other parameters
-        self.language_model_name = self.language_model.config._name_or_path
+        self.language_model_name = self.language_model.config.name_or_path
         self.pooling_strategy = pooling_strategy
         self.load_ort_model = load_ort_model
         self.freeze = freeze
@@ -481,7 +480,7 @@ class GoldenRetriever(torch.nn.Module):
         return self._context_embeddings
 
     @property
-    def context_index(self) -> Dict[int, str]:
+    def context_index(self) -> Labels:
         """
         The context index.
         """

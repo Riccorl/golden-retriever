@@ -11,10 +11,10 @@ import transformers as tr
 from datasets import load_dataset
 from torch.utils.data import Dataset, IterableDataset
 
-from data.dpr_mixin import DPRMixin
-from data.labels import Labels
 from common.logging import get_console_logger
 from common.model_inputs import ModelInputs
+from data.dpr_mixin import DPRMixin
+from data.labels import Labels
 
 logger = get_console_logger()
 

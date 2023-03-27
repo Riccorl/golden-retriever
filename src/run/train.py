@@ -15,9 +15,9 @@ from pytorch_lightning.callbacks import (
 from pytorch_lightning.loggers import WandbLogger
 from rich.pretty import pprint
 
+from common.logging import get_console_logger
 from data.pl_data_modules import PLDataModule
 from models.pl_modules import GoldenRetrieverPLModule
-from common.logging import get_console_logger
 
 logger = get_console_logger()
 
@@ -186,12 +186,12 @@ def train(conf: omegaconf.DictConfig) -> None:
             )
         logger.log(f"Loading best model from {best_model_path}")
         best_pl_module = GoldenRetrieverPLModule.load_from_checkpoint(best_model_path)
-        try:
-            best_pl_module = torch.compile(best_pl_module, backend="inductor")
-        except Exception as e:
-            logger.log(
-                f"Failed to compile the model, you may need to install PyTorch 2.0"
-            )
+        # try:
+        #     best_pl_module = torch.compile(best_pl_module, backend="inductor")
+        # except Exception as e:
+        #     logger.log(
+        #         f"Failed to compile the model, you may need to install PyTorch 2.0"
+        #     )
 
     # module test
     trainer.test(best_pl_module, datamodule=pl_data_module)

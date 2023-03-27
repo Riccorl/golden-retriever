@@ -6,9 +6,9 @@ import psutil
 import torch
 import transformers as tr
 
+from common.logging import get_console_logger
 from data.labels import Labels
 from data.sampler import NegativeSampler
-from common.logging import get_console_logger
 
 logger = get_console_logger()
 
@@ -39,9 +39,9 @@ class DPRMixin:
         negative_ctxs = list(set([n["text"].strip() for n in sample["negative_ctxs"]]))
         if max_negatives != -1:
             negative_ctxs = negative_ctxs[:max_negatives]
-        hard_negative_ctxs = list(set(
-            [h["text"].strip() for h in sample["hard_negative_ctxs"]]
-        ))
+        hard_negative_ctxs = list(
+            set([h["text"].strip() for h in sample["hard_negative_ctxs"]])
+        )
         if max_hard_negatives != -1:
             hard_negative_ctxs = hard_negative_ctxs[:max_hard_negatives]
 

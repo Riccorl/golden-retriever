@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import Union, Any, Dict, Tuple, Optional
+from typing import Union, Any, Optional
 
 # name constants
 WEIGHTS_NAME = "weights.pt"

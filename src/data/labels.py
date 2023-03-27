@@ -72,7 +72,9 @@ class Labels:
             )
 
         if index not in self._index_to_labels[namespace]:
-            raise ValueError(f"Provided label `{index}` is not in the label dictionary.")
+            raise ValueError(
+                f"Provided label `{index}` is not in the label dictionary."
+            )
 
         return self._index_to_labels[namespace][index]
 
