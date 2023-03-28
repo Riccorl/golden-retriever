@@ -100,3 +100,11 @@ class GoldenRetrieverPLModule(pl.LightningModule):
             "frequency": 1,
         }
         return [optimizer], [lr_scheduler_config]
+
+    def lr_scheduler_step(self, scheduler, optimizer_idx, metric):
+        """
+        Workaround for UserWarning: Detected call of `lr_scheduler.step()` before `optimizer.step()`.
+        """
+        if self.should_skip_lr_scheduler_step:
+            return
+        scheduler.step()

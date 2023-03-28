@@ -121,7 +121,7 @@ fi
 
 # PRELIMINARIES
 CONDA_BASE=$(conda info --base)
-source $CONDA_BASE/bin/activate golden
+source $CONDA_BASE/bin/activate golden-pip
 
 # Default device is GPU
 ACCELERATOR="gpu"
@@ -212,7 +212,7 @@ fi
 # if -s is not specified, STRATEGY is None
 if [ -z "$STRATEGY" ]; then
   # default value
-  STRATEGY="null"
+  STRATEGY="auto"
 fi
 
 # if -g DEVICES is 0 (no GPU) and PRECISION is 32
@@ -221,7 +221,7 @@ if [ "$USE_CPU" = "True" ]; then
   DEVICES=1
   PRECISION=32
   ACCELERATOR="cpu"
-  STRATEGY="null"
+  STRATEGY="auto"
 fi
 
 if type nvidia-smi >/dev/null 2>&1; then
@@ -242,6 +242,7 @@ cat <<EOF
 
 Configuration:
 -------------------------------------------------------------------
+python:                           $(which python)
 Language model name:              $LANG_MODEL_NAME
 Config path:                      $CONFIG_PATH
 Model name:                       $MODEL_NAME
@@ -292,7 +293,7 @@ export HYDRA_FULL_ERROR=1
 
 
 if [ "$DEV_RUN" = "True" ]; then
-  python src/run/train.py \
+  python golden_retriever/trainer/train.py \
     $CONFIG_PATH \
     "train.pl_trainer.fast_dev_run=$DEV_RUN" \
     "train.pl_trainer.devices=$DEVICES" \
@@ -306,7 +307,7 @@ if [ "$DEV_RUN" = "True" ]; then
     "hydra/hydra_logging=disabled" \
     $OVERRIDES
 else
-  python src/run/train.py \
+  python golden_retriever/trainer/train.py \
     $CONFIG_PATH \
     "train.pl_trainer.fast_dev_run=$DEV_RUN" \
     "train.pl_trainer.devices=$DEVICES" \

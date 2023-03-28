@@ -37,7 +37,8 @@ if [ -z "$CUDA_VERSION" ]; then
 else
   conda install -y pytorch"$PYTORCH_VERSION" pytorch-cuda="$CUDA_VERSION" -c pytorch -c nvidia
   CPPYTHON=$(python -c "import sys; print('cp' + ''.join(str(s) for s in sys.version_info[:2]))")
-  conda install -c conda-forge faiss-gpu
+  # conda install -y -c conda-forge faiss-gpu
+  pip install faiss-gpu
 fi
 
 # install python requirements

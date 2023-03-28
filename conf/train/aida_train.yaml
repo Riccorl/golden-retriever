@@ -23,8 +23,8 @@ pl_trainer:
   max_steps: 100000
   deterministic: True
   fast_dev_run: False
-  precision: 32
-  ckpt_path: null
+  precision: 16
+  # ckpt_path: null
 
 # early stopping callback
 # "early_stopping_callback: null" will disable early stopping
@@ -47,7 +47,7 @@ model_checkpoint_callback:
 prediction_callbacks:
   - _target_: golden_retriever.callbacks.custom_callbacks.GoldenRetrieverPredictionCallback
     k: ${train.top_k}
-    batch_size: 256
+    batch_size: 512
     use_faiss: False
     move_index_to_cpu: False
     other_callbacks:
@@ -63,13 +63,13 @@ prediction_callbacks:
 
   - _target_: golden_retriever.callbacks.custom_callbacks.NegativeAugmentationCallback
     k: ${train.top_k}
-    batch_size: 256
+    batch_size: 512
     stages: [ validate ]
     metric_to_monitor: validate_recall@${train.top_k}
     threshold: 0.0
-    max_negatives: 5
+    max_negatives: 3
     refresh_every_n_epochs: 1
-    other_callbacks:
-      - _target_: golden_retriever.callbacks.utils_callbacks.FreeUpIndexerVRAMCallback
+    # other_callbacks:
+    #   - _target_: golden_retriever.callbacks.utils_callbacks.FreeUpIndexerVRAMCallback
 
   - _target_: golden_retriever.callbacks.utils_callbacks.ShuffleTrainDatasetCallback
