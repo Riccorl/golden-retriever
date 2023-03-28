@@ -10,5 +10,9 @@ datasets
 black[d]
 
 # Optional dependencies
+# onnx GPU
 optimum[onnxruntime-gpu]>=1.7,<1.8; platform_system == "Linux" # needed by: onnx-gpu
+termcolor # needed by: onnx-gpu
+# onnx CPU
 optimum[onnxruntime]>=1.7,<1.8 # needed by: onnx
+termcolor # needed by: onnx
