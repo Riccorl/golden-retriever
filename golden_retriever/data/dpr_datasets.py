@@ -10,9 +10,9 @@ import torch
 import transformers as tr
 from datasets import load_dataset
 
-from golden_retriever.data.datasets import GenerativeDataset, BaseDataset
 from golden_retriever.common.logging import get_console_logger
 from golden_retriever.common.model_inputs import ModelInputs
+from golden_retriever.data.datasets import GenerativeDataset, BaseDataset
 from golden_retriever.data.labels import Labels
 from golden_retriever.data.sampler import NegativeSampler
 
@@ -334,6 +334,7 @@ class DPRIterableDataset(GenerativeDataset, DPRMixin):
         path: Union[str, os.PathLike, List[str], List[os.PathLike]],
         shuffle: bool = False,
         max_contexts_per_batch: int = 32,
+        max_questions_per_batch: int = 32,
         max_contexts: int = 64,
         max_positives: int = 1,
         max_negatives: int = 0,
@@ -354,6 +355,7 @@ class DPRIterableDataset(GenerativeDataset, DPRMixin):
             **kwargs,
         )
         self.max_contexts_per_batch = max_contexts_per_batch
+        self.max_questions_per_batch = max_questions_per_batch
         self.max_contexts = max_contexts
         self.max_positives = max_positives
         self.max_negatives = max_negatives
@@ -409,7 +411,18 @@ class DPRIterableDataset(GenerativeDataset, DPRMixin):
         contexts_in_batch = set()
         for sample in self.data:
             if len(contexts_in_batch) >= self.max_contexts_per_batch:
-                yield self.collate_fn(batch)
+                collated_batch = self.collate_fn(batch)
+                if (
+                    len(collated_batch.questions.input_ids)
+                    >= self.max_questions_per_batch
+                ):
+                    splitted_batches = self.split_batch(
+                        collated_batch, self.max_questions_per_batch
+                    )
+                    for splitted_batch in splitted_batches:
+                        yield splitted_batch
+                else:
+                    yield collated_batch
                 batch = []
                 contexts_in_batch = set()
             batch.append(sample)
@@ -433,6 +446,60 @@ class DPRIterableDataset(GenerativeDataset, DPRMixin):
         # drop last cause might be too short and result in issues (nan if we are using amp)
         if not self.drop_last_batch and len(batch) > 0:
             yield self.collate_fn(batch)
+
+    @staticmethod
+    def split_batch(
+        batch: Union[Dict[str, Any], ModelInputs], max_questions_per_batch: int
+    ) -> List[ModelInputs]:
+        """
+        Split a batch into multiple batches of size `max_questions_per_batch` while keeping
+        the same number of contexts.
+        """
+        # the batch should contain the following data:
+        # {
+        #     "questions": {
+        #       "input_ids": torch.Tensor,
+        #       "attention_mask": torch.Tensor,
+        #       "token_type_ids": torch.Tensor,
+        #     },
+        #     "contexts": {
+        #       "input_ids": torch.Tensor,
+        #       "attention_mask": torch.Tensor,
+        #       "token_type_ids": torch.Tensor,
+        #     },
+        #     "labels": torch.Tensor,
+        #     "positives": Set,
+        #     "sample_idx": List,
+        # }
+        # we want to split the questions, the labels and the sample_idx
+        # we want to keep the same number of contexts and positives
+
+        # split the questions
+        questions = batch.questions
+        questions = {
+            key: torch.split(value, max_questions_per_batch, dim=0)
+            for key, value in questions.items()
+        }
+        # split the labels
+        labels = torch.split(batch.labels, max_questions_per_batch, dim=0)
+        # chunk the sample_idx
+        sample_idx = batch.sample_idx
+        sample_idx = [
+            sample_idx[i : i + max_questions_per_batch]
+            for i in range(0, len(sample_idx), max_questions_per_batch)
+        ]
+        # create the new batches
+        new_batches = []
+        for i, (q, l, s) in enumerate(zip(questions["input_ids"], labels, sample_idx)):
+            new_batch = {
+                "questions": {key: value[i] for key, value in questions.items()},
+                "contexts": batch.contexts,
+                "labels": l,
+                "positives": batch.positives,
+                "sample_idx": s,
+            }
+            new_batches.append(ModelInputs(new_batch))
+        return new_batches
 
     def load(
         self,
@@ -542,6 +609,7 @@ class InBatchNegativesDPRIterableDataset(DPRIterableDataset, DPRMixin):
         path: Union[str, os.PathLike, List[str], List[os.PathLike]],
         shuffle: bool = False,
         max_contexts_per_batch: int = 64,
+        max_questions_per_batch: int = 64,
         max_contexts: int = -1,
         max_positives: int = -1,
         max_negatives: int = 0,
@@ -559,6 +627,7 @@ class InBatchNegativesDPRIterableDataset(DPRIterableDataset, DPRMixin):
             path,
             shuffle,
             max_contexts_per_batch,
+            max_questions_per_batch,
             max_contexts,
             max_positives,
             max_negatives,

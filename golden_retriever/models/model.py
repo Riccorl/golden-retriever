@@ -376,6 +376,7 @@ class GoldenRetriever(torch.nn.Module):
         attention_mask: Optional[torch.Tensor] = None,
         token_type_ids: Optional[torch.Tensor] = None,
         k: int = 5,
+        max_length: Optional[int] = None,
     ) -> Tuple[List[List[str]], List[List[int]]]:
         """
         Retrieve the contexts for the questions.
@@ -391,6 +392,8 @@ class GoldenRetriever(torch.nn.Module):
                 The token type ids of the questions.
             k (`int`):
                 The number of top contexts to retrieve.
+            max_length (`Optional[int]`):
+                The maximum length of the questions.
 
         Returns:
             `Tuple[List[List[str]], List[List[int]]]`: The retrieved contexts and their indices.
@@ -413,7 +416,7 @@ class GoldenRetriever(torch.nn.Module):
                     padding=True,
                     return_tensors="pt",
                     truncation=True,
-                    max_length=tokenizer.model_max_length,
+                    max_length=max_length or tokenizer.model_max_length,
                 )
             )
             model_inputs.to(next(self.parameters()).device)

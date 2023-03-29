@@ -6,6 +6,7 @@ from typing import List, Optional, Set, Union
 import pytorch_lightning as pl
 import torch
 from omegaconf import DictConfig
+from pytorch_lightning.trainer.states import RunningStage
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -14,9 +15,6 @@ from golden_retriever.common.logging import get_console_logger
 from golden_retriever.common.model_inputs import ModelInputs
 from golden_retriever.data.datasets import BaseDataset
 from golden_retriever.models.model import GoldenRetriever
-
-from pytorch_lightning.trainer.states import RunningStage
-
 
 logger = get_console_logger()
 

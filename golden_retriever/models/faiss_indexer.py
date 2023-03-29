@@ -1,6 +1,6 @@
+import math
 from typing import Union
 
-import math
 import numpy
 import torch
 
