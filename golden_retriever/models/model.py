@@ -126,6 +126,14 @@ class SentenceEncoder(torch.nn.Module):
         }
 
 
+class Swish(torch.nn.Module):
+    def __init__(self):
+        super(Swish, self).__init__()
+
+    def forward(self, x):
+        return x * torch.sigmoid(x)
+
+
 class GoldenRetriever(torch.nn.Module):
     def __init__(
         self,
@@ -152,13 +160,23 @@ class GoldenRetriever(torch.nn.Module):
         # projection layer
         self.projection_size = projection_size
         self.projection_dropout = projection_dropout
-        self.projection_module: Optional[torch.nn.Sequential] = None
+        self.question_projection: Optional[torch.nn.Sequential] = None
+        self.context_projection: Optional[torch.nn.Sequential] = None
         if projection_size is not None:
-            self.projection_module = torch.nn.Sequential(
+            self.question_projection = torch.nn.Sequential(
+                torch.nn.Linear(
+                    self.question_encoder.language_model.config.hidden_size,
+                    self.projection_size,
+                ),
+                Swish(),
+                torch.nn.Dropout(projection_dropout),
+            )
+            self.context_projection = torch.nn.Sequential(
                 torch.nn.Linear(
                     self.context_encoder.language_model.config.hidden_size,
-                    projection_size,
+                    self.projection_size,
                 ),
+                Swish(),
                 torch.nn.Dropout(projection_dropout),
             )
 
@@ -222,9 +240,9 @@ class GoldenRetriever(torch.nn.Module):
         if contexts_encodings is None:
             contexts_encodings = self.context_encoder(**contexts)
 
-        if self.projection_module is not None:
-            question_encodings = self.projection_module(question_encodings)
-            contexts_encodings = self.projection_module(contexts_encodings)
+        if self.question_projection is not None and self.context_projection is not None:
+            question_encodings = self.question_projection(question_encodings)
+            contexts_encodings = self.context_projection(contexts_encodings)
 
         if contexts_per_question is not None:
             # multiply each question encoding with a contexs_per_question encodings
