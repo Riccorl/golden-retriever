@@ -5,21 +5,21 @@ datamodule:
   tokenizer: ${model.language_model}
   datasets:
     train:
-      _target_: golden_retriever.data.datasets.SampledNegativesDPRDataset
+      _target_: golden_retriever.data.dpr_datasets.SampledNegativesDPRDataset
       name: 'train'
       contexts_path: ${data_overrides.contexts_path}
       max_contexts: ${data.max_contexts}
       path: ${data_overrides.train_path}
 
     val:
-      - _target_: golden_retriever.data.datasets.SampledNegativesDPRDataset
+      - _target_: golden_retriever.data.dpr_datasets.SampledNegativesDPRDataset
         name: 'val'
         contexts_path: ${data_overrides.contexts_path}
         max_contexts: ${data.max_contexts}
         path: ${data_overrides.val_path}
 
     test:
-      - _target_: golden_retriever.data.datasets.SampledNegativesDPRDataset
+      - _target_: golden_retriever.data.dpr_datasets.SampledNegativesDPRDataset
         name: 'test'
         contexts_path: ${data_overrides.contexts_path}
         max_contexts: ${data.max_contexts}

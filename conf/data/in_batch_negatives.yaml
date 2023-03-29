@@ -3,19 +3,19 @@ datamodule:
   tokenizer: ${model.language_model}
   datasets:
     train:
-      _target_: golden_retriever.data.datasets.InBatchNegativesDPRDataset
+      _target_: golden_retriever.data.dpr_datasets.InBatchNegativesDPRDataset
       name: 'train'
       contexts_path: ${data_overrides.contexts_path}
       path: ${data_overrides.train_path}
 
     val:
-      - _target_: golden_retriever.data.datasets.InBatchNegativesDPRDataset
+      - _target_: golden_retriever.data.dpr_datasets.InBatchNegativesDPRDataset
         name: 'val'
         contexts_path: ${data_overrides.contexts_path}
         path: ${data_overrides.val_path}
 
     test:
-      - _target_: golden_retriever.data.datasets.InBatchNegativesDPRDataset
+      - _target_: golden_retriever.data.dpr_datasets.InBatchNegativesDPRDataset
         name: 'test'
         contexts_path: ${data_overrides.contexts_path}
         path: ${data_overrides.test_path}

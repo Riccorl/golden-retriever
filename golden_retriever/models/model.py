@@ -407,13 +407,16 @@ class GoldenRetriever(torch.nn.Module):
             if isinstance(text, str):
                 text = [text]
             tokenizer = self.question_tokenizer
-            model_inputs = tokenizer(
-                text,
-                padding=True,
-                return_tensors="pt",
-                truncation=True,
-                max_length=tokenizer.model_max_length,
+            model_inputs = ModelInputs(
+                tokenizer(
+                    text,
+                    padding=True,
+                    return_tensors="pt",
+                    truncation=True,
+                    max_length=tokenizer.model_max_length,
+                )
             )
+            model_inputs.to(next(self.parameters()).device)
         else:
             model_inputs = ModelInputs({"input_ids": input_ids})
             if attention_mask is not None:
