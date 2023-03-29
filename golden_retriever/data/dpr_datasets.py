@@ -492,7 +492,9 @@ class DPRIterableDataset(GenerativeDataset, DPRMixin):
         new_batches = []
         for i, (q, l, s) in enumerate(zip(questions["input_ids"], labels, sample_idx)):
             new_batch = {
-                "questions": {key: value[i] for key, value in questions.items()},
+                "questions": ModelInputs(
+                    {key: value[i] for key, value in questions.items()}
+                ),
                 "contexts": batch.contexts,
                 "labels": l,
                 "positives": batch.positives,
