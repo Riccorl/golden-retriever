@@ -1,0 +1,29 @@
+max_contexts_per_batch: 128
+
+datamodule:
+  _target_: golden_retriever.data.pl_data_modules.PLDataModule
+  tokenizer: ${model.language_model}
+  datasets:
+    train:
+      _target_: golden_retriever.data.datasets.InBatchNegativesDPRIterableDataset
+      name: 'train'
+      contexts_path: ${data_overrides.contexts_path}
+      max_context_length: 64
+      max_contexts_per_batch: ${data.max_contexts_per_batch}
+      path: ${data_overrides.train_path}
+
+    val:
+      - _target_: golden_retriever.data.datasets.InBatchNegativesDPRIterableDataset
+        name: 'val'
+        contexts_path: ${data_overrides.contexts_path}
+        max_context_length: 64
+        max_contexts_per_batch: ${data.max_contexts_per_batch}
+        path: ${data_overrides.val_path}
+
+    test:
+      - _target_: golden_retriever.data.datasets.InBatchNegativesDPRIterableDataset
+        name: 'test'
+        contexts_path: ${data_overrides.contexts_path}
+        max_context_length: 64
+        max_contexts_per_batch: ${data.max_contexts_per_batch}
+        path: ${data_overrides.test_path}

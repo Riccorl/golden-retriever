@@ -45,7 +45,7 @@ class Labels:
         """
         if namespace not in self._labels_to_index:
             raise ValueError(
-                f"Provided namespace {namespace} is not in the label dictionary."
+                f"Provided namespace `{namespace}` is not in the label dictionary."
             )
 
         if label not in self._labels_to_index[namespace]:
@@ -68,11 +68,13 @@ class Labels:
         """
         if namespace not in self._index_to_labels:
             raise ValueError(
-                f"Provided namespace {namespace} is not in the label dictionary."
+                f"Provided namespace `{namespace}` is not in the label dictionary."
             )
 
         if index not in self._index_to_labels[namespace]:
-            raise ValueError(f"Provided label {index} is not in the label dictionary.")
+            raise ValueError(
+                f"Provided label `{index}` is not in the label dictionary."
+            )
 
         return self._index_to_labels[namespace][index]
 
@@ -159,7 +161,7 @@ class Labels:
         """
         if namespace not in self._labels_to_index:
             raise ValueError(
-                f"Provided namespace {namespace} is not in the label dictionary."
+                f"Provided namespace `{namespace}` is not in the label dictionary."
             )
         return len(self._labels_to_index[namespace])
 
@@ -178,6 +180,6 @@ class Labels:
             labels_to_index = json.load(f)
         return cls(labels_to_index, **kwargs)
 
-    def to_file(self, file_path: Union[str, Path, dict], **kwargs):
+    def save(self, file_path: Union[str, Path, dict], **kwargs):
         with open(file_path, "w") as f:
             json.dump(self._labels_to_index, f, indent=2)

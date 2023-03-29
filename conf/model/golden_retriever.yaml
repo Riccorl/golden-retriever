@@ -1,17 +1,17 @@
-language_model: "sentence-transformers/all-MiniLM-L6-v2"
+language_model: "sentence-transformers/all-MiniLM-L12-v2"
 
 pl_module:
-  _target_: models.pl_modules.GoldenRetrieverPLModule
+  _target_: golden_retriever.models.pl_modules.GoldenRetrieverPLModule
   model:
-    _target_: models.model.GoldenRetriever
+    _target_: golden_retriever.models.model.GoldenRetriever
     question_encoder:
-      _target_: models.model.SentenceEncoder
+      _target_: golden_retriever.models.model.SentenceEncoder
       language_model: ${model.language_model}
       pooling_strategy: "mean"
-    context_encoder: null
-      # _target_: models.model.SentenceEncoder
-      # language_model: ${model.language_model}
-      # pooling_strategy: "mean"
+    context_encoder:
+      _target_: golden_retriever.models.model.SentenceEncoder
+      language_model: ${model.language_model}
+      pooling_strategy: "mean"
     loss_type: ${loss}
   optimizer: ${optimizer}
   lr_scheduler: ${scheduler}

@@ -5,8 +5,8 @@ import pytorch_lightning as pl
 import torch
 from omegaconf import DictConfig
 
-from data.labels import Labels
-from utils.model_inputs import ModelInputs
+from golden_retriever.common.model_inputs import ModelInputs
+from golden_retriever.data.labels import Labels
 
 
 class GoldenRetrieverPLModule(pl.LightningModule):
@@ -100,3 +100,11 @@ class GoldenRetrieverPLModule(pl.LightningModule):
             "frequency": 1,
         }
         return [optimizer], [lr_scheduler_config]
+
+    # def lr_scheduler_step(self, scheduler, metric):
+    #     """
+    #     Workaround for UserWarning: Detected call of `lr_scheduler.step()` before `optimizer.step()`.
+    #     """
+    #     if self.should_skip_lr_scheduler_step:
+    #         return
+    #     scheduler.step()

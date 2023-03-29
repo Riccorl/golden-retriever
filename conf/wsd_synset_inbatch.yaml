@@ -3,26 +3,26 @@ hydra:
   run:
     dir: ./experiments/${model_name}/${now:%Y-%m-%d}/${now:%H-%M-%S}
 
-model_name: ${model.language_model}-sampled   # used to name the model in wandb
-project_name: golden-retriever-aida           # used to name the project in wandb
+model_name: ${model.language_model}-inbatch   # used to name the model in wandb
+project_name: golden-retriever-wsd           # used to name the project in wandb
 
 data_overrides:
-  contexts_path: "data/aida_dpr_special_tok/definitions.txt"
+  contexts_path: "data/dpr-like/wsd/lemma_all_lemmas/wordnet_definitions.txt"
   train_path:
-    - 'data/aida_dpr_special_tok/train.json'
+    - 'data/dpr-like/wsd/lemma_all_lemmas/train.jsonl'
   val_path:
-    - 'data/aida_dpr_special_tok/val.json'
+    - 'data/dpr-like/wsd/lemma_all_lemmas/validation.jsonl'
   test_path:
-    - 'data/aida_dpr_special_tok/test.json'
+    - 'data/dpr-like/wsd/lemma_all_lemmas/test.jsonl'
 
 defaults:
   - _self_
-  - train: aida_train
+  - train: wsd
   - model: golden_retriever
   - loss: nce_loss
   - optimizer: adamw
   - scheduler: linear_scheduler_with_warmup
-  - data: sampled_negatives
+  - data: iterable_in_batch_negatives
   - evaluation: default_evaluation
   - logging: wandb_logging
   - override hydra/job_logging: colorlog

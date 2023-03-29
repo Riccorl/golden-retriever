@@ -15,9 +15,9 @@ from pytorch_lightning.callbacks import (
 from pytorch_lightning.loggers import WandbLogger
 from rich.pretty import pprint
 
-from data.pl_data_modules import PLDataModule
-from models.pl_modules import GoldenRetrieverPLModule
-from utils.logging import get_console_logger
+from golden_retriever.common.logging import get_console_logger
+from golden_retriever.data.pl_data_modules import PLDataModule
+from golden_retriever.models.pl_modules import GoldenRetrieverPLModule
 
 logger = get_console_logger()
 
@@ -35,11 +35,12 @@ def train(conf: omegaconf.DictConfig) -> None:
         # Debuggers don't like GPUs nor multiprocessing
         # conf.train.pl_trainer.accelerator = "cpu"
         conf.train.pl_trainer.devices = 1
-        conf.train.pl_trainer.strategy = None
+        conf.train.pl_trainer.strategy = "auto"
         conf.train.pl_trainer.precision = 32
-        conf.data.datamodule.num_workers = {
-            k: 0 for k in conf.data.datamodule.num_workers
-        }
+        if "num_workers" in conf.data.datamodule:
+            conf.data.datamodule.num_workers = {
+                k: 0 for k in conf.data.datamodule.num_workers
+            }
         # Switch wandb to offline mode to prevent online logging
         conf.logging.log = None
         # remove model checkpoint callback
@@ -88,7 +89,9 @@ def train(conf: omegaconf.DictConfig) -> None:
         logger.log(f"Expected number of training steps: {num_training_steps}")
 
         if "lr_scheduler" in conf.model.pl_module and conf.model.pl_module.lr_scheduler:
-            conf.model.pl_module.lr_scheduler.num_training_steps = num_training_steps
+            conf.model.pl_module.lr_scheduler.num_training_steps = (
+                num_training_steps // conf.train.pl_trainer.accumulate_grad_batches
+            )
             # set the number of warmup steps as x% of the total number of training steps
             if conf.model.pl_module.lr_scheduler.num_warmup_steps is None:
                 if (
@@ -183,12 +186,12 @@ def train(conf: omegaconf.DictConfig) -> None:
             )
         logger.log(f"Loading best model from {best_model_path}")
         best_pl_module = GoldenRetrieverPLModule.load_from_checkpoint(best_model_path)
-        try:
-            best_pl_module = torch.compile(best_pl_module, backend="inductor")
-        except Exception as e:
-            logger.log(
-                f"Failed to compile the model, you may need to install PyTorch 2.0"
-            )
+        # try:
+        #     best_pl_module = torch.compile(best_pl_module, backend="inductor")
+        # except Exception as e:
+        #     logger.log(
+        #         f"Failed to compile the model, you may need to install PyTorch 2.0"
+        #     )
 
     # module test
     trainer.test(best_pl_module, datamodule=pl_data_module)

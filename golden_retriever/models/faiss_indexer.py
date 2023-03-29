@@ -1,10 +1,14 @@
-import math
 from typing import Union
 
-import faiss
-import faiss.contrib.torch_utils
+import math
 import numpy
 import torch
+
+from golden_retriever.common.utils import is_package_available
+
+if is_package_available("faiss"):
+    import faiss
+    import faiss.contrib.torch_utils
 
 
 class FaissIndexer:
@@ -12,7 +16,7 @@ class FaissIndexer:
         self,
         embeddings: Union[torch.Tensor, numpy.ndarray],
         index: str = "Flat",
-        metric: int = faiss.METRIC_INNER_PRODUCT,
+        metric: int = "faiss.METRIC_INNER_PRODUCT",
         normalize: bool = False,
         use_gpu: bool = False,
     ) -> None:
@@ -25,9 +29,9 @@ class FaissIndexer:
         if self.normalize:
             index = f"L2norm,{index}"
         faiss_vector_size = embeddings.shape[1]
-        index = index.replace("x", str(math.ceil(math.sqrt(faiss_vector_size)) * 4))
         if not self.use_gpu:
             index = index.replace("x,", "x_HNSW32,")
+        index = index.replace("x", str(math.ceil(math.sqrt(faiss_vector_size)) * 4))
         self.index = faiss.index_factory(faiss_vector_size, index, metric)
         # convert to GPU
         if self.use_gpu:

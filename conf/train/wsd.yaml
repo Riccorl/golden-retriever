@@ -3,12 +3,10 @@ seed: 42
 
 export: False
 float32_matmul_precision: "medium"
-set_determinism_the_old_way: False
 top_k: 100
 
 only_test: False
 
-# pl_trainer
 pl_trainer:
   _target_: pytorch_lightning.Trainer
   accelerator: gpu
@@ -18,36 +16,35 @@ pl_trainer:
   accumulate_grad_batches: 1
   gradient_clip_val: 1.0
   val_check_interval: 1.0 # you can specify an int "n" here => validation every "n" steps
-  check_val_every_n_epoch: 1
   max_epochs: 0
-  max_steps: 30000
-  deterministic: True
+  max_steps: 100_000
+  deterministic: warn
   fast_dev_run: False
   precision: 16
-  # ckpt_path: null
 
 # early stopping callback
 # "early_stopping_callback: null" will disable early stopping
 early_stopping_callback:
   _target_: pytorch_lightning.callbacks.EarlyStopping
-  monitor: validate_recall@${train.top_k}
+  monitor: val_recall@${train.top_k}
   mode: max
-  patience: 15
+  patience: 10
+
 # model_checkpoint_callback
 # "model_checkpoint_callback: null" will disable model checkpointing
 model_checkpoint_callback:
   _target_: pytorch_lightning.callbacks.ModelCheckpoint
-  monitor: validate_recall@${train.top_k}
+  monitor: val_recall@${train.top_k}
   mode: max
   verbose: True
   save_top_k: 1
-  filename: "checkpoint-validate_recall@${train.top_k}_{validate_recall@${train.top_k}:.4f}-epoch_{epoch:02d}"
+  filename: "checkpoint-val_recall@${train.top_k}_{val_recall@${train.top_k}:.4f}-epoch_{epoch:02d}"
   auto_insert_metric_name: False
 
 prediction_callbacks:
   - _target_: golden_retriever.callbacks.custom_callbacks.GoldenRetrieverPredictionCallback
     k: ${train.top_k}
-    batch_size: 512
+    batch_size: 256
     use_faiss: False
     move_index_to_cpu: False
     other_callbacks:
@@ -63,13 +60,13 @@ prediction_callbacks:
 
   - _target_: golden_retriever.callbacks.custom_callbacks.NegativeAugmentationCallback
     k: ${train.top_k}
-    batch_size: 512
-    stages: [ validate ]
-    metric_to_monitor: validate_recall@${train.top_k}
-    threshold: 0.0
-    max_negatives: 3
-    refresh_every_n_epochs: 1
-    # other_callbacks:
-    #   - _target_: golden_retriever.callbacks.utils_callbacks.FreeUpIndexerVRAMCallback
+    batch_size: 256
+    stages: [ val ]
+    metric_to_monitor: val_recall@${train.top_k}
+    threshold: 0.85
+    max_negatives: 2
+    refresh_every_n_epochs: 5
+    other_callbacks:
+      - _target_: golden_retriever.callbacks.utils_callbacks.FreeUpIndexerVRAMCallback
 
   - _target_: golden_retriever.callbacks.utils_callbacks.ShuffleTrainDatasetCallback
