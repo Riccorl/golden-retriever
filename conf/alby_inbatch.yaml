@@ -20,7 +20,7 @@ defaults:
   - train: aida_train
   - model: golden_retriever
   - loss: nce_loss
-  - optimizer: adamw
+  - optimizer: radam
   - scheduler: linear_scheduler_with_warmup
   - data: iterable_in_batch_negatives
   - evaluation: default_evaluation

@@ -20,7 +20,7 @@ pl_trainer:
   val_check_interval: 1.0 # you can specify an int "n" here => validation every "n" steps
   check_val_every_n_epoch: 1
   max_epochs: 0
-  max_steps: 30000
+  max_steps: 30_000
   deterministic: True
   fast_dev_run: False
   precision: 16
@@ -67,9 +67,7 @@ prediction_callbacks:
     stages: [ validate ]
     metric_to_monitor: validate_recall@${train.top_k}
     threshold: 0.0
-    max_negatives: 3
+    max_negatives: 5
     refresh_every_n_epochs: 1
-    # other_callbacks:
-    #   - _target_: golden_retriever.callbacks.utils_callbacks.FreeUpIndexerVRAMCallback
 
   - _target_: golden_retriever.callbacks.utils_callbacks.ShuffleTrainDatasetCallback

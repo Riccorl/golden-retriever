@@ -61,12 +61,10 @@ prediction_callbacks:
   - _target_: golden_retriever.callbacks.custom_callbacks.NegativeAugmentationCallback
     k: ${train.top_k}
     batch_size: 256
-    stages: [ val ]
+    stages: [ validate ]
     metric_to_monitor: val_recall@${train.top_k}
     threshold: 0.85
     max_negatives: 2
     refresh_every_n_epochs: 5
-    other_callbacks:
-      - _target_: golden_retriever.callbacks.utils_callbacks.FreeUpIndexerVRAMCallback
 
   - _target_: golden_retriever.callbacks.utils_callbacks.ShuffleTrainDatasetCallback

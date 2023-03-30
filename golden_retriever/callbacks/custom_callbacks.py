@@ -147,9 +147,9 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                     **batch.questions, k=self.k
                 )
                 # compute recall at k
-                for sample_idx, retrieved_index in enumerate(retrieved_indices):
+                for batch_idx, retrieved_index in enumerate(retrieved_indices):
                     # get the positive contexts
-                    gold_contexts = batch.positives[sample_idx]
+                    gold_contexts = batch.positives[batch_idx]
                     # get the index of the gold contexts in the retrieved contexts
                     gold_context_indices = [
                         retriever.get_index_from_context(context)
@@ -161,9 +161,9 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                     wrong_indices = set(retrieved_index) - set(gold_context_indices)
                     # add the predictions to the list
                     prediction_output = {
-                        "sample_idx": batch.sample_idx[sample_idx],
+                        "sample_idx": batch.sample_idx[batch_idx],
                         "gold": gold_contexts,
-                        "predictions": retrieved_contexts[sample_idx],
+                        "predictions": retrieved_contexts[batch_idx],
                         "correct": [
                             retriever.get_context_from_index(i) for i in correct_indices
                         ],
@@ -172,7 +172,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                         ],
                     }
                     if "id" in batch:
-                        prediction_output["id"] = batch.id[sample_idx]
+                        prediction_output["id"] = batch.id[batch_idx]
                     predictions.append(prediction_output)
             end = time.time()
             logger.log("Time to retrieve:", end - start)

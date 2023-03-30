@@ -1,4 +1,4 @@
-max_contexts_per_batch: 128
+max_contexts_per_batch: 400
 
 datamodule:
   _target_: golden_retriever.data.pl_data_modules.PLDataModule
