@@ -117,6 +117,8 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                 and stage == RunningStage.TESTING
             ):
                 retriever = retriever.from_pretrained(self.retriever_dir)
+                # set the retriever to eval mode if we are loading it from disk
+                retriever.eval()
 
             retriever.index(
                 contexts,

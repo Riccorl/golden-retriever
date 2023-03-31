@@ -125,7 +125,10 @@ def train(conf: omegaconf.DictConfig) -> None:
     if conf.logging.log:
         logger.log(f"Instantiating Wandb Logger")
         experiment_logger = hydra.utils.instantiate(conf.logging.wandb_arg)
-        experiment_logger.watch(pl_module, **conf.logging.watch)
+        if pl_module is not None:
+            # it may happen that the model is not instantiated if we are only testing
+            # in that case, we don't need to watch the model
+            experiment_logger.watch(pl_module, **conf.logging.watch)
         experiment_path = Path(experiment_logger.experiment.dir)
         # Store the YaML config separately into the wandb dir
         yaml_conf: str = OmegaConf.to_yaml(cfg=conf)

@@ -104,7 +104,6 @@ class SaveRetrieverCallback(pl.Callback):
         self,
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
-        checkpoint: Dict[str, Any],
         *args,
         **kwargs,
     ):
@@ -117,7 +116,7 @@ class SaveRetrieverCallback(pl.Callback):
                 retriever_folder = Path(self.saving_dir)
             else:
                 retriever_folder = Path(trainer.logger.experiment.dir) / "retriever"
-                retriever_folder.mkdir(exist_ok=True)
+            retriever_folder.mkdir(exist_ok=True, parents=True)
             if self.verbose:
                 logger.log(f"Saving retriever to {retriever_folder}")
             pl_module.model.save_pretrained(retriever_folder)
@@ -128,4 +127,9 @@ class SaveRetrieverCallback(pl.Callback):
         pl_module: pl.LightningModule,
         checkpoint: Dict[str, Any],
     ):
-        self(trainer, pl_module, checkpoint)
+        self(trainer, pl_module)
+
+    # def on_test_epoch_end(
+    #     self, trainer: "pl.Trainer", pl_module: "pl.LightningModule"
+    # ) -> None:
+    #     return self(trainer, pl_module)

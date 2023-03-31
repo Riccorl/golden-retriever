@@ -72,6 +72,68 @@ class TopKEvaluationCallback(NLPTemplateCallback):
         return metrics
 
 
+class AvgRankingEvaluationCallback(NLPTemplateCallback):
+    def __init__(
+        self,
+        k: int,
+        prefix: Optional[str] = None,
+        verbose: bool = True,
+        *args,
+        **kwargs,
+    ):
+        super().__init__()
+        self.k = k
+        self.prefix = prefix
+        self.verbose = verbose
+
+    @torch.no_grad()
+    def __call__(
+        self,
+        trainer: pl.Trainer,
+        pl_module: pl.LightningModule,
+        predictions: Dict,
+        *args,
+        **kwargs,
+    ) -> dict:
+        if self.verbose:
+            logger.log(f"Computing recall@{self.k}")
+
+        # metrics to return
+        metrics = {}
+
+        stage = trainer.state.stage
+        if stage not in DEFAULT_STAGES:
+            raise ValueError(
+                f"Stage {stage} not supported, only `validate` and `test` are supported."
+            )
+
+        for dataloader_idx, samples in predictions.items():
+            rankings = []
+            for sample in samples:
+                window_candidates = sample["predictions"][: self.k]
+                window_labels = sample["gold"]
+                for wl in window_labels:
+                    if wl in window_candidates:
+                        rankings.append(window_candidates.index(wl) + 1)
+
+            avg_ranking = sum(rankings) / len(rankings)
+            metrics[f"avg_ranking@{self.k}_{dataloader_idx}"] = avg_ranking
+        metrics[f"avg_ranking@{self.k}"] = sum(metrics.values()) / len(metrics)
+
+        if self.prefix is not None:
+            metrics = {f"{self.prefix}_{k}": v for k, v in metrics.items()}
+        else:
+            metrics = {f"{stage.value}_{k}": v for k, v in metrics.items()}
+        pl_module.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
+
+        if self.verbose:
+            logger.log(
+                f"AVG Ranking@{self.k} on {stage.value}: {metrics[f'{stage.value}_avg_ranking@{self.k}']}"
+            )
+
+        return metrics
+
+
 class NYTTopKEvaluationCallback(TopKEvaluationCallback):
     def __init__(
         self,

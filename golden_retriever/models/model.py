@@ -736,6 +736,7 @@ class GoldenRetriever(torch.nn.Module):
             `GoldenRetriever`: The retriever.
         """
 
+        logger.log(f"Loading retriever from {model_dir}")
         # get model stuff
         if device == "cpu":
             num_threads = os.getenv(
@@ -795,5 +796,6 @@ class GoldenRetriever(torch.nn.Module):
         else:
             model._context_embeddings = torch.load(index_vectors, map_location=device)
 
+        # move model to device
         model.to(device)
         return model
