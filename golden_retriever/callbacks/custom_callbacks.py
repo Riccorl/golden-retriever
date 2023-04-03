@@ -337,4 +337,20 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
         logger.log(f"Adding hard negatives to the dataset.")
         trainer.datamodule.train_dataset.add_fields_to_samples(update_dict)
 
+        # normalize predictions as in the original GoldenRetrieverPredictionCallback
+        predictions = {0: predictions}
         return predictions
+
+
+class SampleNegativesDatasetCallback(pl.Callback):
+    def __init__(self, seed: int = 42, verbose: bool = True) -> None:
+        super().__init__()
+        self.seed = seed
+        self.verbose = verbose
+
+    def on_validation_epoch_end(self, trainer: pl.Trainer, *args, **kwargs):
+        if self.verbose:
+            logger.log(f"Shuffling train dataset at epoch {trainer.current_epoch}")
+        trainer.datamodule.train_dataset.shuffle_data(
+            seed=self.seed + trainer.current_epoch
+        )

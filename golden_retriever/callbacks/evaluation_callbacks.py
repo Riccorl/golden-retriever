@@ -116,7 +116,7 @@ class AvgRankingEvaluationCallback(NLPTemplateCallback):
                     if wl in window_candidates:
                         rankings.append(window_candidates.index(wl) + 1)
 
-            avg_ranking = sum(rankings) / len(rankings)
+            avg_ranking = sum(rankings) / len(rankings) if len(rankings) > 0 else 0
             metrics[f"avg_ranking@{self.k}_{dataloader_idx}"] = avg_ranking
         metrics[f"avg_ranking@{self.k}"] = sum(metrics.values()) / len(metrics)
 
@@ -139,11 +139,10 @@ class NYTTopKEvaluationCallback(TopKEvaluationCallback):
         self,
         label_mapping: Dict[str, List[str]],
         k: int = 100,
-        batch_size: int = 32,
         *args,
         **kwargs,
     ):
-        super().__init__(k, batch_size, *args, **kwargs)
+        super().__init__(k, *args, **kwargs)
         self.label_mapping = label_mapping
         # invert the label mapping
         self.inverted_label_mapping = {

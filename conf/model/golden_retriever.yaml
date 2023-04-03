@@ -17,4 +17,4 @@ pl_module:
   optimizer: ${optimizer}
   lr_scheduler: ${scheduler}
   grouped_parameters: False
-  warmup_steps_ratio: 0.0
+  warmup_steps_ratio: 0.1

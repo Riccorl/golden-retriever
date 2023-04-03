@@ -81,8 +81,10 @@ class ShuffleTrainDatasetCallback(pl.Callback):
 
     def on_validation_epoch_end(self, trainer: pl.Trainer, *args, **kwargs):
         if self.verbose:
-            logger.log(f"Shuffling train dataset at epoch {trainer.current_epoch}")
-        trainer.datamodule.train_dataset.shuffle_data(
+            logger.log(
+                f"Sampling negatives for train dataset at epoch {trainer.current_epoch}"
+            )
+        trainer.datamodule.train_dataset.sample_dataset_negatives(
             seed=self.seed + trainer.current_epoch
         )
 

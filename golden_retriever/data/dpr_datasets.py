@@ -1,3 +1,4 @@
+import bisect
 import json
 import os
 import time
@@ -15,6 +16,9 @@ from golden_retriever.common.model_inputs import ModelInputs
 from golden_retriever.data.datasets import GenerativeDataset, BaseDataset
 from golden_retriever.data.labels import Labels
 from golden_retriever.data.sampler import NegativeSampler
+
+import random
+from numpy.random import choice
 
 logger = get_console_logger()
 
@@ -128,6 +132,24 @@ class DPRMixin:
         }
         return output
 
+    def sample_dataset_negatives(self, seed: int = 42):
+        """
+        Wrapper around _sample_dataset_negatives to use it
+        from external classes, like the callbacks.
+
+        Args:
+            seed (int, optional): Seed for the random number generator. Defaults to 42.
+        """
+        # seed numpy
+        np.random.seed(seed)
+        self.data = self._sample_dataset_negatives(
+            self.data,
+            self.tokenizer,
+            self.context_manager,
+            self.sample_by_frequency,
+            self.max_negatives_to_sample,
+        )
+
     def _sample_dataset_negatives(
         self,
         data,
@@ -157,7 +179,7 @@ class DPRMixin:
                 data, sampled_context_manager
             )
         else:
-            context_frequencies = None
+            context_frequencies = np.ones(context_manager.get_label_size())
             sampled_context_manager = context_manager
         sample_space_size = sampled_context_manager.get_label_size()
         logger.log(f"Sampling negative contexts from {sample_space_size} samples")
@@ -172,7 +194,7 @@ class DPRMixin:
                 max_negatives_to_sample=max_negatives_to_sample,
             ),
             keep_in_memory=True,
-            num_proc=psutil.cpu_count(),
+            num_proc=psutil.cpu_count(logical=False),
         )
         return data
 
@@ -190,38 +212,50 @@ class DPRMixin:
         Sample negatives and add them to the sample.
         """
 
-        # TODO: make faster sampling
-        negative_sampler = NegativeSampler(sample_space_size, context_frequencies)
-
         positives_contexts_ids = sample["positive_ctxs"]
         negative_contexts_ids = sample["negative_ctxs"]
         hard_negative_contexts_ids = sample["hard_negative_ctxs"]
+        # retrieved_hard_negatives = sample.get("retrieved_hard_negatives", [])
 
         positives = sample["positives"]
         positive_indices = [context_manager.get_index_from_label(p) for p in positives]
+        # put to 0 the frequency of the positive contexts
+        context_frequencies[positive_indices] = 0
+        # normalize the frequencies
+        context_frequencies = context_frequencies / np.sum(context_frequencies)
 
         actual_number_of_contexts = (
             len(positives_contexts_ids)
             + len(negative_contexts_ids)
             + len(hard_negative_contexts_ids)
+            # + len(retrieved_hard_negatives)
         )
+
+        population = [i for i in range(sample_space_size)]
 
         sampled_negative_contexts = []
         if max_negatives_to_sample > 0:
             if actual_number_of_contexts < max_negatives_to_sample:
                 remaining_contexts = max_negatives_to_sample - actual_number_of_contexts
-                sampled = negative_sampler(remaining_contexts, exclude=positive_indices)
-                sampled_negative_contexts += [
-                    context_manager.get_label_from_index(s) for s in sampled[0]
+                sampled = choice(
+                    population, remaining_contexts, p=context_frequencies, replace=False
+                )
+                sampled_negative_contexts = [
+                    context_manager.get_label_from_index(s) for s in sampled
                 ]
 
         sampled_negative_ids = [
             tokenizer(n, max_length=max_context_length, truncation=True)
             for n in sampled_negative_contexts
         ]
-        negative_contexts_ids += sampled_negative_ids
+        # sampled_negative_ids = tokenizer(
+        #     sampled_negative_contexts, max_length=max_context_length, truncation=True
+        # )
         context = (
-            positives_contexts_ids + negative_contexts_ids + hard_negative_contexts_ids
+            positives_contexts_ids
+            + negative_contexts_ids
+            + hard_negative_contexts_ids
+            + sampled_negative_ids
         )
         sample["context"] = context
         return sample
@@ -402,7 +436,7 @@ class DPRIterableDataset(GenerativeDataset, DPRMixin):
                 self.data,
                 self.tokenizer,
                 self.context_manager,
-                sample_by_frequency,
+                self.sample_by_frequency,
                 self.max_negatives_to_sample,
             )
 
@@ -496,7 +530,9 @@ class DPRIterableDataset(GenerativeDataset, DPRMixin):
         ]
         # create the new batches
         new_batches = []
-        for i, (q, l, s, p) in enumerate(zip(questions["input_ids"], labels, sample_idx, positives)):
+        for i, (q, l, s, p) in enumerate(
+            zip(questions["input_ids"], labels, sample_idx, positives)
+        ):
             new_batch = {
                 "questions": ModelInputs(
                     {key: value[i] for key, value in questions.items()}
@@ -864,34 +900,34 @@ class DPRDataset(BaseDataset, DPRMixin):
         )
         return data
 
-    def save_data(
-        self, path: Union[str, os.PathLike], remove_columns: Optional[List[str]] = None
-    ) -> None:
-        """
-        Save the samples to a file.
-
-        Args:
-            path (:obj:`str`):
-                Path to the file where to save the dataset.
-        """
-        samples = self.data.to_dict()
-        samples["question"] = self.tokenizer.batch_decode(
-            [question["input_ids"] for question in samples["question"]]
-        )
-
-        # remove columns if needed
-        if remove_columns is None:
-            remove_columns = []
-        for key in remove_columns:
-            if key in samples:
-                samples.pop(key)
-
-        with open(path, "w") as f:
-            for i in range(len(samples["question"])):
-                dump = {
-                    k: v[i] if isinstance(v, list) else v for k, v in samples.items()
-                }
-                json.dump(dump, f, indent=2)
+    # def save_data(
+    #     self, path: Union[str, os.PathLike], remove_columns: Optional[List[str]] = None
+    # ) -> None:
+    #     """
+    #     Save the samples to a file.
+    #
+    #     Args:
+    #         path (:obj:`str`):
+    #             Path to the file where to save the dataset.
+    #     """
+    #     samples = self.data.to_dict()
+    #     samples["question"] = self.tokenizer.batch_decode(
+    #         [question["input_ids"] for question in samples["question"]]
+    #     )
+    #
+    #     # remove columns if needed
+    #     if remove_columns is None:
+    #         remove_columns = []
+    #     for key in remove_columns:
+    #         if key in samples:
+    #             samples.pop(key)
+    #
+    #     with open(path, "w") as f:
+    #         for i in range(len(samples["question"])):
+    #             dump = {
+    #                 k: v[i] if isinstance(v, list) else v for k, v in samples.items()
+    #             }
+    #             json.dump(dump, f, indent=2)
 
 
 class InBatchNegativesDPRDataset(DPRDataset):
@@ -1006,7 +1042,7 @@ class SampledNegativesDPRDataset(DPRDataset):
         max_question_length: int = 256,
         max_context_length: int = 128,
         max_negatives_to_sample: int = 64,
-        sample_by_frequency: bool = True,
+        sample_by_frequency: bool = False,
         contexts_path: Union[str, os.PathLike] = None,
         tokenizer: Optional[Union[str, tr.PreTrainedTokenizer]] = None,
         **kwargs,

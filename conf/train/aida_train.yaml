@@ -15,7 +15,7 @@ pl_trainer:
   devices: 1
   num_nodes: 1
   strategy: auto
-  accumulate_grad_batches: 20
+  accumulate_grad_batches: 1
   gradient_clip_val: 1.0
   val_check_interval: 1.0 # you can specify an int "n" here => validation every "n" steps
   check_val_every_n_epoch: 1
@@ -79,3 +79,4 @@ prediction_callbacks:
       - _target_: golden_retriever.callbacks.utils_callbacks.FreeUpIndexerVRAMCallback
 
   - _target_: golden_retriever.callbacks.utils_callbacks.ShuffleTrainDatasetCallback
+  - _target_: golden_retriever.callbacks.custom_callbacks.SampleNegativesDatasetCallback
