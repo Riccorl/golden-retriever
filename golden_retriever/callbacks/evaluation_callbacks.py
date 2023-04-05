@@ -118,7 +118,10 @@ class AvgRankingEvaluationCallback(NLPTemplateCallback):
 
             avg_ranking = sum(rankings) / len(rankings) if len(rankings) > 0 else 0
             metrics[f"avg_ranking@{self.k}_{dataloader_idx}"] = avg_ranking
-        metrics[f"avg_ranking@{self.k}"] = sum(metrics.values()) / len(metrics)
+        if len(metrics) == 0:
+            metrics[f"avg_ranking@{self.k}"] = 0
+        else:
+            metrics[f"avg_ranking@{self.k}"] = sum(metrics.values()) / len(metrics)
 
         if self.prefix is not None:
             metrics = {f"{self.prefix}_{k}": v for k, v in metrics.items()}

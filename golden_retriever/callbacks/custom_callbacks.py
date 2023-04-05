@@ -106,7 +106,9 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
 
             # check if we need to reindex the contexts and
             # also if we need to load the retriever from disk
-            if self.retriever_dir is not None and trainer.current_epoch == 0:
+            if (self.retriever_dir is not None and trainer.current_epoch == 0) or (
+                self.retriever_dir is not None and stage == RunningStage.TESTING
+            ):
                 force_reindex = False
             else:
                 force_reindex = self.force_reindex
@@ -351,6 +353,6 @@ class SampleNegativesDatasetCallback(pl.Callback):
     def on_validation_epoch_end(self, trainer: pl.Trainer, *args, **kwargs):
         if self.verbose:
             logger.log(f"Shuffling train dataset at epoch {trainer.current_epoch}")
-        trainer.datamodule.train_dataset.shuffle_data(
+        trainer.datamodule.train_dataset.sample_dataset_negatives(
             seed=self.seed + trainer.current_epoch
         )

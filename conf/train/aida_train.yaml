@@ -20,19 +20,19 @@ pl_trainer:
   val_check_interval: 1.0 # you can specify an int "n" here => validation every "n" steps
   check_val_every_n_epoch: 1
   max_epochs: 0
-  max_steps: 100_000
+  max_steps: 50_000
   deterministic: True
   fast_dev_run: False
   precision: 16
   # ckpt_path: null
 
 # early stopping callback
-# "early_stopping_callback: null" will disable early stopping
-early_stopping_callback:
-  _target_: pytorch_lightning.callbacks.EarlyStopping
-  monitor: validate_recall@${train.top_k}
-  mode: max
-  patience: 15
+early_stopping_callback: null
+#early_stopping_callback:
+#  _target_: pytorch_lightning.callbacks.EarlyStopping
+#  monitor: validate_recall@${train.top_k}
+#  mode: max
+#  patience: 15
 # model_checkpoint_callback
 # "model_checkpoint_callback: null" will disable model checkpointing
 model_checkpoint_callback:
@@ -70,7 +70,7 @@ prediction_callbacks:
     stages: [validate]
     metric_to_monitor: validate_recall@${train.top_k}
     threshold: 0.0
-    max_negatives: 5
+    max_negatives: 15
     refresh_every_n_epochs: 1
     other_callbacks:
       - _target_: golden_retriever.callbacks.evaluation_callbacks.AvgRankingEvaluationCallback
@@ -79,4 +79,4 @@ prediction_callbacks:
       - _target_: golden_retriever.callbacks.utils_callbacks.FreeUpIndexerVRAMCallback
 
   - _target_: golden_retriever.callbacks.utils_callbacks.ShuffleTrainDatasetCallback
-  - _target_: golden_retriever.callbacks.custom_callbacks.SampleNegativesDatasetCallback
+#  - _target_: golden_retriever.callbacks.custom_callbacks.SampleNegativesDatasetCallback

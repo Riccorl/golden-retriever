@@ -89,9 +89,9 @@ def train(conf: omegaconf.DictConfig) -> None:
         logger.log(f"Expected number of training steps: {num_training_steps}")
 
         if "lr_scheduler" in conf.model.pl_module and conf.model.pl_module.lr_scheduler:
-            conf.model.pl_module.lr_scheduler.num_training_steps = (
-                num_training_steps // conf.train.pl_trainer.accumulate_grad_batches
-            )
+            # conf.model.pl_module.lr_scheduler.num_training_steps = (
+            #     num_training_steps // conf.train.pl_trainer.accumulate_grad_batches
+            # )
             # set the number of warmup steps as x% of the total number of training steps
             if conf.model.pl_module.lr_scheduler.num_warmup_steps is None:
                 if (

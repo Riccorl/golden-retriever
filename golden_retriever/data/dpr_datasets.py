@@ -258,6 +258,7 @@ class DPRMixin:
             + sampled_negative_ids
         )
         sample["context"] = context
+
         return sample
 
     @staticmethod

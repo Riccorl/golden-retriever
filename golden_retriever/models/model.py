@@ -157,6 +157,14 @@ class GoldenRetriever(torch.nn.Module):
         # context encoder model
         self.context_encoder = context_encoder
 
+        # normalization layer
+        # self.question_layer_norm = torch.nn.LayerNorm(
+        #     self.question_encoder.language_model.config.hidden_size
+        # )
+        # self.context_layer_norm = torch.nn.LayerNorm(
+        #     self.context_encoder.language_model.config.hidden_size
+        # )
+
         # projection layer
         self.projection_size = projection_size
         self.projection_dropout = projection_dropout
@@ -245,7 +253,7 @@ class GoldenRetriever(torch.nn.Module):
             contexts_encodings = self.context_projection(contexts_encodings)
 
         if contexts_per_question is not None:
-            # multiply each question encoding with a contexs_per_question encodings
+            # multiply each question encoding with a contexts_per_question encodings
             concatenated_contexts = torch.stack(
                 torch.split(contexts_encodings, contexts_per_question)
             ).transpose(1, 2)
@@ -282,11 +290,13 @@ class GoldenRetriever(torch.nn.Module):
 
         return output
 
+    @torch.no_grad()
     def index(
         self,
         contexts: List[str],
         batch_size: int = 32,
         num_workers: int = 0,
+        context_max_length: Optional[int] = None,
         collate_fn: Optional[Callable] = None,
         force_reindex: bool = False,
         use_faiss: bool = False,
@@ -303,6 +313,8 @@ class GoldenRetriever(torch.nn.Module):
                 The batch size to use for the indexing.
             num_workers (`int`):
                 The number of workers to use for the indexing.
+            context_max_length (`Optional[int]`):
+                The maximum length of the contexts.
             collate_fn (`Callable`):
                 The collate function to use for the indexing.
             force_reindex (`bool`):
@@ -320,15 +332,13 @@ class GoldenRetriever(torch.nn.Module):
         if collate_fn is None:
             tokenizer = self.context_tokenizer
             collate_fn = lambda x: ModelInputs(
-                {
-                    tokenizer(
-                        x,
-                        padding=True,
-                        return_tensors="pt",
-                        truncation=True,
-                        max_length=tokenizer.model_max_length,
-                    )
-                }
+                tokenizer(
+                    x,
+                    padding=True,
+                    return_tensors="pt",
+                    truncation=True,
+                    max_length=context_max_length or tokenizer.model_max_length,
+                )
             )
         dataloader = DataLoader(
             BaseDataset(name="context", data=contexts),
@@ -794,6 +804,7 @@ class GoldenRetriever(torch.nn.Module):
         if load_faiss_index:
             model._faiss_indexer = FaissIndexer.load(faiss_index_vectors)
         else:
+            logger.log("Loading index vectors")
             model._context_embeddings = torch.load(index_vectors, map_location=device)
 
         # move model to device

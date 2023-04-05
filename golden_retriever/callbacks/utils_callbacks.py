@@ -84,7 +84,7 @@ class ShuffleTrainDatasetCallback(pl.Callback):
             logger.log(
                 f"Sampling negatives for train dataset at epoch {trainer.current_epoch}"
             )
-        trainer.datamodule.train_dataset.sample_dataset_negatives(
+        trainer.datamodule.train_dataset.shuffle_data(
             seed=self.seed + trainer.current_epoch
         )
 
