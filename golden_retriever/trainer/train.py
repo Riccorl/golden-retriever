@@ -109,9 +109,13 @@ def train(conf: omegaconf.DictConfig) -> None:
             )
 
         logger.log(f"Instantiating the Model")
-        pl_module: GoldenRetrieverPLModule = hydra.utils.instantiate(
-            conf.model.pl_module, _recursive_=False
-        )
+        if 'ckpt_path' in conf.train and conf.train.ckpt_path is not None:
+            logger.log(f"Loading checkpoint from {conf.train.ckpt_path}")
+            pl_module = GoldenRetrieverPLModule.load_from_checkpoint(conf.train.ckpt_path)
+        else:
+            pl_module: GoldenRetrieverPLModule = hydra.utils.instantiate(
+                conf.model.pl_module, _recursive_=False
+            )
         # try:
         #     pl_module = torch.compile(pl_module, backend="inductor")
         # except Exception as e:
