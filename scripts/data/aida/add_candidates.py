@@ -1,29 +1,33 @@
 # Path: scripts/data/aida/add_candidates.py
-from golden_retriever import GoldenRetriever
+
+import argparse
 import json
+import os
+from typing import Union
+
+import torch
 import tqdm
 
-if __name__ == "__main__":
-    retriever = GoldenRetriever.from_pretrained(
-        "retrievers/minilm-l12-fullindex",
-        device="cuda:0",
-    )
-    data_path = "/root/golden-retriever-2/data/dpr-like/el/aida/testb_windowed_3.0.jsonl"
-    output_path = "/root/golden-retriever-2/data/dpr-like/el/aida/testb_windowed_candidates.jsonl"
-    # with open(output_path, "w") as f:
-    #     for line in open(data_path):
-    #         sample = json.loads(line)
-    #         candidates = retriever.retrieve(sample["doc_text"], k=100)
-    #         candidate_titles = [c.split(" <def> ", 1)[0] for c in candidates[0][0]]
-    #         sample["candidates"] = candidate_titles
-    #         f.write(json.dumps(sample) + "\n")
+from golden_retriever import GoldenRetriever
 
-    # let's do it batched
+
+@torch.no_grad()
+def add_candidates(
+    retriever_name_or_path: Union[str, os.PathLike],
+    input_path: Union[str, os.PathLike],
+    output_path: Union[str, os.PathLike],
+    batch_size: int = 512,
+    device: str = "cuda",
+):
+    retriever = GoldenRetriever.from_pretrained(
+        retriever_name_or_path,
+        device=device,
+    )
     retriever.eval()
-    batch_size = 32
+
     documents_batch = []
     with open(output_path, "w") as f:
-        for line in tqdm.tqdm(open(data_path)):
+        for line in tqdm.tqdm(open(input_path)):
             sample = json.loads(line)
             documents_batch.append(sample)
             if len(documents_batch) == batch_size:
@@ -44,3 +48,14 @@ if __name__ == "__main__":
                 candidate_titles = [c.split(" <def>", 1)[0] for c in candidates[0][i]]
                 sample["window_candidates"] = candidate_titles
                 f.write(json.dumps(sample) + "\n")
+
+
+if __name__ == "__main__":
+    arg_parser = argparse.ArgumentParser()
+    arg_parser.add_argument("--retriever_name_or_path", type=str, required=True)
+    arg_parser.add_argument("--input_path", type=str, required=True)
+    arg_parser.add_argument("--output_path", type=str, required=True)
+    arg_parser.add_argument("--batch_size", type=int, default=512)
+    arg_parser.add_argument("--device", type=str, default="cuda")
+
+    add_candidates(**vars(arg_parser.parse_args()))

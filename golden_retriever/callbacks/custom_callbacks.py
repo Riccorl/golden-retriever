@@ -22,7 +22,7 @@ logger = get_console_logger()
 class GoldenRetrieverPredictionCallback(PredictionCallback):
     def __init__(
         self,
-        k: int = 100,
+        k: Optional[int] = None,
         batch_size: int = 32,
         num_workers: int = 0,
         use_faiss: bool = False,
@@ -352,7 +352,7 @@ class SampleNegativesDatasetCallback(pl.Callback):
 
     def on_validation_epoch_end(self, trainer: pl.Trainer, *args, **kwargs):
         if self.verbose:
-            logger.log(f"Shuffling train dataset at epoch {trainer.current_epoch}")
+            f"Sampling negatives for train dataset at epoch {trainer.current_epoch}"
         trainer.datamodule.train_dataset.sample_dataset_negatives(
             seed=self.seed + trainer.current_epoch
         )

@@ -46,6 +46,7 @@ class SentenceEncoder(torch.nn.Module):
         pooling_strategy: str = "mean",
         load_ort_model: bool = False,
         freeze: bool = False,
+        config: Optional[Dict[str, Any]] = None,
         *args,
         **kwargs,
     ):
@@ -74,6 +75,17 @@ class SentenceEncoder(torch.nn.Module):
         self.pooling_strategy = pooling_strategy
         self.load_ort_model = load_ort_model
         self.freeze = freeze
+
+        # set the config
+        if config is None:
+            config = {
+                "_target_": f"{self.__class__.__module__}.{self.__class__.__name__}",
+                "language_model": self.language_model_name,
+                "pooling_strategy": self.pooling_strategy,
+                "load_ort_model": self.load_ort_model,
+                "freeze": self.freeze,
+            }
+        self.config = config
 
     def forward(
         self,
@@ -117,13 +129,17 @@ class SentenceEncoder(torch.nn.Module):
         Returns:
             `Dict[str, Any]`: The configuration of the model.
         """
-        return {
-            "_target_": f"{self.__class__.__module__}.{self.__class__.__name__}",
-            "language_model": self.language_model_name,
-            "pooling_strategy": self.pooling_strategy,
-            "load_ort_model": self.load_ort_model,
-            "freeze": self.freeze,
-        }
+        return self._config
+
+    @config.setter
+    def config(self, config: Dict[str, Any]):
+        """
+        Set the configuration of the model.
+
+        Args:
+            config (`Dict[str, Any]`): The configuration of the model.
+        """
+        self._config = config
 
 
 class Swish(torch.nn.Module):
@@ -143,6 +159,7 @@ class GoldenRetriever(torch.nn.Module):
         projection_size: Optional[int] = None,
         projection_dropout: float = 0.1,
         context_index: Optional[Labels] = None,
+        layer_norm: bool = False,
         *args,
         **kwargs,
     ):
@@ -154,16 +171,22 @@ class GoldenRetriever(torch.nn.Module):
             # if no context encoder is provided,
             # share the weights of the question encoder
             context_encoder = question_encoder
+            # set the context encoder config to None since it should not be saved
+            context_encoder.config = None
         # context encoder model
         self.context_encoder = context_encoder
 
         # normalization layer
-        # self.question_layer_norm = torch.nn.LayerNorm(
-        #     self.question_encoder.language_model.config.hidden_size
-        # )
-        # self.context_layer_norm = torch.nn.LayerNorm(
-        #     self.context_encoder.language_model.config.hidden_size
-        # )
+        self.layer_norm = layer_norm
+        self.question_layer_norm: Optional[torch.nn.LayerNorm] = None
+        self.context_layer_norm: Optional[torch.nn.LayerNorm] = None
+        if layer_norm:
+            self.question_layer_norm = torch.nn.LayerNorm(
+                self.question_encoder.language_model.config.hidden_size
+            )
+            self.context_layer_norm = torch.nn.LayerNorm(
+                self.context_encoder.language_model.config.hidden_size
+            )
 
         # projection layer
         self.projection_size = projection_size
@@ -247,6 +270,11 @@ class GoldenRetriever(torch.nn.Module):
             question_encodings = self.question_encoder(**questions)
         if contexts_encodings is None:
             contexts_encodings = self.context_encoder(**contexts)
+
+        if self.question_layer_norm:
+            question_encodings = self.question_layer_norm(question_encodings)
+        if self.context_layer_norm:
+            contexts_encodings = self.context_layer_norm(contexts_encodings)
 
         if self.question_projection is not None and self.context_projection is not None:
             question_encodings = self.question_projection(question_encodings)
@@ -385,7 +413,7 @@ class GoldenRetriever(torch.nn.Module):
         input_ids: Optional[torch.Tensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
         token_type_ids: Optional[torch.Tensor] = None,
-        k: int = 5,
+        k: Optional[int] = None,
         max_length: Optional[int] = None,
     ) -> Tuple[List[List[str]], List[List[int]]]:
         """
@@ -416,6 +444,10 @@ class GoldenRetriever(torch.nn.Module):
             raise ValueError(
                 "Either `text` or `input_ids` must be provided to retrieve the contexts."
             )
+
+        if k is None:
+            k = self._context_embeddings.size(0)
+
         if text is not None:
             if isinstance(text, str):
                 text = [text]
@@ -659,6 +691,7 @@ class GoldenRetriever(torch.nn.Module):
             },
             "projection_size": self.projection_size,
             "projection_dropout": self.projection_dropout,
+            "layer_norm": self.layer_norm,
             # context_index is not saved because it might be too large
             "context_index": None,
         }
@@ -691,7 +724,8 @@ class GoldenRetriever(torch.nn.Module):
         # override the from_pretrained parameter of the encoders
         # we don't want to load the pretrained weights from HF Hub when loading the retriever
         config["question_encoder"]["from_pretrained"] = False
-        config["context_encoder"]["from_pretrained"] = False
+        if config["context_encoder"] is not None:
+            config["context_encoder"]["from_pretrained"] = False
         # save the config using OmegaConf
         OmegaConf.save(config, output_dir / CONFIG_NAME)
 

@@ -15,6 +15,7 @@ class TopKEvaluationCallback(NLPTemplateCallback):
         k: int = 100,
         prefix: Optional[str] = None,
         verbose: bool = False,
+        prog_bar: bool = True,
         *args,
         **kwargs,
     ):
@@ -22,6 +23,7 @@ class TopKEvaluationCallback(NLPTemplateCallback):
         self.k = k
         self.prefix = prefix
         self.verbose = verbose
+        self.prog_bar = prog_bar
 
     @torch.no_grad()
     def __call__(
@@ -62,7 +64,9 @@ class TopKEvaluationCallback(NLPTemplateCallback):
             metrics = {f"{self.prefix}_{k}": v for k, v in metrics.items()}
         else:
             metrics = {f"{stage.value}_{k}": v for k, v in metrics.items()}
-        pl_module.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
+        pl_module.log_dict(
+            metrics, on_step=False, on_epoch=True, prog_bar=self.prog_bar
+        )
 
         if self.verbose:
             logger.log(
@@ -127,7 +131,7 @@ class AvgRankingEvaluationCallback(NLPTemplateCallback):
             metrics = {f"{self.prefix}_{k}": v for k, v in metrics.items()}
         else:
             metrics = {f"{stage.value}_{k}": v for k, v in metrics.items()}
-        pl_module.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
+        pl_module.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=False)
 
         if self.verbose:
             logger.log(

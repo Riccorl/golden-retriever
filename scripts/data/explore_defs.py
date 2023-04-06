@@ -24,8 +24,10 @@ import json
 definitions_dpr_sets = set()
 definitions_titles_sets = set()
 
-for data_set in ['train', 'val', 'test']:
-    with open(f"/root/golden-retriever/data/aida_dpr_special_tok/{data_set}.json", "r") as f:
+for data_set in ["train", "val", "test"]:
+    with open(
+        f"/root/golden-retriever/data/aida_dpr_special_tok/{data_set}.json", "r"
+    ) as f:
         data = json.load(f)
         for line in data:
             # line_data = json.loads(line)
@@ -33,7 +35,7 @@ for data_set in ['train', 'val', 'test']:
                 definitions_dpr_sets.add(definition["text"])
                 definitions_titles_sets.add(definition["title"])
 
-#check if they are present in the whole index
+# check if they are present in the whole index
 total_titles = set()
 total_dpr = set()
 with open("/root/golden-retriever/data/aida_dpr_special_tok/definitions.txt") as f:
@@ -44,10 +46,14 @@ with open("/root/golden-retriever/data/aida_dpr_special_tok/definitions.txt") as
 print(len(total_dpr))
 print(len(total_titles))
 
-print("intersection definitions_titles and total_titles", len(definitions_titles_sets.intersection(total_titles)))
-print("intersection definitions_dpr_sets and total_dpr", len(definitions_dpr_sets.intersection(total_dpr)))
+print(
+    "intersection definitions_titles and total_titles",
+    len(definitions_titles_sets.intersection(total_titles)),
+)
+print(
+    "intersection definitions_dpr_sets and total_dpr",
+    len(definitions_dpr_sets.intersection(total_dpr)),
+)
 
 print(definitions_titles_sets.difference(total_titles))
 # print missing definitions in dpr
-
-

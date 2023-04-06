@@ -1,13 +1,12 @@
 import argparse
-import json
 import os
 from pathlib import Path
 from typing import Union
+
 import torch
 
-import tqdm
-
 from golden_retriever import GoldenRetriever
+
 
 @torch.no_grad()
 def build_index(

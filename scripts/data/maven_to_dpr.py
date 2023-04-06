@@ -61,12 +61,12 @@ def maven_to_dpr(
                         "passage_id": f"{event['id']}",
                     }
                 )
-            
+
             if len(positive_ctxs) == 0:
                 continue
 
             # remove duplicates
-            positive_ctxs = list({v['text']:v for v in positive_ctxs}.values())
+            positive_ctxs = list({v["text"]: v for v in positive_ctxs}.values())
             dpr.append(
                 {
                     "id": f"{d_idx}_{s_idx}",

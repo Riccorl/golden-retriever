@@ -20,7 +20,7 @@ if __name__ == "__main__":
         for sample in data:
             for positive in sample["positive_ctxs"]:
                 data_definitons.add(positive["text"].strip())
-    
+
     random_def = random.sample(definitions, 1_000_000)
 
     # merge the two

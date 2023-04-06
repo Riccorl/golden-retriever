@@ -101,6 +101,7 @@ def conll_2012_to_dpr(
         json.dump(dpr, f, indent=2)
     return dpr
 
+
 def conll_2012_to_dpr_pairs(
     conll_path: Union[str, os.PathLike],
     output_path: Union[str, os.PathLike],
@@ -152,7 +153,9 @@ def conll_2012_to_dpr_pairs(
             else:
                 title = annotation["predicate"] + "."
             if merged_role_definitions:
-                predicate_definition = predicate_definition + ". " + merged_role_definitions + "."
+                predicate_definition = (
+                    predicate_definition + ". " + merged_role_definitions + "."
+                )
             else:
                 predicate_definition = predicate_definition + "."
             positive_ctxs.append(
@@ -199,7 +202,6 @@ def conll_2012_to_dpr_pairs(
     with open(output_path, "w") as f:
         json.dump(dpr, f, indent=2)
     return dpr
-
 
 
 if __name__ == "__main__":

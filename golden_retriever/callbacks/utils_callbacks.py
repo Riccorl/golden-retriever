@@ -82,7 +82,7 @@ class ShuffleTrainDatasetCallback(pl.Callback):
     def on_validation_epoch_end(self, trainer: pl.Trainer, *args, **kwargs):
         if self.verbose:
             logger.log(
-                f"Sampling negatives for train dataset at epoch {trainer.current_epoch}"
+                f"Shuffling train dataset at epoch {trainer.current_epoch}"
             )
         trainer.datamodule.train_dataset.shuffle_data(
             seed=self.seed + trainer.current_epoch
@@ -130,8 +130,3 @@ class SaveRetrieverCallback(pl.Callback):
         checkpoint: Dict[str, Any],
     ):
         self(trainer, pl_module)
-
-    # def on_test_epoch_end(
-    #     self, trainer: "pl.Trainer", pl_module: "pl.LightningModule"
-    # ) -> None:
-    #     return self(trainer, pl_module)

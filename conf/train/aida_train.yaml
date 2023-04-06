@@ -57,6 +57,7 @@ prediction_callbacks:
       - _target_: golden_retriever.callbacks.evaluation_callbacks.TopKEvaluationCallback
         k: 50
         verbose: True
+        prog_bar: False
       - _target_: golden_retriever.callbacks.evaluation_callbacks.AvgRankingEvaluationCallback
         k: ${train.top_k}
         verbose: True

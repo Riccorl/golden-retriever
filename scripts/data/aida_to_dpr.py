@@ -24,7 +24,9 @@ def aida_to_dpr(
         with open(definitions_path, "r") as f:
             for line in f:
                 line_data = json.loads(line)
-                definitions[line_data["title"]] = line_data["title"] + " <def> " + line_data["text"]
+                definitions[line_data["title"]] = (
+                    line_data["title"] + " <def> " + line_data["text"]
+                )
                 f_def.write(line_data["title"] + " <def> " + line_data["text"] + "\n")
             # tokenizer.decode(line_data["text_ids"])
             # definitions[line_data["title"]].replace("[unused2]", ": ")
