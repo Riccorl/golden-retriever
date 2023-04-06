@@ -19,10 +19,7 @@ def add_candidates(
     batch_size: int = 512,
     device: str = "cuda",
 ):
-    retriever = GoldenRetriever.from_pretrained(
-        retriever_name_or_path,
-        device=device,
-    )
+    retriever = GoldenRetriever.from_pretrained(retriever_name_or_path, device=device)
     retriever.eval()
 
     documents_batch = []

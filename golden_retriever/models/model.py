@@ -696,7 +696,11 @@ class GoldenRetriever(torch.nn.Module):
             "context_index": None,
         }
 
-    def save_pretrained(self, output_dir: str, config: Optional[Dict[str, Any]] = None):
+    def save_pretrained(
+        self,
+        output_dir: Union[str, os.PathLike],
+        config: Optional[Dict[str, Any]] = None,
+    ):
         """
         Save the retriever to a directory.
 

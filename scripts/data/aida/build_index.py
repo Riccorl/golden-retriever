@@ -14,6 +14,7 @@ def build_index(
     candidates_path: Union[str, os.PathLike],
     output_path: Union[str, os.PathLike],
     batch_size: int = 512,
+    context_max_length: int = 64,
     device: str = "cuda",
 ):
     retriever = GoldenRetriever.from_pretrained(
@@ -31,7 +32,7 @@ def build_index(
         candidates,
         batch_size=batch_size,
         force_reindex=True,
-        context_max_length=64,
+        context_max_length=context_max_length,
         move_index_to_cpu=True,
     )
 
@@ -46,6 +47,7 @@ if __name__ == "__main__":
     arg_parser.add_argument("--candidates_path", type=str, required=True)
     arg_parser.add_argument("--output_path", type=str, required=True)
     arg_parser.add_argument("--batch_size", type=int, default=512)
+    arg_parser.add_argument("--context_max_length", type=int, default=64)
     arg_parser.add_argument("--device", type=str, default="cuda")
 
     build_index(**vars(arg_parser.parse_args()))
