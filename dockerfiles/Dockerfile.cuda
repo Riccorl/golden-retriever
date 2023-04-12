@@ -5,7 +5,6 @@ ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
     && apt-get install \
     curl wget python3.10 \
-    python3.10-distutils \
     python3-pip \
     curl wget -y \
     && rm -rf /var/lib/apt/lists/*
