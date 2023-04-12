@@ -17,12 +17,12 @@ ENV DEVICE="cuda"
 COPY ./gpu-requirements.txt ./requirements.txt
 COPY ./golden_retriever /golden_retriever
 COPY ./scripts/serve /serve
-RUN mkdir -p /app/resources/model \
+RUN mkdir -p /golden_retriever/resources/model \
     && pip install --upgrade --no-cache-dir -r requirements.txt \
     && pip install --upgrade --no-cache-dir click==7.1.2 \
-    && chmod +x /start.sh && chmod +x /start-reload.sh
+    && chmod +x /serve/start.sh && chmod +x /serve/start-reload.sh
 ARG MODEL_PATH
-COPY ${MODEL_PATH}/* /app/resources/model/
+COPY ${MODEL_PATH}/* /golden_retriever/resources/model/
 
 WORKDIR /golden_retriever
 
@@ -30,6 +30,6 @@ ENV PYTHONPATH=/golden_retriever
 
 EXPOSE 80
 
-# Run the start script, it will check for an /app/prestart.sh script (e.g. for migrations)
+# Run the start script, it will check for an /golden_retriever/prestart.sh script (e.g. for migrations)
 # And then will start Gunicorn with Uvicorn
 CMD ["/start.sh"]

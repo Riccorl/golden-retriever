@@ -1,0 +1,13 @@
+FROM tiangolo/uvicorn-gunicorn:python3.9-slim
+
+# Copy and install requirements.txt
+COPY ./requirements.txt ./requirements.txt
+COPY ./golden_retriever /golden_retriever
+COPY ./scripts/serve /serve
+RUN mkdir -p /golden_retriever/resources/model \
+    && pip install --no-cache-dir -r requirements.txt \
+    && chmod +x /serve/start.sh && chmod +x /serve/start-reload.sh
+ARG MODEL_PATH
+COPY ${MODEL_PATH}/* /golden_retriever/resources/model/
+
+ENV APP_MODULE=golden_retriever.serve.app:app
