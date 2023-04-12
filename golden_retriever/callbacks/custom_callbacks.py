@@ -66,9 +66,11 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         # get the tokenizer
         tokenizer = trainer.datamodule.tokenizer
 
-        datasets, dataloaders = self._get_datasets_and_dataloaders(
-            self.datasets or datasets,
-            self.dataloaders or dataloaders,
+        self.datasets = datasets or self.datasets
+        self.dataloaders = dataloaders or self.dataloaders
+        self.datasets, self.dataloaders = self._get_datasets_and_dataloaders(
+            self.datasets,
+            self.dataloaders,
             trainer,
             dataloader_kwargs={
                 "batch_size": self.batch_size,
@@ -87,8 +89,8 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         # here we will store the samples with predictions for each dataloader
         dataloader_predictions = {}
         # compute the context embeddings index for each dataloader
-        for dataloader_idx, dataloader in enumerate(dataloaders):
-            current_dataset: BaseDataset = datasets[dataloader_idx]
+        for dataloader_idx, dataloader in enumerate(self.dataloaders):
+            current_dataset: BaseDataset = self.datasets[dataloader_idx]
             logger.log(
                 f"Computing context embeddings for dataset {current_dataset.name}"
             )

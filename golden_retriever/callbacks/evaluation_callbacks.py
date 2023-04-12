@@ -126,16 +126,14 @@ class AvgRankingEvaluationCallback(NLPTemplateCallback):
             metrics[f"avg_ranking@{self.k}"] = 0
         else:
             metrics[f"avg_ranking@{self.k}"] = sum(metrics.values()) / len(metrics)
-
-        if self.prefix is not None:
-            metrics = {f"{self.prefix}_{k}": v for k, v in metrics.items()}
-        else:
-            metrics = {f"{stage.value}_{k}": v for k, v in metrics.items()}
+        
+        prefix = self.prefix or stage.value
+        metrics = {f"{prefix}_{k}": v for k, v in metrics.items()}
         pl_module.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=False)
 
         if self.verbose:
             logger.log(
-                f"AVG Ranking@{self.k} on {stage.value}: {metrics[f'{stage.value}_avg_ranking@{self.k}']}"
+                f"AVG Ranking@{self.k} on {prefix}: {metrics[f'{prefix}_avg_ranking@{self.k}']}"
             )
 
         return metrics
