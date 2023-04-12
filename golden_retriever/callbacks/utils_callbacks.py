@@ -37,27 +37,35 @@ class SavePredictionsCallback(NLPTemplateCallback):
         # write the predictions to a file inside the experiment folder
         if self.saving_dir is None and trainer.logger is None:
             logger.log(
-                "You need to specify an output directory (`saving_dir`) or a logger to save the predictions."
+                "You need to specify an output directory (`saving_dir`) or a logger to save the predictions.\n"
+                "Skipping saving predictions."
             )
-        else:
-            datasets = callback.datasets
-            for dataloader_idx, predictions in predictions.items():
-                # save to file
-                if self.saving_dir is not None:
-                    prediction_folder = Path(self.saving_dir)
-                else:
+            return
+        datasets = callback.datasets
+        for dataloader_idx, predictions in predictions.items():
+            # save to file
+            if self.saving_dir is not None:
+                prediction_folder = Path(self.saving_dir)
+            else:
+                try:
                     prediction_folder = (
                         Path(trainer.logger.experiment.dir) / "predictions"
                     )
-                    prediction_folder.mkdir(exist_ok=True)
-                predictions_path = (
-                    prediction_folder
-                    / f"{datasets[dataloader_idx].name}_{dataloader_idx}.json"
-                )
-                if self.verbose:
-                    logger.log(f"Saving predictions to {predictions_path}")
-                with open(predictions_path, "w") as f:
-                    json.dump(predictions, f, indent=2)
+                except:
+                    logger.log(
+                        "You need to specify an output directory (`saving_dir`) or a logger to save the predictions.\n"
+                        "Skipping saving predictions."
+                    )
+                    return
+                prediction_folder.mkdir(exist_ok=True)
+            predictions_path = (
+                prediction_folder
+                / f"{datasets[dataloader_idx].name}_{dataloader_idx}.json"
+            )
+            if self.verbose:
+                logger.log(f"Saving predictions to {predictions_path}")
+            with open(predictions_path, "w") as f:
+                json.dump(predictions, f, indent=2)
 
 
 class FreeUpIndexerVRAMCallback(NLPTemplateCallback):
@@ -120,17 +128,25 @@ class SaveRetrieverCallback(pl.Callback):
     ):
         if self.saving_dir is None and trainer.logger is None:
             logger.log(
-                "You need to specify an output directory (`saving_dir`) or a logger to save the retriever."
+                "You need to specify an output directory (`saving_dir`) or a logger to save the retriever.\n"
+                "Skipping saving retriever."
             )
+            return
+        if self.saving_dir is not None:
+            retriever_folder = Path(self.saving_dir)
         else:
-            if self.saving_dir is not None:
-                retriever_folder = Path(self.saving_dir)
-            else:
+            try:
                 retriever_folder = Path(trainer.logger.experiment.dir) / "retriever"
-            retriever_folder.mkdir(exist_ok=True, parents=True)
-            if self.verbose:
-                logger.log(f"Saving retriever to {retriever_folder}")
-            pl_module.model.save_pretrained(retriever_folder)
+            except:
+                logger.log(
+                    "You need to specify an output directory (`saving_dir`) or a logger to save the retriever.\n"
+                    "Skipping saving retriever."
+                )
+                return
+        retriever_folder.mkdir(exist_ok=True, parents=True)
+        if self.verbose:
+            logger.log(f"Saving retriever to {retriever_folder}")
+        pl_module.model.save_pretrained(retriever_folder)
 
     def on_save_checkpoint(
         self,

@@ -79,6 +79,7 @@ prediction_callbacks:
       - _target_: golden_retriever.callbacks.evaluation_callbacks.AvgRankingEvaluationCallback
         k: ${train.top_k}
         verbose: True
+        prefix: "train"
       - _target_: golden_retriever.callbacks.utils_callbacks.FreeUpIndexerVRAMCallback
 
   - _target_: golden_retriever.callbacks.utils_callbacks.ShuffleTrainDatasetCallback
