@@ -77,15 +77,15 @@ class SentenceEncoder(torch.nn.Module):
         self.freeze = freeze
 
         # set the config
-        if config is None:
-            config = {
-                "_target_": f"{self.__class__.__module__}.{self.__class__.__name__}",
-                "language_model": self.language_model_name,
-                "pooling_strategy": self.pooling_strategy,
-                "load_ort_model": self.load_ort_model,
-                "freeze": self.freeze,
-            }
-        self.config = config
+        # if config is None:
+        #     config = {
+        #         "_target_": f"{self.__class__.__module__}.{self.__class__.__name__}",
+        #         "language_model": self.language_model_name,
+        #         "pooling_strategy": self.pooling_strategy,
+        #         "load_ort_model": self.load_ort_model,
+        #         "freeze": self.freeze,
+        #     }
+        # self.config = config
 
     def forward(
         self,
@@ -129,17 +129,13 @@ class SentenceEncoder(torch.nn.Module):
         Returns:
             `Dict[str, Any]`: The configuration of the model.
         """
-        return self._config
-
-    @config.setter
-    def config(self, config: Dict[str, Any]):
-        """
-        Set the configuration of the model.
-
-        Args:
-            config (`Dict[str, Any]`): The configuration of the model.
-        """
-        self._config = config
+        return {
+            "_target_": f"{self.__class__.__module__}.{self.__class__.__name__}",
+            "language_model": self.language_model_name,
+            "pooling_strategy": self.pooling_strategy,
+            "load_ort_model": self.load_ort_model,
+            "freeze": self.freeze,
+        }
 
 
 class Swish(torch.nn.Module):
@@ -165,14 +161,15 @@ class GoldenRetriever(torch.nn.Module):
     ):
         super().__init__()
 
+        self.context_encoder_is_question_encoder = False
         # question encoder model
         self.question_encoder = question_encoder
         if not context_encoder:
             # if no context encoder is provided,
             # share the weights of the question encoder
             context_encoder = question_encoder
-            # set the context encoder config to None since it should not be saved
-            context_encoder.config = None
+            # keep track of the fact that the context encoder is the same as the question encoder
+            self.context_encoder_is_question_encoder = True
         # context encoder model
         self.context_encoder = context_encoder
 
@@ -685,7 +682,9 @@ class GoldenRetriever(torch.nn.Module):
         return {
             "_target_": f"{self.__class__.__module__}.{self.__class__.__name__}",
             "question_encoder": self.question_encoder.config,
-            "context_encoder": self.context_encoder.config,
+            "context_encoder": self.context_encoder.config
+            if not self.context_encoder_is_question_encoder
+            else None,
             "loss_type": {
                 "_target_": f"{self.loss_type.__class__.__module__}.{self.loss_type.__class__.__name__}"
             },

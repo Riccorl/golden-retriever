@@ -8,8 +8,9 @@ from typing import Any, Dict, Iterator, List, Sequence, Tuple, Union, Optional, 
 import numpy as np
 import psutil
 import torch
+from tqdm import tqdm
 import transformers as tr
-from datasets import load_dataset
+from datasets import load_dataset, IterableDataset, Dataset
 
 from golden_retriever.common.logging import get_console_logger
 from golden_retriever.common.model_inputs import ModelInputs
@@ -18,6 +19,7 @@ from golden_retriever.data.labels import Labels
 from golden_retriever.data.sampler import NegativeSampler
 
 import random
+from random import choices
 from numpy.random import choice
 
 logger = get_console_logger()
@@ -148,6 +150,7 @@ class DPRMixin:
             self.context_manager,
             self.sample_by_frequency,
             self.max_negatives_to_sample,
+            self.max_context_length,
         )
 
     def _sample_dataset_negatives(
@@ -157,6 +160,7 @@ class DPRMixin:
         context_manager: Labels,
         sample_by_frequency: bool = True,
         max_negatives_to_sample: int = 64,
+        max_context_length: int = 64,
         *args,
         **kwargs,
     ) -> Any:
@@ -184,14 +188,16 @@ class DPRMixin:
         sample_space_size = sampled_context_manager.get_label_size()
         logger.log(f"Sampling negative contexts from {sample_space_size} samples")
         # update the samples with the sampled negatives
+        population = [i for i in range(sample_space_size)]
         data = data.map(
             partial(
                 self._sample_negatives,
                 tokenizer=tokenizer,
-                sample_space_size=sample_space_size,
+                population=population,
                 context_frequencies=context_frequencies,
                 context_manager=sampled_context_manager,
                 max_negatives_to_sample=max_negatives_to_sample,
+                max_context_length=max_context_length,
             ),
             keep_in_memory=True,
             num_proc=psutil.cpu_count(logical=False),
@@ -203,10 +209,10 @@ class DPRMixin:
         sample: Dict[str, Any],
         tokenizer: tr.PreTrainedTokenizer,
         context_manager: Labels,
-        sample_space_size: int,
+        population: List[int],
         context_frequencies: np.array,
-        max_negatives_to_sample: int = 0,
-        max_context_length: int = 128,
+        max_negatives_to_sample: int,
+        max_context_length: int,
     ):
         """
         Sample negatives and add them to the sample.
@@ -231,8 +237,6 @@ class DPRMixin:
             # + len(retrieved_hard_negatives)
         )
 
-        population = [i for i in range(sample_space_size)]
-
         sampled_negative_contexts = []
         if max_negatives_to_sample > 0:
             if actual_number_of_contexts < max_negatives_to_sample:
@@ -240,6 +244,11 @@ class DPRMixin:
                 sampled = choice(
                     population, remaining_contexts, p=context_frequencies, replace=False
                 )
+                # sampled = choices(
+                #     population,
+                #     weights=context_frequencies,
+                #     k=remaining_contexts,
+                # )
                 sampled_negative_contexts = [
                     context_manager.get_label_from_index(s) for s in sampled
                 ]
@@ -248,9 +257,7 @@ class DPRMixin:
             tokenizer(n, max_length=max_context_length, truncation=True)
             for n in sampled_negative_contexts
         ]
-        # sampled_negative_ids = tokenizer(
-        #     sampled_negative_contexts, max_length=max_context_length, truncation=True
-        # )
+        sample["sampled_negative_ctxs"] = sampled_negative_ids
         context = (
             positives_contexts_ids
             + negative_contexts_ids
@@ -380,6 +387,7 @@ class DPRIterableDataset(GenerativeDataset, DPRMixin):
         sample_by_frequency: bool = False,
         contexts_path: Union[str, os.PathLike] = None,
         tokenizer: Optional[Union[str, tr.PreTrainedTokenizer]] = None,
+        prefetch_batches: bool = False,
         **kwargs,
     ):
         super().__init__(
@@ -399,6 +407,7 @@ class DPRIterableDataset(GenerativeDataset, DPRMixin):
         self.max_context_length = max_context_length
         self.max_negatives_to_sample = max_negatives_to_sample
         self.sample_by_frequency = sample_by_frequency
+        self.prefetch_batches = prefetch_batches
 
         if type(self) == DPRDataset and max_positives != 1:
             raise ValueError(
@@ -432,38 +441,32 @@ class DPRIterableDataset(GenerativeDataset, DPRMixin):
                 ),
             }
         self.data = self.load(path, tokenizer=self.tokenizer, shuffle=shuffle)
-        if self.max_negatives_to_sample > 0:
-            self.data = self._sample_dataset_negatives(
-                self.data,
-                self.tokenizer,
-                self.context_manager,
-                self.sample_by_frequency,
-                self.max_negatives_to_sample,
-            )
+        # if self.max_negatives_to_sample > 0:
+        #     self.data = self._sample_dataset_negatives(
+        #         self.data,
+        #         self.tokenizer,
+        #         self.context_manager,
+        #         self.sample_by_frequency,
+        #         self.max_negatives_to_sample,
+        #         self.max_context_length,
+        #     )
+        self.prefatched_data = []
+        if self.prefetch_batches:
+            self.prefetch()
 
-    def __iter__(self) -> Iterator[Dict[str, torch.Tensor]]:
+    def batch_generator(self) -> List:
         batch = []
         contexts_in_batch = set()
         for sample in self.data:
             if len(contexts_in_batch) >= self.max_contexts_per_batch:
-                collated_batch = self.collate_fn(batch)
-                if (
-                    len(collated_batch.questions.input_ids)
-                    >= self.max_questions_per_batch
-                ):
-                    splitted_batches = self.split_batch(
-                        collated_batch, self.max_questions_per_batch
-                    )
-                    for splitted_batch in splitted_batches:
-                        yield splitted_batch
-                else:
-                    yield self.collate_fn(batch)
+                yield batch
                 batch = []
                 contexts_in_batch = set()
             batch.append(sample)
             for context_type in {
                 "positive_ctxs",
                 "negative_ctxs",
+                "sampled_negative_ctxs",
                 "hard_negative_ctxs",
                 "retrieved_hard_negatives",
             }:
@@ -478,9 +481,117 @@ class DPRIterableDataset(GenerativeDataset, DPRMixin):
                     if context_type in sample
                     for s in sample[context_type]
                 )
-        # drop last cause might be too short and result in issues (nan if we are using amp)
         if not self.drop_last_batch and len(batch) > 0:
-            yield self.collate_fn(batch)
+            yield batch
+
+    def collate_generator(
+        self, batch: List[Dict[str, torch.Tensor]]
+    ) -> Dict[str, torch.Tensor]:
+        collated_batch = self.collate_fn(batch)
+        if len(collated_batch.questions.input_ids) >= self.max_questions_per_batch:
+            splitted_batches = self.split_batch(
+                collated_batch, self.max_questions_per_batch
+            )
+            for splitted_batch in splitted_batches:
+                yield splitted_batch
+        else:
+            yield collated_batch
+
+    def __iter__(self) -> Iterator[Dict[str, torch.Tensor]]:
+        if self.prefatched_data:
+            for sample in self.prefatched_data:
+                yield sample
+            self.prefatched_data = []
+            return
+        else:
+            for batch in self.batch_generator():
+                for collated_batch in self.collate_generator(batch):
+                    yield collated_batch
+            return
+
+    # def __len__(self) -> int:
+    #     if self.prefatched_data:
+    #         return len(self.prefatched_data)
+    #     else:
+    #         None
+
+    def prefetch(self):
+        if self.prefetch_batches:
+            self.prefatched_data = list(self.batch_generator())
+            if self.max_negatives_to_sample > 0:
+                # sample negatives for each batch
+                self.prefatched_data = [
+                    self._sample_batch_negatives(
+                        batch,
+                        self.tokenizer,
+                        self.context_manager,
+                        self.max_negatives_to_sample,
+                        self.max_context_length,
+                    )
+                    for batch in tqdm(self.prefatched_data, desc="Sampling negatives")
+                ]
+            # collate batches
+            # for collated_batch in self.collate_generator(self.prefatched_data):
+            #     self.prefatched_data.append(collated_batch)
+            collated_data = []
+            for batch in tqdm(self.prefatched_data, desc="Collating batches"):
+                collated_data.extend(self.collate_generator(batch))
+            self.prefatched_data = collated_data
+
+    def _sample_batch_negatives(
+        self,
+        batch: Dict[str, torch.Tensor],
+        tokenizer: tr.PreTrainedTokenizer,
+        context_manager: Labels,
+        max_negatives_to_sample: int,
+        max_context_length: int,
+    ) -> Dict[str, torch.Tensor]:
+        """
+        Sample negatives for each batch.
+        """
+        # sample negatives for each batch
+        # batch["sampled_negative_ctxs"] = [
+        #     self._sample_negatives(
+        #         sample,
+        #         tokenizer,
+        #         context_manager,
+        #         sample_by_frequency,
+        #         max_negatives_to_sample,
+        #         max_context_length,
+        #     )
+        #     for sample in batch["negative_ctxs"]
+        # ]
+
+        positives = set(
+            [positive for sample in batch for positive in sample["positives"]]
+        )
+        positive_indices = [context_manager.get_index_from_label(p) for p in positives]
+
+        context_frequencies = np.ones(self.context_manager.get_label_size())
+        population = np.arange(self.context_manager.get_label_size())
+        # put to 0 the frequency of the positive contexts
+        context_frequencies[positive_indices] = 0
+        # normalize the frequencies
+        context_frequencies = context_frequencies / np.sum(context_frequencies)
+        sampled = choice(
+            population, max_negatives_to_sample, p=context_frequencies, replace=False
+        )
+        # sampled = choices(
+        #     population,
+        #     weights=context_frequencies,
+        #     k=remaining_contexts,
+        # )
+        sampled_negative_contexts = [
+            context_manager.get_label_from_index(s) for s in sampled
+        ]
+        sampled_negative_ids = [
+            tokenizer(n, max_length=max_context_length, truncation=True)
+            for n in sampled_negative_contexts
+        ]
+        # add the sampled negative contexts to each sample in the batch
+        for sample in batch:
+            sample["sampled_negative_ctxs"] = sampled_negative_ids
+        return batch
 
     @staticmethod
     def split_batch(
@@ -580,7 +691,7 @@ class DPRIterableDataset(GenerativeDataset, DPRMixin):
             self.max_context_length,
         )
         # convert to iterable dataset
-        data = data.to_iterable_dataset(num_shards=4)
+        # data = data.to_iterable_dataset(num_shards=4)
 
         end = time.time()
         logger.log(
@@ -694,6 +805,9 @@ class InBatchNegativesDPRIterableDataset(DPRIterableDataset, DPRMixin):
         # this is needed to get the correct labels for each question
         positives_ctxs = [sample["positive_ctxs"] for sample in batch]
         negatives_ctxs = [sample["negative_ctxs"] for sample in batch]
+        if "sampled_negative_ctxs" in batch[0]:
+            negatives_ctxs += [sample["sampled_negative_ctxs"] for sample in batch]
+
         hard_negatives_ctxs = [sample["hard_negative_ctxs"] for sample in batch]
         # use negatives from predictions if available
         if "retrieved_hard_negatives" in batch[0]:
@@ -816,7 +930,7 @@ class DPRDataset(BaseDataset, DPRMixin):
                 self.data,
                 self.tokenizer,
                 self.context_manager,
-                sample_by_frequency,
+                self.sample_by_frequency,
                 self.max_negatives_to_sample,
             )
 

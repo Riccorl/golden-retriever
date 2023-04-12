@@ -10,7 +10,11 @@ datamodule:
       contexts_path: ${data_overrides.contexts_path}
       max_context_length: 64
 #      max_questions_per_batch: 8
+      # max_negatives_to_sample: 200
+      # max_contexts: 200
+      prefetch_batches: True
       max_contexts_per_batch: ${data.max_contexts_per_batch}
+      shuffle: True
       path: ${data_overrides.train_path}
 
     val:
@@ -19,6 +23,9 @@ datamodule:
         contexts_path: ${data_overrides.contexts_path}
         max_context_length: 64
 #        max_questions_per_batch: 8
+        # max_negatives_to_sample: 200
+        # max_contexts: 200
+        prefetch_batches: True
         max_contexts_per_batch: ${data.max_contexts_per_batch}
         path: ${data_overrides.val_path}
 
@@ -28,5 +35,8 @@ datamodule:
         contexts_path: ${data_overrides.contexts_path}
         max_context_length: 64
 #        max_questions_per_batch: 8
+        # max_negatives_to_sample: 200
+        # max_contexts: 200
+        prefetch_batches: True
         max_contexts_per_batch: ${data.max_contexts_per_batch}
         path: ${data_overrides.test_path}

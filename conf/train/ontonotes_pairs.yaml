@@ -3,9 +3,12 @@ seed: 42
 
 export: False
 float32_matmul_precision: "medium"
+set_determinism_the_old_way: False
 top_k: 100
 
 only_test: False
+
+ckpt_path: null
 
 # pl_trainer
 pl_trainer:
@@ -17,49 +20,71 @@ pl_trainer:
   accumulate_grad_batches: 1
   gradient_clip_val: 1.0
   val_check_interval: 1.0 # you can specify an int "n" here => validation every "n" steps
-  max_epochs: 40
-  deterministic: warn
+  check_val_every_n_epoch: 1
+  max_epochs: 0
+  max_steps: 100_000
+  deterministic: True
   fast_dev_run: False
   precision: 16
-  ckpt_path: null
+  # ckpt_path: null
 
 # early stopping callback
-# "early_stopping_callback: null" will disable early stopping
+#early_stopping_callback: null
 early_stopping_callback:
   _target_: pytorch_lightning.callbacks.EarlyStopping
-  monitor: val_recall@${train.top_k}
+  monitor: validate_recall@${train.top_k}
   mode: max
-  patience: 10
+  patience: 15
 
 # model_checkpoint_callback
 # "model_checkpoint_callback: null" will disable model checkpointing
 model_checkpoint_callback:
   _target_: pytorch_lightning.callbacks.ModelCheckpoint
-  monitor: val_recall@${train.top_k}
+  monitor: validate_recall@${train.top_k}
   mode: max
   verbose: True
   save_top_k: 1
-  filename: "checkpoint-val_recall@${train.top_k}_{val_recall@${train.top_k}:.4f}-epoch_{epoch:02d}"
+  filename: "checkpoint-validate_recall@${train.top_k}_{validate_recall@${train.top_k}:.4f}-epoch_{epoch:02d}"
   auto_insert_metric_name: False
 
 prediction_callbacks:
   - _target_: golden_retriever.callbacks.custom_callbacks.GoldenRetrieverPredictionCallback
     k: ${train.top_k}
-    batch_size: 128
+    batch_size: 512
+    use_faiss: False
+    move_index_to_cpu: False
     other_callbacks:
       - _target_: golden_retriever.callbacks.evaluation_callbacks.TopKEvaluationCallback
         k: ${train.top_k}
+        verbose: True
+      - _target_: golden_retriever.callbacks.evaluation_callbacks.TopKEvaluationCallback
+        k: 50
+        verbose: True
+        prog_bar: False
+      - _target_: golden_retriever.callbacks.evaluation_callbacks.TopKEvaluationCallback
+        k: 20
+        verbose: True
+        prog_bar: False
+      - _target_: golden_retriever.callbacks.evaluation_callbacks.AvgRankingEvaluationCallback
+        k: ${train.top_k}
+        verbose: True
+      - _target_: golden_retriever.callbacks.utils_callbacks.SavePredictionsCallback
+
+  - _target_: golden_retriever.callbacks.utils_callbacks.SaveRetrieverCallback
+
   - _target_: golden_retriever.callbacks.custom_callbacks.NegativeAugmentationCallback
     k: ${train.top_k}
-    metric_to_monitor: val_recall@${train.top_k}
-    threshold: 0.90
-    max_negatives: 5
-    batch_size: 128
-    stages: [ val ]
-    dataset:
-      _target_: golden_retriever.data.datasetsDPRDataset
-      name: "train_augmented"
-      contexts_path: ${data.contexts_path}
-      tokenizer: ${model.language_model}
-      path:
-        - "data/dpr-like/srl/ontonotes/ontonotes.train.pairs.noargm.nolemma.json"
+    batch_size: 512
+    stages: [validate]
+    metric_to_monitor: validate_recall@${train.top_k}
+    threshold: 0.0
+    max_negatives: 15
+    refresh_every_n_epochs: 1
+    other_callbacks:
+      - _target_: golden_retriever.callbacks.evaluation_callbacks.AvgRankingEvaluationCallback
+        k: ${train.top_k}
+        verbose: True
+#      - _target_: golden_retriever.callbacks.utils_callbacks.FreeUpIndexerVRAMCallback
+
+  - _target_: golden_retriever.callbacks.utils_callbacks.ShuffleTrainDatasetCallback
+#  - _target_: golden_retriever.callbacks.custom_callbacks.SampleNegativesDatasetCallback

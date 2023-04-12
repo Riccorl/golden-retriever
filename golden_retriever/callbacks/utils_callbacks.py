@@ -87,6 +87,17 @@ class ShuffleTrainDatasetCallback(pl.Callback):
         )
 
 
+class PrefetchTrainDatasetCallback(pl.Callback):
+    def __init__(self, verbose: bool = True) -> None:
+        super().__init__()
+        self.verbose = verbose
+
+    def on_validation_epoch_end(self, trainer: pl.Trainer, *args, **kwargs):
+        if self.verbose:
+            logger.log(f"Prefetching train dataset at epoch {trainer.current_epoch}")
+        trainer.datamodule.train_dataset.prefetch()
+
+
 class SaveRetrieverCallback(pl.Callback):
     def __init__(
         self,

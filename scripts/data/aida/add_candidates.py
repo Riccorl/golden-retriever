@@ -3,6 +3,7 @@
 import argparse
 import json
 import os
+from pathlib import Path
 from typing import Union
 
 import torch
@@ -22,6 +23,8 @@ def add_candidates(
     retriever = GoldenRetriever.from_pretrained(retriever_name_or_path, device=device)
     retriever.eval()
 
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     documents_batch = []
     with open(output_path, "w") as f:
         for line in tqdm.tqdm(open(input_path)):

@@ -82,4 +82,5 @@ prediction_callbacks:
       - _target_: golden_retriever.callbacks.utils_callbacks.FreeUpIndexerVRAMCallback
 
   - _target_: golden_retriever.callbacks.utils_callbacks.ShuffleTrainDatasetCallback
-#  - _target_: golden_retriever.callbacks.custom_callbacks.SampleNegativesDatasetCallback
+  # - _target_: golden_retriever.callbacks.custom_callbacks.SampleNegativesDatasetCallback
+  - _target_: golden_retriever.callbacks.utils_callbacks.PrefetchTrainDatasetCallback
