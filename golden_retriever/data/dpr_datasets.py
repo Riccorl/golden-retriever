@@ -441,15 +441,15 @@ class DPRIterableDataset(GenerativeDataset, DPRMixin):
                 ),
             }
         self.data = self.load(path, tokenizer=self.tokenizer, shuffle=shuffle)
-        # if self.max_negatives_to_sample > 0:
-        #     self.data = self._sample_dataset_negatives(
-        #         self.data,
-        #         self.tokenizer,
-        #         self.context_manager,
-        #         self.sample_by_frequency,
-        #         self.max_negatives_to_sample,
-        #         self.max_context_length,
-        #     )
+        if self.max_negatives_to_sample > 0:
+            self.data = self._sample_dataset_negatives(
+                self.data,
+                self.tokenizer,
+                self.context_manager,
+                self.sample_by_frequency,
+                self.max_negatives_to_sample,
+                self.max_context_length,
+            )
         self.prefatched_data = []
         if self.prefetch_batches:
             self.prefetch()
@@ -531,8 +531,6 @@ class DPRIterableDataset(GenerativeDataset, DPRMixin):
                     for batch in tqdm(self.prefatched_data, desc="Sampling negatives")
                 ]
             # collate batches
-            # for collated_batch in self.collate_generator(self.prefatched_data):
-            #     self.prefatched_data.append(collated_batch)
             collated_data = []
             for batch in tqdm(self.prefatched_data, desc="Collating batches"):
                 collated_data.extend(self.collate_generator(batch))
@@ -1014,35 +1012,6 @@ class DPRDataset(BaseDataset, DPRMixin):
             f"data took [bold]{end - start:.2f}[/bold] seconds"
         )
         return data
-
-    # def save_data(
-    #     self, path: Union[str, os.PathLike], remove_columns: Optional[List[str]] = None
-    # ) -> None:
-    #     """
-    #     Save the samples to a file.
-    #
-    #     Args:
-    #         path (:obj:`str`):
-    #             Path to the file where to save the dataset.
-    #     """
-    #     samples = self.data.to_dict()
-    #     samples["question"] = self.tokenizer.batch_decode(
-    #         [question["input_ids"] for question in samples["question"]]
-    #     )
-    #
-    #     # remove columns if needed
-    #     if remove_columns is None:
-    #         remove_columns = []
-    #     for key in remove_columns:
-    #         if key in samples:
-    #             samples.pop(key)
-    #
-    #     with open(path, "w") as f:
-    #         for i in range(len(samples["question"])):
-    #             dump = {
-    #                 k: v[i] if isinstance(v, list) else v for k, v in samples.items()
-    #             }
-    #             json.dump(dump, f, indent=2)
 
 
 class InBatchNegativesDPRDataset(DPRDataset):
