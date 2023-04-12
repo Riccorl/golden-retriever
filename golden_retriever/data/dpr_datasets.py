@@ -509,11 +509,11 @@ class DPRIterableDataset(GenerativeDataset, DPRMixin):
                     yield collated_batch
             return
 
-    # def __len__(self) -> int:
-    #     if self.prefatched_data:
-    #         return len(self.prefatched_data)
-    #     else:
-    #         None
+    def __len__(self) -> int:
+        if self.prefatched_data:
+            return len(self.prefatched_data)
+        else:
+            None
 
     def prefetch(self):
         if self.prefetch_batches:

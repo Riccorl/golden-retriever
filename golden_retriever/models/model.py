@@ -18,7 +18,9 @@ from golden_retriever.common.model_inputs import ModelInputs
 from golden_retriever.common.utils import (
     CONFIG_NAME,
     WEIGHTS_NAME,
+    from_cache,
     is_package_available,
+    is_remote_url,
 )
 from golden_retriever.data.datasets import BaseDataset
 from golden_retriever.data.labels import Labels
@@ -754,7 +756,7 @@ class GoldenRetriever(torch.nn.Module):
     @classmethod
     def from_pretrained(
         cls,
-        model_dir: Union[str, Path],
+        model_name_or_dir: Union[str, Path],
         strict: bool = True,
         device: str = "cpu",
         load_faiss_index: bool = False,
@@ -765,7 +767,7 @@ class GoldenRetriever(torch.nn.Module):
         Load a retriever from disk.
 
         Args:
-            model_dir (`str` or `Path`):
+            model_name_or_dir (`str` or `Path`):
                 The path to the directory containing the retriever files.
             strict (`bool`, optional):
                 Whether to raise an error if the state dict of the saved retriever does not
@@ -783,6 +785,32 @@ class GoldenRetriever(torch.nn.Module):
             `GoldenRetriever`: The retriever.
         """
 
+        cache_dir = kwargs.pop("cache_dir", None)
+        force_download = kwargs.pop("force_download", False)
+
+        if is_remote_url(model_name_or_dir):
+            # if model_name_or_dir is a URL
+            # download it and try to load
+            model_archive = model_name_or_dir
+        elif Path(model_name_or_dir).is_dir() or Path(model_name_or_dir).is_file():
+            # if model_name_or_dir is a local directory or
+            # an archive file try to load it
+            model_archive = model_name_or_dir
+        else:
+            # probably model_name_or_dir is a sapienzanlp model id
+            # guess the url and try to download
+            model_name_or_dir_ = model_name_or_dir
+            raise ValueError(
+                f"Providing a model id is not supported yet."
+            )
+            # model_archive = sapienzanlp_model_urls(model_name_or_dir_)
+    
+        model_dir = from_cache(
+            model_archive,
+            cache_dir=cache_dir,
+            force_download=force_download,
+        )
+
         logger.log(f"Loading retriever from {model_dir}")
         # get model stuff
         if device == "cpu":
@@ -793,8 +821,8 @@ class GoldenRetriever(torch.nn.Module):
             logger.log(f"Model is running on {num_threads} threads")
 
         # prepare model dir path
-        if isinstance(model_dir, str):
-            model_dir = Path(model_dir)
+        # if isinstance(model_dir, str):
+        #     model_dir = Path(model_dir)
 
         # parse config file
         config_path = model_dir / CONFIG_NAME

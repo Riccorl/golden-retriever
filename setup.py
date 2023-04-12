@@ -69,7 +69,7 @@ def parse_requirements_file(
     return requirements, extras
 
 
-allowed_extras = {"onnx", "onnx-gpu"}
+allowed_extras = {"onnx", "onnx-gpu", "serve"}
 
 # Load requirements.
 install_requirements, extras = parse_requirements_file(
