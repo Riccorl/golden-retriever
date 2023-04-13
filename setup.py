@@ -36,6 +36,7 @@ def parse_requirements_file(
 ):
     requirements = []
     extras = defaultdict(list)
+    find_links = []
     with open(path) as requirements_file:
         import re
 
@@ -54,6 +55,14 @@ def parse_requirements_file(
             line = line.strip()
             if line.startswith("#") or len(line) <= 0:
                 continue
+            if (
+                line.startswith("-f")
+                or line.startswith("--find-links")
+                or line.startswith("--index-url")
+            ):
+                find_links.append(line.split(" ", maxsplit=1)[-1].strip())
+                continue
+
             req, *needed_by = line.split("# needed by:")
             req = fix_url_dependencies(req.strip())
             if needed_by:
@@ -66,13 +75,13 @@ def parse_requirements_file(
                     extras["all"].append(req)
             else:
                 requirements.append(req)
-    return requirements, extras
+    return requirements, extras, find_links
 
 
 allowed_extras = {"onnx", "onnx-gpu", "serve"}
 
 # Load requirements.
-install_requirements, extras = parse_requirements_file(
+install_requirements, extras, find_links = parse_requirements_file(
     "requirements.txt", allowed_extras=allowed_extras
 )
 
@@ -106,5 +115,5 @@ setuptools.setup(
     ],
     install_requires=install_requirements,
     extras_require=extras,
-    python_requires=">=3.9",
+    python_requires=">=3.8",
 )
