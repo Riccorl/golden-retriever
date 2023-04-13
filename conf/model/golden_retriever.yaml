@@ -17,5 +17,5 @@ pl_module:
     layer_norm: True
   optimizer: ${optimizer}
   lr_scheduler: ${scheduler}
-  grouped_parameters: True
-  warmup_steps_ratio: 0.2
+  grouped_parameters: False
+  warmup_steps_ratio: 0.1
