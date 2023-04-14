@@ -24,7 +24,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         self,
         k: Optional[int] = None,
         batch_size: int = 32,
-        num_workers: int = 0,
+        num_workers: int = 4,
         use_faiss: bool = False,
         move_index_to_cpu: bool = True,
         force_reindex: bool = True,
