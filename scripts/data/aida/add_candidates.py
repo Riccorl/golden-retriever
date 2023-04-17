@@ -35,21 +35,21 @@ def add_candidates(
                 topics_pair = None
                 if topics:
                     topics_pair = [d["doc_topic"] for d in documents_batch]
-                candidates = retriever.retrieve(
+                retriever_outs = retriever.retrieve(
                     [d["text"] for d in documents_batch], text_pair=topics_pair, k=100
                 )
                 for i, sample in enumerate(documents_batch):
                     candidate_titles = [
-                        c.split(" <def>", 1)[0] for c in candidates[0][i]
+                        c.split(" <def>", 1)[0] for c in retriever_outs.contexts[i]
                     ]
                     sample["window_candidates"] = candidate_titles
                     f.write(json.dumps(sample) + "\n")
                 documents_batch = []
 
         if len(documents_batch) > 0:
-            candidates = retriever.retrieve([d["text"] for d in documents_batch], k=100)
+            retriever_outs = retriever.retrieve([d["text"] for d in documents_batch], k=100)
             for i, sample in enumerate(documents_batch):
-                candidate_titles = [c.split(" <def>", 1)[0] for c in candidates[0][i]]
+                candidate_titles = [c.split(" <def>", 1)[0] for c in retriever_outs.contexts[i]]
                 sample["window_candidates"] = candidate_titles
                 f.write(json.dumps(sample) + "\n")
 

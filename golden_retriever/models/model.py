@@ -234,6 +234,44 @@ class GoldenRetriever(torch.nn.Module):
         self._question_tokenizer: Optional[tr.PreTrainedTokenizer] = None
         self._context_tokenizer: Optional[tr.PreTrainedTokenizer] = None
 
+    def encoder_forward(
+        self,
+        encoder_type,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+        token_type_ids: Optional[torch.Tensor] = None,
+        load_ort_model: bool = False,
+    ) -> torch.Tensor:
+        encoder_inputs = {
+            "input_ids": input_ids,
+            "attention_mask": attention_mask,
+        }
+        if token_type_ids is not None:
+            encoder_inputs["token_type_ids"] = token_type_ids
+
+        if encoder_type == "question":
+            encoder = self.question_encoder
+            layer_norm = self.question_layer_norm
+            projection = self.question_projection
+        elif encoder_type == "context":
+            encoder = self.context_encoder
+            layer_norm = self.context_layer_norm
+            projection = self.context_projection
+        else:
+            raise ValueError(
+                f"Encoder type {encoder_type} not supported, use 'question' or 'context'"
+            )
+        if load_ort_model:
+            encoder = self._load_ort_optimized_encoder(encoder)
+
+        encodings = encoder(**encoder_inputs)
+        if layer_norm:
+            encodings = layer_norm(encodings)
+            if projection is not None:
+                encodings = projection(encodings)
+
+        return encodings
+
     def forward(
         self,
         questions: Optional[Dict[str, torch.Tensor]] = None,
@@ -283,18 +321,13 @@ class GoldenRetriever(torch.nn.Module):
             )
 
         if question_encodings is None:
-            question_encodings = self.question_encoder(**questions)
+            question_encodings = self.encoder_forward(
+                **{**questions, "encoder_type": "question"}
+            )
         if contexts_encodings is None:
-            contexts_encodings = self.context_encoder(**contexts)
-
-        if self.question_layer_norm:
-            question_encodings = self.question_layer_norm(question_encodings)
-        if self.context_layer_norm:
-            contexts_encodings = self.context_layer_norm(contexts_encodings)
-
-        if self.question_projection is not None and self.context_projection is not None:
-            question_encodings = self.question_projection(question_encodings)
-            contexts_encodings = self.context_projection(contexts_encodings)
+            contexts_encodings = self.encoder_forward(
+                **{**questions, "encoder_type": "context"}
+            )
 
         if contexts_per_question is not None:
             # multiply each question encoding with a contexts_per_question encodings
@@ -314,17 +347,16 @@ class GoldenRetriever(torch.nn.Module):
                 question_encodings = F.normalize(question_encodings, p=2, dim=1)
                 contexts_encodings = F.normalize(contexts_encodings, p=2, dim=1)
 
-            # dot product with einsum
-            if inner_batch_size is not None:
-                # split the contexts into batches
-                contexts_encodings = torch.split(contexts_encodings, inner_batch_size)
-                logits = []
-                for batch in contexts_encodings:
-                    # logits.append(torch.einsum("ij,ij->i", question_encodings, batch))
-                    logits.append(torch.matmul(question_encodings, batch.T))
-                logits = torch.cat(logits)
-            else:
-                logits = torch.matmul(question_encodings, contexts_encodings.T)
+            # if inner_batch_size is not None:
+            #     # split the contexts into batches
+            #     contexts_encodings = torch.split(contexts_encodings, 10_000)
+            #     logits = []
+            #     for batch in contexts_encodings:
+            #         # logits.append(torch.einsum("ij,ij->i", question_encodings, batch))
+            #         logits.append(torch.matmul(question_encodings, batch.T))
+            #     logits = torch.cat(logits)
+            # else:
+            logits = torch.matmul(question_encodings, contexts_encodings.T)
 
         output = {"logits": logits}
 
@@ -402,18 +434,20 @@ class GoldenRetriever(torch.nn.Module):
             collate_fn=collate_fn,
         )
         # we can use the onnx runtime optimized encoder for the indexing
-        if not use_ort:
-            context_encoder = self.context_encoder
-        else:
-            context_encoder = self._load_ort_optimized_encoder(self.context_encoder)
+        # if not use_ort:
+        #     context_encoder = self.context_encoder
+        # else:
+        #     context_encoder = self._load_ort_optimized_encoder(self.context_encoder)
         # Create empty lists to store the context embeddings and context index
         context_embeddings: List[torch.Tensor] = []
         # Iterate through each batch in the dataloader
         for batch in tqdm(dataloader, desc="Indexing"):
             # Move the batch to the device
             batch: ModelInputs = batch.to(next(self.parameters()).device)
+            # add kwargs to the batch
+            batch.update({"load_ort_model": use_ort, "encoder_type": "context"})
             # Compute the context embeddings
-            context_outs = context_encoder(**batch)
+            context_outs = self.encoder_forward(**batch)
             # Append the context embeddings to the list
             context_embeddings.extend(
                 [c.cpu() if move_index_to_cpu else c for c in context_outs]
@@ -435,6 +469,7 @@ class GoldenRetriever(torch.nn.Module):
     def retrieve(
         self,
         text: Optional[Union[str, List[str]]] = None,
+        text_pair: Optional[Union[str, List[str]]] = None,
         input_ids: Optional[torch.Tensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
         token_type_ids: Optional[torch.Tensor] = None,
@@ -522,15 +557,15 @@ class GoldenRetriever(torch.nn.Module):
             if past_device != next(self.parameters()).device:
                 self.to(past_device)
             # Retrieve the indices of the top k context embeddings
-            top_k: torch.Tensor = torch.topk(
+            top_k_out: Tuple = torch.topk(
                 similarity, k=min(k, similarity.shape[-1]), dim=1
             )
-            top_k: torch.Tensor = top_k.indices
-            scores: torch.Tensor = top_k.values
+            top_k: torch.Tensor = top_k_out.indices
+            scores: torch.Tensor = top_k_out.values
         # get int values
         top_k: List[List[int]] = top_k.cpu().tolist()
         # get float values
-        scores: List[List[float]] = scores.cpu().tolist()
+        scores: List[List[float]] = scores
         # Retrieve the contexts corresponding to the indices
         contexts = [
             [self._context_index.get_label_from_index(i) for i in indices]
