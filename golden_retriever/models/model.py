@@ -326,7 +326,7 @@ class GoldenRetriever(torch.nn.Module):
             )
         if contexts_encodings is None:
             contexts_encodings = self.encoder_forward(
-                **{**questions, "encoder_type": "context"}
+                **{**contexts, "encoder_type": "context"}
             )
 
         if contexts_per_question is not None:
