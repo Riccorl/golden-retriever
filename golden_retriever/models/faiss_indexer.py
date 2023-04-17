@@ -32,7 +32,8 @@ class FaissIndexer:
         if not self.use_gpu:
             index = index.replace("x,", "x_HNSW32,")
         index = index.replace("x", str(math.ceil(math.sqrt(faiss_vector_size)) * 4))
-        self.index = faiss.index_factory(faiss_vector_size, index, metric)
+        # self.index = faiss.index_factory(faiss_vector_size, index, metric)
+        self.index = faiss.IndexFlatIP(embeddings.shape[1])
         # convert to GPU
         if self.use_gpu:
             # use a single GPU

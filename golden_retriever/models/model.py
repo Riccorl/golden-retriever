@@ -198,16 +198,16 @@ class GoldenRetriever(torch.nn.Module):
                     self.question_encoder.language_model.config.hidden_size,
                     self.projection_size,
                 ),
-                Swish(),
                 torch.nn.Dropout(projection_dropout),
+                torch.nn.LayerNorm(self.projection_size),
             )
             self.context_projection = torch.nn.Sequential(
                 torch.nn.Linear(
                     self.context_encoder.language_model.config.hidden_size,
                     self.projection_size,
                 ),
-                Swish(),
                 torch.nn.Dropout(projection_dropout),
+                torch.nn.LayerNorm(self.projection_size),
             )
 
         # loss function
@@ -230,6 +230,7 @@ class GoldenRetriever(torch.nn.Module):
         question_encodings: Optional[torch.Tensor] = None,
         contexts_encodings: Optional[torch.Tensor] = None,
         contexts_per_question: Optional[List[int]] = None,
+        inner_batch_size: Optional[int] = None,
         return_loss: bool = False,
         *args,
         **kwargs,
@@ -252,6 +253,10 @@ class GoldenRetriever(torch.nn.Module):
                 The encodings of the contexts.
             contexts_per_question (`List[int]`):
                 The number of contexts per question.
+            inner_batch_size (`int`):
+                The batch size to use for the context encoding.
+            return_loss (`bool`):
+                Whether to compute the loss.
 
         Returns:
             obj:`torch.Tensor`: The outputs of the model.
@@ -298,7 +303,16 @@ class GoldenRetriever(torch.nn.Module):
                 contexts_encodings = F.normalize(contexts_encodings, p=2, dim=1)
 
             # dot product with einsum
-            logits = torch.matmul(question_encodings, contexts_encodings.T)
+            if inner_batch_size is not None:
+                # split the contexts into batches
+                contexts_encodings = torch.split(contexts_encodings, inner_batch_size)
+                logits = []
+                for batch in contexts_encodings:
+                    # logits.append(torch.einsum("ij,ij->i", question_encodings, batch))
+                    logits.append(torch.matmul(question_encodings, batch.T))
+                logits = torch.cat(logits)
+            else:
+                logits = torch.matmul(question_encodings, contexts_encodings.T)
 
         output = {"logits": logits}
 
@@ -435,7 +449,7 @@ class GoldenRetriever(torch.nn.Module):
         Returns:
             `Tuple[List[List[str]], List[List[int]]]`: The retrieved contexts and their indices.
         """
-        if self._context_embeddings is None:
+        if self._context_embeddings is None and self._faiss_indexer is None:
             raise ValueError(
                 "The contexts must be indexed before they can be retrieved."
             )
@@ -450,10 +464,13 @@ class GoldenRetriever(torch.nn.Module):
         if text is not None:
             if isinstance(text, str):
                 text = [text]
+            if text_pair is not None and isinstance(text_pair, str):
+                text_pair = [text_pair]
             tokenizer = self.question_tokenizer
             model_inputs = ModelInputs(
                 tokenizer(
                     text,
+                    text_pair=text_pair,
                     padding=True,
                     return_tensors="pt",
                     truncation=True,
@@ -800,11 +817,9 @@ class GoldenRetriever(torch.nn.Module):
             # probably model_name_or_dir is a sapienzanlp model id
             # guess the url and try to download
             model_name_or_dir_ = model_name_or_dir
-            raise ValueError(
-                f"Providing a model id is not supported yet."
-            )
+            raise ValueError(f"Providing a model id is not supported yet.")
             # model_archive = sapienzanlp_model_urls(model_name_or_dir_)
-    
+
         model_dir = from_cache(
             model_archive,
             cache_dir=cache_dir,
@@ -859,7 +874,9 @@ class GoldenRetriever(torch.nn.Module):
         index_vectors = model_dir / INDEX_VECTOR_NAME
         faiss_index_vectors = model_dir / FAISS_INDEX_NAME
         if load_faiss_index and not faiss_index_vectors.exists():
-            raise ValueError(f"Faiss index `{faiss_index_vectors}` does not exist.")
+            logger.log(
+                f"{faiss_index_vectors} does not exist. Trying to convert from dense index."
+            )
         if not index_vectors.exists():
             raise ValueError(f"Index vectors `{index_vectors}` does not exist.")
         if not (model_dir / INDEX_NAME).exists():
@@ -867,7 +884,15 @@ class GoldenRetriever(torch.nn.Module):
 
         # select between faiss and dense index
         if load_faiss_index:
-            model._faiss_indexer = FaissIndexer.load(faiss_index_vectors)
+            if not faiss_index_vectors.exists():
+                # try to load the faiss index from the torch index
+                embeddings = torch.load(index_vectors, map_location=device)
+                model._faiss_indexer = FaissIndexer(
+                    embeddings, use_gpu=bool(device == "cuda")
+                )
+                del embeddings
+            else:
+                model._faiss_indexer = FaissIndexer.load(faiss_index_vectors)
         else:
             logger.log("Loading index vectors")
             model._context_embeddings = torch.load(index_vectors, map_location=device)

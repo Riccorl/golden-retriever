@@ -104,9 +104,17 @@ class DPRMixin:
         if max_hard_negatives != -1:
             hard_negative_ctxs = hard_negative_ctxs[:max_hard_negatives]
 
-        question = tokenizer(
-            sample["question"], max_length=max_question_length, truncation=True
-        )
+        if "doc_topic" in sample:
+            question = tokenizer(
+                sample["question"],
+                sample["doc_topic"],
+                max_length=max_question_length,
+                truncation=True,
+            )
+        else:
+            question = tokenizer(
+                sample["question"], max_length=max_question_length, truncation=True
+            )
         positive_ctxs = [
             tokenizer(p, max_length=max_context_length, truncation=True)
             for p in positive_ctxs

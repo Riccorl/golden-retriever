@@ -19,6 +19,7 @@ def add_candidates(
     output_path: Union[str, os.PathLike],
     batch_size: int = 512,
     device: str = "cuda",
+    topics: bool = False,
 ):
     retriever = GoldenRetriever.from_pretrained(retriever_name_or_path, device=device)
     retriever.eval()
@@ -31,8 +32,11 @@ def add_candidates(
             sample = json.loads(line)
             documents_batch.append(sample)
             if len(documents_batch) == batch_size:
+                topics_pair = None
+                if topics:
+                    topics_pair = [d["doc_topic"] for d in documents_batch]
                 candidates = retriever.retrieve(
-                    [d["text"] for d in documents_batch], k=100
+                    [d["text"] for d in documents_batch], text_pair=topics_pair, k=100
                 )
                 for i, sample in enumerate(documents_batch):
                     candidate_titles = [
@@ -55,7 +59,8 @@ if __name__ == "__main__":
     arg_parser.add_argument("--retriever_name_or_path", type=str, required=True)
     arg_parser.add_argument("--input_path", type=str, required=True)
     arg_parser.add_argument("--output_path", type=str, required=True)
-    arg_parser.add_argument("--batch_size", type=int, default=512)
+    arg_parser.add_argument("--batch_size", type=int, default=128)
     arg_parser.add_argument("--device", type=str, default="cuda")
+    arg_parser.add_argument("--topics", action="store_true")
 
     add_candidates(**vars(arg_parser.parse_args()))
