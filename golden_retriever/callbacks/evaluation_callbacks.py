@@ -3,6 +3,8 @@ from typing import Dict, List, Optional
 import pytorch_lightning as pl
 import torch
 
+from sklearn.metrics import label_ranking_average_precision_score
+
 from golden_retriever.callbacks.base import DEFAULT_STAGES, NLPTemplateCallback
 from golden_retriever.common.logging import get_console_logger
 
@@ -76,6 +78,68 @@ class TopKEvaluationCallback(NLPTemplateCallback):
         return metrics
 
 
+class LRAPEvaluationCallback(NLPTemplateCallback):
+    def __init__(
+        self,
+        k: int = 100,
+        prefix: Optional[str] = None,
+        verbose: bool = False,
+        prog_bar: bool = True,
+        *args,
+        **kwargs,
+    ):
+        super().__init__()
+        self.k = k
+        self.prefix = prefix
+        self.verbose = verbose
+        self.prog_bar = prog_bar
+
+    @torch.no_grad()
+    def __call__(
+        self,
+        trainer: pl.Trainer,
+        pl_module: pl.LightningModule,
+        predictions: Dict,
+        *args,
+        **kwargs,
+    ) -> dict:
+        if self.verbose:
+            logger.log(f"Computing recall@{self.k}")
+
+        # metrics to return
+        metrics = {}
+
+        stage = trainer.state.stage
+        if stage not in DEFAULT_STAGES:
+            raise ValueError(
+                f"Stage {stage} not supported, only `validate` and `test` are supported."
+            )
+
+        for dataloader_idx, samples in predictions.items():
+            scores = [sample["scores"][: self.k] for sample in samples]
+            golds = [sample["gold"] for sample in samples]
+            
+            # compute the mean recall at k
+            lrap = label_ranking_average_precision_score(golds, scores)
+            metrics[f"lrap@{self.k}_{dataloader_idx}"] = lrap
+        metrics[f"lrap@{self.k}"] = sum(metrics.values()) / len(metrics)
+
+        if self.prefix is not None:
+            metrics = {f"{self.prefix}_{k}": v for k, v in metrics.items()}
+        else:
+            metrics = {f"{stage.value}_{k}": v for k, v in metrics.items()}
+        pl_module.log_dict(
+            metrics, on_step=False, on_epoch=True, prog_bar=self.prog_bar
+        )
+
+        if self.verbose:
+            logger.log(
+                f"Recall@{self.k} on {stage.value}: {metrics[f'{stage.value}_recall@{self.k}']}"
+            )
+
+        return metrics
+
+
 class AvgRankingEvaluationCallback(NLPTemplateCallback):
     def __init__(
         self,
@@ -126,7 +190,7 @@ class AvgRankingEvaluationCallback(NLPTemplateCallback):
             metrics[f"avg_ranking@{self.k}"] = 0
         else:
             metrics[f"avg_ranking@{self.k}"] = sum(metrics.values()) / len(metrics)
-        
+
         prefix = self.prefix or stage.value
         metrics = {f"{prefix}_{k}": v for k, v in metrics.items()}
         pl_module.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=False)

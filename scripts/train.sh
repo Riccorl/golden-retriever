@@ -121,7 +121,7 @@ fi
 
 # PRELIMINARIES
 CONDA_BASE=$(conda info --base)
-source $CONDA_BASE/bin/activate golden-pip
+source $CONDA_BASE/bin/activate golden-retriever
 
 # Default device is GPU
 ACCELERATOR="gpu"

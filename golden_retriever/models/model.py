@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 import os
 import tempfile
 from pathlib import Path
@@ -36,6 +37,17 @@ INDEX_VECTOR_NAME = "index.pt"
 FAISS_INDEX_NAME = "faiss_index.bin"
 
 logger = get_console_logger()
+
+
+@dataclass
+class GoldenRetrieverOutput:
+    """
+    Dataclass for the output of the GoldenRetriever model.
+    """
+
+    scores: List[float]
+    indices: List[int]
+    contexts: List[str]
 
 
 class SentenceEncoder(torch.nn.Module):
@@ -512,15 +524,20 @@ class GoldenRetriever(torch.nn.Module):
             # Retrieve the indices of the top k context embeddings
             top_k: torch.Tensor = torch.topk(
                 similarity, k=min(k, similarity.shape[-1]), dim=1
-            ).indices
+            )
+            top_k: torch.Tensor = top_k.indices
+            scores: torch.Tensor = top_k.values
         # get int values
         top_k: List[List[int]] = top_k.cpu().tolist()
+        # get float values
+        scores: List[List[float]] = scores.cpu().tolist()
         # Retrieve the contexts corresponding to the indices
         contexts = [
             [self._context_index.get_label_from_index(i) for i in indices]
             for indices in top_k
         ]
-        return contexts, top_k
+        # return contexts, top_k
+        return GoldenRetrieverOutput(contexts=contexts, indices=top_k, scores=scores)
 
     def get_index_from_context(self, context: str) -> int:
         """

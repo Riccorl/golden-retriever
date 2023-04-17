@@ -6,6 +6,7 @@ hydra_colorlog
 wandb>=0.14,<0.15
 rich>=13.0.0,<14.0.0
 transformers>=4.27,<4.28
+scikit-learn
 datasets
 black[d]
 

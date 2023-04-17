@@ -13,7 +13,7 @@ pl_module:
       language_model: ${model.language_model}
       pooling_strategy: "mean"
     loss_type: ${loss}
-    projection_size: null
+    projection_size: 384
     layer_norm: True
   optimizer: ${optimizer}
   lr_scheduler: ${scheduler}
