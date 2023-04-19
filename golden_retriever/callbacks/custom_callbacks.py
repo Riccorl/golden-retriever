@@ -149,9 +149,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
             for batch in tqdm(dataloader, desc="Retrieving contexts"):
                 batch = batch.to(pl_module.device)
                 # get the top-k indices
-                retriever_output = retriever.retrieve(
-                    **batch.questions, k=self.k
-                )
+                retriever_output = retriever.retrieve(**batch.questions, k=self.k)
                 # compute recall at k
                 for batch_idx, retrieved_index in enumerate(retriever_output.indices):
                     # get the positive contexts

@@ -8,14 +8,16 @@ pl_module:
       _target_: golden_retriever.models.model.SentenceEncoder
       language_model: ${model.language_model}
       pooling_strategy: "mean"
+      projection_size: 384
+      layer_norm: True
     context_encoder:
       _target_: golden_retriever.models.model.SentenceEncoder
       language_model: ${model.language_model}
       pooling_strategy: "mean"
+      projection_size: 384
+      layer_norm: True
     loss_type: ${loss}
-    projection_size: 384
-    layer_norm: True
   optimizer: ${optimizer}
   lr_scheduler: ${scheduler}
-  grouped_parameters: False
+  grouped_parameters: True
   warmup_steps_ratio: 0.1

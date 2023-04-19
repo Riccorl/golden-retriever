@@ -58,6 +58,9 @@ class SentenceEncoder(torch.nn.Module):
         ] = "sentence-transformers/all-MiniLM-12-v2",
         from_pretrained: bool = True,
         pooling_strategy: str = "mean",
+        layer_norm: bool = False,
+        projection_size: Optional[int] = None,
+        projection_dropout: float = 0.1,
         load_ort_model: bool = False,
         freeze: bool = False,
         config: Optional[Dict[str, Any]] = None,
@@ -84,22 +87,31 @@ class SentenceEncoder(torch.nn.Module):
             for param in self.language_model.parameters():
                 param.requires_grad = False
 
+        # normalization layer
+        self.layer_norm_layer: Optional[torch.nn.LayerNorm] = None
+        if layer_norm:
+            self.layer_norm_layer = torch.nn.LayerNorm(
+                self.language_model.config.hidden_size
+            )
+
+        # projection layer
+        self.projection: Optional[torch.nn.Sequential] = None
+        if projection_size is not None:
+            self.projection = torch.nn.Sequential(
+                torch.nn.Linear(
+                    self.language_model.config.hidden_size, projection_size
+                ),
+                torch.nn.Dropout(projection_dropout),
+            )
+
         # save the other parameters
         self.language_model_name = self.language_model.config.name_or_path
+        self.layer_norm = layer_norm
+        self.projection_size = projection_size
+        self.projection_dropout = projection_dropout
         self.pooling_strategy = pooling_strategy
         self.load_ort_model = load_ort_model
         self.freeze = freeze
-
-        # set the config
-        # if config is None:
-        #     config = {
-        #         "_target_": f"{self.__class__.__module__}.{self.__class__.__name__}",
-        #         "language_model": self.language_model_name,
-        #         "pooling_strategy": self.pooling_strategy,
-        #         "load_ort_model": self.load_ort_model,
-        #         "freeze": self.freeze,
-        #     }
-        # self.config = config
 
     def forward(
         self,
@@ -119,7 +131,7 @@ class SentenceEncoder(torch.nn.Module):
 
         model_output = self.language_model(**model_kwargs)
         if pooling_strategy == "cls":
-            return model_output.pooler_output
+            pooling = model_output.pooler_output
         elif pooling_strategy == "mean":
             # mean pooling
             token_embeddings = model_output.last_hidden_state
@@ -129,11 +141,19 @@ class SentenceEncoder(torch.nn.Module):
             mean_pooling = torch.sum(
                 token_embeddings * input_mask_expanded, 1
             ) / torch.clamp(input_mask_expanded.sum(1), min=1e-9)
-            return mean_pooling
+            pooling = mean_pooling
         else:
             raise ValueError(
                 f"Pooling strategy {pooling_strategy} not supported, use 'cls' or 'mean'"
             )
+
+        if self.layer_norm_layer is not None:
+            pooling = self.layer_norm_layer(pooling)
+
+        if self.projection is not None:
+            pooling = self.projection(pooling)
+
+        return pooling
 
     @property
     def config(self) -> Dict[str, Any]:
@@ -146,6 +166,9 @@ class SentenceEncoder(torch.nn.Module):
         return {
             "_target_": f"{self.__class__.__module__}.{self.__class__.__name__}",
             "language_model": self.language_model_name,
+            "layer_norm": self.layer_norm,
+            "projection_size": self.projection_size,
+            "projection_dropout": self.projection_dropout,
             "pooling_strategy": self.pooling_strategy,
             "load_ort_model": self.load_ort_model,
             "freeze": self.freeze,
@@ -166,10 +189,7 @@ class GoldenRetriever(torch.nn.Module):
         question_encoder: SentenceEncoder,
         loss_type: Optional[torch.nn.Module] = None,
         context_encoder: Optional[SentenceEncoder] = None,
-        projection_size: Optional[int] = None,
-        projection_dropout: float = 0.1,
         context_index: Optional[Labels] = None,
-        layer_norm: bool = False,
         *args,
         **kwargs,
     ):
@@ -187,41 +207,6 @@ class GoldenRetriever(torch.nn.Module):
         # context encoder model
         self.context_encoder = context_encoder
 
-        # normalization layer
-        self.layer_norm = layer_norm
-        self.question_layer_norm: Optional[torch.nn.LayerNorm] = None
-        self.context_layer_norm: Optional[torch.nn.LayerNorm] = None
-        if layer_norm:
-            self.question_layer_norm = torch.nn.LayerNorm(
-                self.question_encoder.language_model.config.hidden_size
-            )
-            self.context_layer_norm = torch.nn.LayerNorm(
-                self.context_encoder.language_model.config.hidden_size
-            )
-
-        # projection layer
-        self.projection_size = projection_size
-        self.projection_dropout = projection_dropout
-        self.question_projection: Optional[torch.nn.Sequential] = None
-        self.context_projection: Optional[torch.nn.Sequential] = None
-        if projection_size is not None:
-            self.question_projection = torch.nn.Sequential(
-                torch.nn.Linear(
-                    self.question_encoder.language_model.config.hidden_size,
-                    self.projection_size,
-                ),
-                torch.nn.Dropout(projection_dropout),
-                torch.nn.LayerNorm(self.projection_size),
-            )
-            self.context_projection = torch.nn.Sequential(
-                torch.nn.Linear(
-                    self.context_encoder.language_model.config.hidden_size,
-                    self.projection_size,
-                ),
-                torch.nn.Dropout(projection_dropout),
-                torch.nn.LayerNorm(self.projection_size),
-            )
-
         # loss function
         self.loss_type = loss_type
 
@@ -233,44 +218,6 @@ class GoldenRetriever(torch.nn.Module):
         # lazy load the tokenizer for inference
         self._question_tokenizer: Optional[tr.PreTrainedTokenizer] = None
         self._context_tokenizer: Optional[tr.PreTrainedTokenizer] = None
-
-    def encoder_forward(
-        self,
-        encoder_type,
-        input_ids: torch.Tensor,
-        attention_mask: torch.Tensor,
-        token_type_ids: Optional[torch.Tensor] = None,
-        load_ort_model: bool = False,
-    ) -> torch.Tensor:
-        encoder_inputs = {
-            "input_ids": input_ids,
-            "attention_mask": attention_mask,
-        }
-        if token_type_ids is not None:
-            encoder_inputs["token_type_ids"] = token_type_ids
-
-        if encoder_type == "question":
-            encoder = self.question_encoder
-            layer_norm = self.question_layer_norm
-            projection = self.question_projection
-        elif encoder_type == "context":
-            encoder = self.context_encoder
-            layer_norm = self.context_layer_norm
-            projection = self.context_projection
-        else:
-            raise ValueError(
-                f"Encoder type {encoder_type} not supported, use 'question' or 'context'"
-            )
-        if load_ort_model:
-            encoder = self._load_ort_optimized_encoder(encoder)
-
-        encodings = encoder(**encoder_inputs)
-        if layer_norm:
-            encodings = layer_norm(encodings)
-            if projection is not None:
-                encodings = projection(encodings)
-
-        return encodings
 
     def forward(
         self,
@@ -321,13 +268,9 @@ class GoldenRetriever(torch.nn.Module):
             )
 
         if question_encodings is None:
-            question_encodings = self.encoder_forward(
-                **{**questions, "encoder_type": "question"}
-            )
+            question_encodings = self.question_encoder(**questions)
         if contexts_encodings is None:
-            contexts_encodings = self.encoder_forward(
-                **{**contexts, "encoder_type": "context"}
-            )
+            contexts_encodings = self.context_encoder(**contexts)
 
         if contexts_per_question is not None:
             # multiply each question encoding with a contexts_per_question encodings
@@ -434,20 +377,18 @@ class GoldenRetriever(torch.nn.Module):
             collate_fn=collate_fn,
         )
         # we can use the onnx runtime optimized encoder for the indexing
-        # if not use_ort:
-        #     context_encoder = self.context_encoder
-        # else:
-        #     context_encoder = self._load_ort_optimized_encoder(self.context_encoder)
+        if not use_ort:
+            context_encoder = self.context_encoder
+        else:
+            context_encoder = self._load_ort_optimized_encoder(self.context_encoder)
         # Create empty lists to store the context embeddings and context index
         context_embeddings: List[torch.Tensor] = []
         # Iterate through each batch in the dataloader
         for batch in tqdm(dataloader, desc="Indexing"):
             # Move the batch to the device
             batch: ModelInputs = batch.to(next(self.parameters()).device)
-            # add kwargs to the batch
-            batch.update({"load_ort_model": use_ort, "encoder_type": "context"})
             # Compute the context embeddings
-            context_outs = self.encoder_forward(**batch)
+            context_outs = context_encoder(**batch)
             # Append the context embeddings to the list
             context_embeddings.extend(
                 [c.cpu() if move_index_to_cpu else c for c in context_outs]
@@ -565,7 +506,7 @@ class GoldenRetriever(torch.nn.Module):
         # get int values
         top_k: List[List[int]] = top_k.cpu().tolist()
         # get float values
-        scores: List[List[float]] = scores
+        scores: List[List[float]] = scores.cpu().tolist()
         # Retrieve the contexts corresponding to the indices
         contexts = [
             [self._context_index.get_label_from_index(i) for i in indices]
@@ -759,9 +700,6 @@ class GoldenRetriever(torch.nn.Module):
             "loss_type": {
                 "_target_": f"{self.loss_type.__class__.__module__}.{self.loss_type.__class__.__name__}"
             },
-            "projection_size": self.projection_size,
-            "projection_dropout": self.projection_dropout,
-            "layer_norm": self.layer_norm,
             # context_index is not saved because it might be too large
             "context_index": None,
         }
