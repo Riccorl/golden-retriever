@@ -118,7 +118,7 @@ class LRAPEvaluationCallback(NLPTemplateCallback):
         for dataloader_idx, samples in predictions.items():
             scores = [sample["scores"][: self.k] for sample in samples]
             golds = [sample["gold"] for sample in samples]
-            
+
             # compute the mean recall at k
             lrap = label_ranking_average_precision_score(golds, scores)
             metrics[f"lrap@{self.k}_{dataloader_idx}"] = lrap

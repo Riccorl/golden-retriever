@@ -21,7 +21,7 @@ def add_candidates(
     device: str = "cuda",
     topics: bool = False,
 ):
-    retriever = GoldenRetriever.from_pretrained(retriever_name_or_path, device=device)
+    retriever = GoldenRetriever.from_pretrained(retriever_name_or_path, device=device, index_device="cpu", load_faiss_index=True)
     retriever.eval()
 
     output_path = Path(output_path)

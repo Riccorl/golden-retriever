@@ -25,7 +25,7 @@ from golden_retriever.common.utils import (
 )
 from golden_retriever.data.datasets import BaseDataset
 from golden_retriever.data.labels import Labels
-from golden_retriever.models.faiss_indexer import FaissIndexer
+from golden_retriever.models.faiss_indexer import FaissIndexer, FaissOutput
 
 # check if ORT is available
 if is_package_available("onnxruntime"):
@@ -357,6 +357,9 @@ class GoldenRetriever(torch.nn.Module):
         if self._context_embeddings is not None and not force_reindex:
             return
 
+        if self._faiss_indexer is not None and not force_reindex and use_faiss:
+            return
+
         if collate_fn is None:
             tokenizer = self.context_tokenizer
             collate_fn = lambda x: ModelInputs(
@@ -402,9 +405,9 @@ class GoldenRetriever(torch.nn.Module):
         self._context_index.add_labels(
             {context: i for i, context in enumerate(contexts)}
         )
-        if use_faiss and self._faiss_indexer is None:
+        if use_faiss and (self._faiss_indexer is None or force_reindex):
             self._faiss_indexer = FaissIndexer(
-                self._context_embeddings, use_gpu=move_index_to_cpu
+                embeddings=self._context_embeddings, use_gpu=bool(not move_index_to_cpu)
             )
 
     def retrieve(
@@ -473,9 +476,11 @@ class GoldenRetriever(torch.nn.Module):
             if token_type_ids is not None:
                 model_inputs["token_type_ids"] = token_type_ids
         if self._faiss_indexer is not None:
-            top_k: torch.Tensor = self._faiss_indexer.search(
+            faiss_outs: FaissOutput = self._faiss_indexer.search(
                 self.question_encoder(**model_inputs), k=k
             )
+            top_k: torch.Tensor = faiss_outs.indices
+            scores: torch.Tensor = faiss_outs.distances
         else:
             # check if the device of the context embeddings is the same
             # as the device of the input ids
@@ -498,11 +503,11 @@ class GoldenRetriever(torch.nn.Module):
             if past_device != next(self.parameters()).device:
                 self.to(past_device)
             # Retrieve the indices of the top k context embeddings
-            top_k_out: Tuple = torch.topk(
+            retriever_out: Tuple = torch.topk(
                 similarity, k=min(k, similarity.shape[-1]), dim=1
             )
-            top_k: torch.Tensor = top_k_out.indices
-            scores: torch.Tensor = top_k_out.values
+            top_k: torch.Tensor = retriever_out.indices
+            scores: torch.Tensor = retriever_out.values
         # get int values
         top_k: List[List[int]] = top_k.cpu().tolist()
         # get float values
@@ -756,7 +761,7 @@ class GoldenRetriever(torch.nn.Module):
         # save the faiss indexer
         if self._faiss_indexer is not None:
             logger.log(f"Saving faiss index to {output_dir / FAISS_INDEX_NAME}")
-            self._faiss_indexer.save(output_dir / FAISS_INDEX_NAME)
+            self._faiss_indexer.save(output_dir)
 
         logger.log("Saving retriever to disk done.")
 
@@ -766,6 +771,7 @@ class GoldenRetriever(torch.nn.Module):
         model_name_or_dir: Union[str, Path],
         strict: bool = True,
         device: str = "cpu",
+        index_device: str = "cpu",
         load_faiss_index: bool = False,
         *args,
         **kwargs,
@@ -825,10 +831,6 @@ class GoldenRetriever(torch.nn.Module):
             torch.set_num_threads(num_threads)
             logger.log(f"Model is running on {num_threads} threads")
 
-        # prepare model dir path
-        # if isinstance(model_dir, str):
-        #     model_dir = Path(model_dir)
-
         # parse config file
         config_path = model_dir / CONFIG_NAME
         if not config_path.exists():
@@ -865,7 +867,7 @@ class GoldenRetriever(torch.nn.Module):
         faiss_index_vectors = model_dir / FAISS_INDEX_NAME
         if load_faiss_index and not faiss_index_vectors.exists():
             logger.log(
-                f"{faiss_index_vectors} does not exist. Trying to convert from dense index."
+                f"{FAISS_INDEX_NAME} does not exist. Trying to convert from dense index."
             )
         if not index_vectors.exists():
             raise ValueError(f"Index vectors `{index_vectors}` does not exist.")
@@ -874,15 +876,18 @@ class GoldenRetriever(torch.nn.Module):
 
         # select between faiss and dense index
         if load_faiss_index:
+            faiss_kwargs = {
+                "use_gpu": bool(index_device == "cuda"),
+            }
             if not faiss_index_vectors.exists():
                 # try to load the faiss index from the torch index
                 embeddings = torch.load(index_vectors, map_location=device)
-                model._faiss_indexer = FaissIndexer(
-                    embeddings, use_gpu=bool(device == "cuda")
-                )
+                faiss_kwargs.update({"embeddings": embeddings})
+                model._faiss_indexer = FaissIndexer(**faiss_kwargs)
                 del embeddings
             else:
-                model._faiss_indexer = FaissIndexer.load(faiss_index_vectors)
+                faiss_kwargs.update({"loading_dir": model_dir})
+                model._faiss_indexer = FaissIndexer.load(**faiss_kwargs)
         else:
             logger.log("Loading index vectors")
             model._context_embeddings = torch.load(index_vectors, map_location=device)

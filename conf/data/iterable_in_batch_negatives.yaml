@@ -9,7 +9,7 @@ datamodule:
       name: 'train'
       contexts_path: ${data_overrides.contexts_path}
       max_context_length: 64
-      max_questions_per_batch: 8
+      # max_questions_per_batch: 8
       # max_negatives_to_sample: 200
       # max_contexts: 200
       prefetch_batches: True
@@ -22,7 +22,7 @@ datamodule:
         name: 'val'
         contexts_path: ${data_overrides.contexts_path}
         max_context_length: 64
-        max_questions_per_batch: 8
+        # max_questions_per_batch: 8
         # max_negatives_to_sample: 200
         # max_contexts: 200
         prefetch_batches: True
@@ -34,7 +34,7 @@ datamodule:
         name: 'test'
         contexts_path: ${data_overrides.contexts_path}
         max_context_length: 64
-        max_questions_per_batch: 8
+        # max_questions_per_batch: 8
         # max_negatives_to_sample: 200
         # max_contexts: 200
         prefetch_batches: True

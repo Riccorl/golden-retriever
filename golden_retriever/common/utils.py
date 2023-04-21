@@ -137,7 +137,7 @@ def url_to_filename(resource: str, etag: str = None) -> str:
 def download_resource(
     url: str,
     temp_file: BinaryIO,
-    headers = None,
+    headers=None,
 ):
     """
     Download remote file.
@@ -162,7 +162,6 @@ def download_resource(
             progress.update(len(chunk))
             temp_file.write(chunk)
     progress.close()
-
 
 
 def download_and_cache(
@@ -235,7 +234,6 @@ def download_and_cache(
     # Prevent parallel downloads of the same file with a lock.
     lock_path = cache_path + ".lock"
     with FileLock(lock_path):
-
         # If the download just completed while the lock was activated.
         if file_exists(cache_path) and not force_download:
             # Even if returning early like here, the lock will be released.

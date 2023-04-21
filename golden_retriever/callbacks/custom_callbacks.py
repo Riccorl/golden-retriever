@@ -122,8 +122,10 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
             ):
                 retriever = retriever.from_pretrained(self.retriever_dir)
                 # set the retriever to eval mode if we are loading it from disk
-                retriever.eval()
 
+            # you never know :)
+            retriever.eval()
+            
             retriever.index(
                 contexts,
                 batch_size=self.batch_size,
@@ -243,7 +245,7 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
         stages: Set[Union[str, RunningStage]] = None,
         other_callbacks: Optional[List[DictConfig]] = None,
         dataset: Optional[Union[DictConfig, BaseDataset]] = None,
-        metric_to_monitor: str = "val_loss",
+        metrics_to_monitor: List[str] = None,
         threshold: float = 0.8,
         max_negatives: int = 5,
         refresh_every_n_epochs: int = 1,
@@ -264,7 +266,9 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
             *args,
             **kwargs,
         )
-        self.metric_to_monitor = metric_to_monitor
+        if metrics_to_monitor is None:
+            metrics_to_monitor = ["val_loss"]
+        self.metrics_to_monitor = metrics_to_monitor
         self.threshold = threshold
         self.max_negatives = max_negatives
         self.refresh_every_n_epochs = refresh_every_n_epochs
@@ -280,20 +284,43 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
         stage = trainer.state.stage
         if stage not in self.stages:
             return {}
-
-        if self.metric_to_monitor not in trainer.logged_metrics:
+        
+        if self.metrics_to_monitor not in trainer.logged_metrics:
             raise ValueError(
                 f"Metric {self.metric_to_monitor} not found in trainer.logged_metrics"
                 f"Available metrics: {trainer.logged_metrics.keys()}"
             )
-        if trainer.logged_metrics[self.metric_to_monitor] < self.threshold:
+        if trainer.logged_metrics[self.metrics_to_monitor] < self.threshold:
             return {}
 
         if trainer.current_epoch % self.refresh_every_n_epochs != 0:
             return {}
 
+        # if all(
+        #     [
+        #         trainer.logged_metrics.get(metric) is None
+        #         for metric in self.metrics_to_monitor
+        #     ]
+        # ):
+        #     raise ValueError(
+        #         f"No metric from {self.metrics_to_monitor} not found in trainer.logged_metrics"
+        #         f"Available metrics: {trainer.logged_metrics.keys()}"
+        #     )
+
+        # if all(
+        #     [
+        #         trainer.logged_metrics.get(metric) < self.threshold
+        #         for metric in self.metrics_to_monitor
+        #         if trainer.logged_metrics.get(metric) is not None
+        #     ]
+        # ):
+        #     return {}
+
+        if trainer.current_epoch % self.refresh_every_n_epochs != 0:
+            return {}
+
         logger.log(
-            f"Metric {self.metric_to_monitor} is above threshold {self.threshold}. Computing hard negatives."
+            f"At least one metric from {self.metrics_to_monitor} is above threshold {self.threshold}. Computing hard negatives."
         )
 
         predictions = super().__call__(
