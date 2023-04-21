@@ -759,9 +759,9 @@ class GoldenRetriever(torch.nn.Module):
         logger.log(f"Saving context index to {output_dir / INDEX_NAME}")
         self._context_index.save(output_dir / INDEX_NAME)
         # save the faiss indexer
-        if self._faiss_indexer is not None:
-            logger.log(f"Saving faiss index to {output_dir / FAISS_INDEX_NAME}")
-            self._faiss_indexer.save(output_dir)
+        # if self._faiss_indexer is not None:
+        #     logger.log(f"Saving faiss index to {output_dir / FAISS_INDEX_NAME}")
+        #     self._faiss_indexer.save(output_dir)
 
         logger.log("Saving retriever to disk done.")
 

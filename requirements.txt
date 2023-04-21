@@ -21,3 +21,4 @@ termcolor # needed by: onnx
 fastapi==0.95.0 # needed by: serve
 uvicorn[standard]==0.21.1 # needed by: serve
 gunicorn==20.1.0 # needed by: serve
+ipa-core # needed by: serve

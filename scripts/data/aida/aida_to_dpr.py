@@ -12,35 +12,41 @@ def aida_to_dpr(
     title_map: Optional[Union[str, os.PathLike]] = None,
 ) -> List[Dict[str, Any]]:
     # Read AIDA file
+    aida_data = []
     with open(conll_path, "r") as f:
-        aida_data = json.load(f)
+        # aida_data = json.load(f)
+        for line in f:
+            aida_data.append(json.loads(line))
 
     definitions = {}
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     # read entities definitions
     # with open("data/aida_dpr/definitions.txt", "w") as f:
-    with open(output_path.parent / "definitions.txt", "w") as f_def:
-        with open(definitions_path, "r") as f:
-            for line in f:
-                line_data = json.loads(line)
-                definitions[line_data["title"]] = (
-                    line_data["title"] + " <def> " + line_data["text"]
-                )
-                f_def.write(line_data["title"] + " <def> " + line_data["text"] + "\n")
+    # with open(output_path.parent / "definitions_from_dataset.txt", "w") as f_def:
+    with open(definitions_path, "r") as f:
+        for line in f:
+            # line_data = json.loads(line)
+            title, definition = line.split(" <def> ")
+            title = title.strip()
+            definition = definition.strip()
+            definitions[title] = definition
+                # f_def.write(line_data["title"] + " <def> " + line_data["text"] + "\n")
             # tokenizer.decode(line_data["text_ids"])
             # definitions[line_data["title"]].replace("[unused2]", ": ")
 
-    with open(title_map, "r") as f:
-        title_map = json.load(f)
+    if title_map is not None:
+        with open(title_map, "r") as f:
+            title_map = json.load(f)
 
     dpr = []
 
     for sentence in aida_data:
-        question = sentence["text_raw"]
+        question = sentence["text"]
         positive_ctxs = []
-        for idx, entity in enumerate(sentence["entities"]):
-            if entity in title_map:
+        for idx, entity in enumerate(sentence["window_labels"]):
+            entity = entity[2]
+            if title_map and entity in title_map:
                 entity = title_map[entity]
             if entity in definitions:
                 def_text = definitions[entity]
@@ -49,7 +55,7 @@ def aida_to_dpr(
                 positive_ctxs.append(
                     {
                         "title": entity,
-                        "text": def_text,
+                        "text": f"{entity} <def> {def_text}",
                         "passage_id": f"{sentence['doc_id']}_{sentence['offset']}_{idx}",
                     }
                 )
