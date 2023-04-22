@@ -24,7 +24,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         self,
         k: Optional[int] = None,
         batch_size: int = 32,
-        num_workers: int = 4,
+        num_workers: int = 8,
         use_faiss: bool = False,
         move_index_to_cpu: bool = True,
         force_reindex: bool = True,
@@ -66,8 +66,10 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         # get the tokenizer
         tokenizer = trainer.datamodule.tokenizer
 
-        self.datasets = datasets or self.datasets
-        self.dataloaders = dataloaders or self.dataloaders
+        if datasets is not None or dataloaders is not None:
+            self.datasets = datasets
+            self.dataloaders = dataloaders
+
         self.datasets, self.dataloaders = self._get_datasets_and_dataloaders(
             self.datasets,
             self.dataloaders,

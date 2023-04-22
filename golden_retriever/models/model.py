@@ -376,7 +376,7 @@ class GoldenRetriever(torch.nn.Module):
             batch_size=batch_size,
             shuffle=False,
             num_workers=num_workers,
-            pin_memory=True,
+            pin_memory=False,
             collate_fn=collate_fn,
         )
         # we can use the onnx runtime optimized encoder for the indexing
@@ -393,9 +393,12 @@ class GoldenRetriever(torch.nn.Module):
             # Compute the context embeddings
             context_outs = context_encoder(**batch)
             # Append the context embeddings to the list
-            context_embeddings.extend(
-                [c.cpu() if move_index_to_cpu else c for c in context_outs]
-            )
+            # Append the context embeddings to the list
+            context_embeddings.extend([c for c in context_outs])
+
+        # move the context embeddings to the CPU if required
+        if move_index_to_cpu:
+            context_embeddings = [c.detach().cpu() for c in context_embeddings]
 
         # Stack the context embeddings into a tensor and return it along with the context index
         self._context_embeddings = None

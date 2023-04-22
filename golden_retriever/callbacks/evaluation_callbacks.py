@@ -164,7 +164,7 @@ class AvgRankingEvaluationCallback(NLPTemplateCallback):
         **kwargs,
     ) -> dict:
         if self.verbose:
-            logger.log(f"Computing recall@{self.k}")
+            logger.log(f"Computing AVG Ranking@{self.k}")
 
         # metrics to return
         metrics = {}
