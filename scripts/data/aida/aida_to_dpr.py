@@ -66,6 +66,7 @@ def aida_to_dpr(
         dpr.append(
             {
                 "id": f"{sentence['doc_id']}_{sentence['offset']}",
+                "doc_topic": sentence["doc_topic"],
                 "question": question,
                 "answers": "",
                 "positive_ctxs": positive_ctxs,

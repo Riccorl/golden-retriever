@@ -81,9 +81,7 @@ def preprocess(
     language: str = "en",
     stanza_device: str = "cpu",
 ):
-    tokenizer = SpacyTokenizer(
-        language=language, use_gpu=bool(stanza_device != "cpu")
-    )
+    tokenizer = SpacyTokenizer(language=language, use_gpu=bool(stanza_device != "cpu"))
 
     if title_mapping is not None:
         with open(title_mapping) as f:
@@ -141,18 +139,16 @@ def preprocess(
                 [start, end, title_mapping.get(label, label)]
                 for start, end, label in doc_level_labels
             ]
-            
 
         # these are the labels for the whole document, we need add them to the correct window
         for window in windowized_document:
             window_level_labels = []
             for doc_level_label in doc_level_labels:
                 start_char, end_char, label_text = doc_level_label
-                if (
-                    start_char >= window["offset"]
-                    and end_char <= window["offset"] + len(window["text"])
-                ):
-                    window_level_labels.append(doc_level_label)                
+                if start_char >= window["offset"] and end_char <= window[
+                    "offset"
+                ] + len(window["text"]):
+                    window_level_labels.append(doc_level_label)
             window["window_labels"] = window_level_labels
 
             # now we need to map the labels to the tokens
@@ -204,6 +200,7 @@ def preprocess(
 
     # print(f"Missing labels: {missing_labels}")
     # print(f"Total number of missing labels: {len(missing_labels)}")
+
 
 if __name__ == "__main__":
     arg_parser = argparse.ArgumentParser()

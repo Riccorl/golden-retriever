@@ -8,12 +8,12 @@ def compute_retriever_stats(dataset_path: str) -> None:
         for line in f:
             window_info = json.loads(line.strip())
             window_candidates = window_info["window_candidates"]
-            window_candidates = [c.replace(" ", "_").lower() for c in window_candidates]
+            window_candidates = [c.replace("_", " ").lower() for c in window_candidates]
 
             for ss, se, label in window_info["window_labels"]:
                 if label == "--NME--":
                     continue
-                if label.lower() in window_candidates:
+                if label.replace("_", " ").lower() in window_candidates:
                     correct += 1
                 total += 1
 

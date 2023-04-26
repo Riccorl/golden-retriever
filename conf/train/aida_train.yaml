@@ -22,7 +22,7 @@ pl_trainer:
   val_check_interval: 1.0 # you can specify an int "n" here => validation every "n" steps
   check_val_every_n_epoch: 1
   max_epochs: 0
-  max_steps: 20_000
+  max_steps: 15_000
   deterministic: True
   fast_dev_run: False
   precision: 16

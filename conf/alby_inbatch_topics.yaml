@@ -7,13 +7,13 @@ model_name: ${model.language_model}-inbatch   # used to name the model in wandb
 project_name: golden-retriever-aida           # used to name the project in wandb
 
 data_overrides:
-  contexts_path: "data/dpr-like/el/aida_tokens/definitions_sampled.txt"
+  contexts_path: "data/dpr-like/el/definitions_clean.txt"
   train_path:
-    - 'data/dpr-like/el/aida_tokens_topic/train.json'
+    - 'data/dpr-like/el/aida_24_tokens_topic/train.json'
   val_path:
-    - 'data/dpr-like/el/aida_tokens_topic/val.json'
+    - 'data/dpr-like/el/aida_24_tokens_topic/val.json'
   test_path:
-    - 'data/dpr-like/el/aida_tokens_topic/test.json'
+    - 'data/dpr-like/el/aida_24_tokens_topic/test.json'
 
 defaults:
   - _self_
