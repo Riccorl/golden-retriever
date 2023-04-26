@@ -1,6 +1,6 @@
-from dataclasses import dataclass
 import os
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
@@ -40,14 +40,24 @@ logger = get_console_logger()
 
 
 @dataclass
-class GoldenRetrieverOutput:
+class GoldenRetrieverOutput(tr.file_utils.ModelOutput):
+    """Class for model's outputs."""
+
+    logits: Optional[torch.FloatTensor] = None
+    loss: Optional[torch.FloatTensor] = None
+    question_encodings: Optional[torch.FloatTensor] = None
+    contexts_encodings: Optional[torch.FloatTensor] = None
+
+
+@dataclass
+class RetrieveOutput:
     """
     Dataclass for the output of the GoldenRetriever model.
     """
 
-    scores: List[float]
-    indices: List[int]
-    contexts: List[str]
+    scores: List[List[float]]
+    indices: List[List[int]]
+    contexts: List[List[str]]
 
 
 class SentenceEncoder(torch.nn.Module):
@@ -229,9 +239,10 @@ class GoldenRetriever(torch.nn.Module):
         contexts_per_question: Optional[List[int]] = None,
         inner_batch_size: Optional[int] = None,
         return_loss: bool = False,
+        return_encodings: bool = False,
         *args,
         **kwargs,
-    ) -> Dict[str, torch.Tensor]:
+    ) -> GoldenRetrieverOutput:
         """
         Forward pass of the model.
 
@@ -254,6 +265,8 @@ class GoldenRetriever(torch.nn.Module):
                 The batch size to use for the context encoding.
             return_loss (`bool`):
                 Whether to compute the loss.
+            return_encodings (`bool`):
+                Whether to return the encodings.
 
         Returns:
             obj:`torch.Tensor`: The outputs of the model.
@@ -316,7 +329,11 @@ class GoldenRetriever(torch.nn.Module):
 
             output["loss"] = self.loss_type(logits, labels)
 
-        return output
+        if return_encodings:
+            output["question_encodings"] = question_encodings
+            output["contexts_encodings"] = contexts_encodings
+
+        return GoldenRetrieverOutput(**output)
 
     @torch.no_grad()
     def index(
@@ -422,12 +439,14 @@ class GoldenRetriever(torch.nn.Module):
         token_type_ids: Optional[torch.Tensor] = None,
         k: Optional[int] = None,
         max_length: Optional[int] = None,
-    ) -> Tuple[List[List[str]], List[List[int]]]:
+    ) -> RetrieveOutput:
         """
         Retrieve the contexts for the questions.
 
         Args:
             text (`Optional[Union[str, List[str]]]`):
+                The questions to retrieve the contexts for.
+            text_pair (`Optional[Union[str, List[str]]]`):
                 The questions to retrieve the contexts for.
             input_ids (`torch.Tensor`):
                 The input ids of the questions.
@@ -521,7 +540,7 @@ class GoldenRetriever(torch.nn.Module):
             for indices in top_k
         ]
         # return contexts, top_k
-        return GoldenRetrieverOutput(contexts=contexts, indices=top_k, scores=scores)
+        return RetrieveOutput(contexts=contexts, indices=top_k, scores=scores)
 
     def get_index_from_context(self, context: str) -> int:
         """
@@ -790,6 +809,8 @@ class GoldenRetriever(torch.nn.Module):
                 match the state dict of the current retriever. Defaults to `True`.
             device (`str`, optional):
                 The device to load the retriever to. Defaults to `cpu`.
+            index_device (`str`, optional):
+                The device to load the index to. Defaults to `cpu`.
             load_faiss_index (`bool`, optional):
                 Whether to load the faiss index. Defaults to `False`.
             *args:

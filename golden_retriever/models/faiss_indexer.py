@@ -38,10 +38,10 @@ class FaissIndexer:
     ) -> None:
         if embeddings is not None and index is not None:
             logger.log("Both embeddings and index are provided, ignoring embeddings.")
-        
+
         if embeddings is None and index is None:
             raise ValueError("Either embeddings or index must be provided.")
-    
+
         self.use_gpu = use_gpu
 
         if index is not None:
@@ -88,7 +88,7 @@ class FaissIndexer:
 
     def search(
         self, query: Union[torch.Tensor, numpy.ndarray], k: int = 1
-    ) -> Union[torch.Tensor, numpy.ndarray]:
+    ) -> FaissOutput:
         k = min(k, self.index.ntotal)
         if self.normalize:
             faiss.normalize_L2(query)

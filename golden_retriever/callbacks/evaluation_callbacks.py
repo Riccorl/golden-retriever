@@ -2,7 +2,6 @@ from typing import Dict, List, Optional
 
 import pytorch_lightning as pl
 import torch
-
 from sklearn.metrics import label_ranking_average_precision_score
 
 from golden_retriever.callbacks.base import DEFAULT_STAGES, NLPTemplateCallback

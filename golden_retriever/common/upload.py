@@ -3,15 +3,15 @@ import json
 import logging
 import os
 import tempfile
+import zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Union
-import zipfile
 
 import huggingface_hub
 
-from golden_retriever.common.utils import SAPIENZANLP_DATE_FORMAT, get_md5
 from golden_retriever.common.log import get_logger
+from golden_retriever.common.utils import SAPIENZANLP_DATE_FORMAT, get_md5
 
 logger = get_logger(level=logging.DEBUG)
 
@@ -109,7 +109,9 @@ def parse_args() -> argparse.Namespace:
         "--commit", help="Commit message to use when pushing to the HuggingFace Hub"
     )
     parser.add_argument(
-        "--transformers", action="store_true", help="Upload as a transformers compatible model"
+        "--transformers",
+        action="store_true",
+        help="Upload as a transformers compatible model",
     )
     return parser.parse_args()
 

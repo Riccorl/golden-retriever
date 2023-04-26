@@ -127,7 +127,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
 
             # you never know :)
             retriever.eval()
-            
+
             retriever.index(
                 contexts,
                 batch_size=self.batch_size,
@@ -286,7 +286,7 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
         stage = trainer.state.stage
         if stage not in self.stages:
             return {}
-        
+
         if self.metrics_to_monitor not in trainer.logged_metrics:
             raise ValueError(
                 f"Metric {self.metric_to_monitor} not found in trainer.logged_metrics"

@@ -1,4 +1,3 @@
-import bisect
 import json
 import os
 import time
@@ -8,19 +7,15 @@ from typing import Any, Dict, Iterator, List, Sequence, Tuple, Union, Optional, 
 import numpy as np
 import psutil
 import torch
-from tqdm import tqdm
 import transformers as tr
-from datasets import load_dataset, IterableDataset, Dataset
+from datasets import load_dataset
+from numpy.random import choice
+from tqdm import tqdm
 
 from golden_retriever.common.log import get_console_logger
 from golden_retriever.common.model_inputs import ModelInputs
 from golden_retriever.data.datasets import GenerativeDataset, BaseDataset
 from golden_retriever.data.labels import Labels
-from golden_retriever.data.sampler import NegativeSampler
-
-import random
-from random import choices
-from numpy.random import choice
 
 logger = get_console_logger()
 
