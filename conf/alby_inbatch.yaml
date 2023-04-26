@@ -9,11 +9,11 @@ project_name: golden-retriever-aida           # used to name the project in wand
 data_overrides:
   contexts_path: "data/dpr-like/el/definitions_clean.txt"
   train_path:
-    - 'data/dpr-like/el/aida_32_tokens/train.json'
+    - 'data/dpr-like/el/aida_24_tokens/train.json'
   val_path:
-    - 'data/dpr-like/el/aida_32_tokens/val.json'
+    - 'data/dpr-like/el/aida_24_tokens/val.json'
   test_path:
-    - 'data/dpr-like/el/aida_32_tokens/test.json'
+    - 'data/dpr-like/el/aida_24_tokens/test.json'
 
 defaults:
   - _self_

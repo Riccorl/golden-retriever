@@ -1,4 +1,5 @@
 max_contexts_per_batch: 400
+max_questions_per_batch: null
 
 datamodule:
   _target_: golden_retriever.data.pl_data_modules.PLDataModule
@@ -9,7 +10,7 @@ datamodule:
       name: 'train'
       contexts_path: ${data_overrides.contexts_path}
       max_context_length: 64
-      # max_questions_per_batch: 8
+      max_questions_per_batch: ${data.max_questions_per_batch}
       # max_negatives_to_sample: 200
       # max_contexts: 200
       prefetch_batches: True
@@ -22,7 +23,7 @@ datamodule:
         name: 'val'
         contexts_path: ${data_overrides.contexts_path}
         max_context_length: 64
-        # max_questions_per_batch: 8
+        max_questions_per_batch: ${data.max_questions_per_batch}
         # max_negatives_to_sample: 200
         # max_contexts: 200
         prefetch_batches: True
@@ -34,7 +35,7 @@ datamodule:
         name: 'test'
         contexts_path: ${data_overrides.contexts_path}
         max_context_length: 64
-        # max_questions_per_batch: 8
+        max_questions_per_batch: ${data.max_questions_per_batch}
         # max_negatives_to_sample: 200
         # max_contexts: 200
         prefetch_batches: True

@@ -28,6 +28,8 @@ LABELS_NAME = "labels.json"
 
 # path constants
 SAPIENZANLP_CACHE_DIR = os.getenv("SAPIENZANLP_CACHE_DIR", Path.home() / ".sapienzanlp")
+SAPIENZANLP_DATE_FORMAT = "%Y-%m-%d %H-%M-%S"
+
 
 logger = get_logger()
 
@@ -68,6 +70,17 @@ def dump_json(document: Any, path: Union[str, Path], indent: Optional[int] = Non
     """
     with open(path, "w", encoding="utf8") as outfile:
         json.dump(document, outfile, indent=indent)
+
+
+def get_md5(path: Path):
+    """
+    Get the MD5 value of a path.
+    """
+    import hashlib
+
+    with path.open("rb") as fin:
+        data = fin.read()
+    return hashlib.md5(data).hexdigest()
 
 
 def file_exists(path: Union[str, os.PathLike]) -> bool:

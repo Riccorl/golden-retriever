@@ -519,7 +519,9 @@ class DPRIterableDataset(GenerativeDataset, DPRMixin):
 
     def prefetch(self):
         if self.prefetch_batches:
-            self.prefatched_data = list(self.batch_generator())
+            self.prefatched_data = list(
+                tqdm(self.batch_generator(), desc="Prefetching batches")
+            )
             if self.max_negatives_to_sample > 0:
                 # sample negatives for each batch
                 self.prefatched_data = [
