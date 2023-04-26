@@ -66,7 +66,7 @@ def upload(
     if organization is not None:
         repo_id = f"{organization}/{repo_id}"
     with tempfile.TemporaryDirectory() as tmpdir:
-        api = huggingface_hub.hf_api.HfApi()
+        api = huggingface_hub.HfApi()
         repo_url = api.create_repo(
             token=token,
             repo_id=repo_id,
