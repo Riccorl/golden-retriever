@@ -6,7 +6,7 @@ import torch
 from sklearn.metrics import label_ranking_average_precision_score
 
 from golden_retriever.callbacks.base import DEFAULT_STAGES, NLPTemplateCallback
-from golden_retriever.common.logging import get_console_logger
+from golden_retriever.common.log import get_console_logger
 
 logger = get_console_logger()
 

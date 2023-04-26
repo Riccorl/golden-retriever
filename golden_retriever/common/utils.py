@@ -18,7 +18,7 @@ import requests
 import tqdm
 from filelock import FileLock
 
-from golden_retriever.common.logging import get_logger
+from golden_retriever.common.log import get_logger
 
 # name constants
 WEIGHTS_NAME = "weights.pt"

@@ -8,7 +8,7 @@ from omegaconf import DictConfig
 from pytorch_lightning.trainer.states import RunningStage
 from torch.utils.data import DataLoader, Dataset
 
-from golden_retriever.common.logging import get_console_logger
+from golden_retriever.common.log import get_console_logger
 from golden_retriever.data.datasets import BaseDataset
 
 logger = get_console_logger()

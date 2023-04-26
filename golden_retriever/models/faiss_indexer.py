@@ -10,7 +10,7 @@ import torch
 from omegaconf import OmegaConf
 from rich.pretty import pprint
 
-from golden_retriever.common.logging import get_console_logger
+from golden_retriever.common.log import get_console_logger
 from golden_retriever.common.utils import is_package_available
 
 if is_package_available("faiss"):

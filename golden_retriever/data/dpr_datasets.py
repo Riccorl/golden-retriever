@@ -12,7 +12,7 @@ from tqdm import tqdm
 import transformers as tr
 from datasets import load_dataset, IterableDataset, Dataset
 
-from golden_retriever.common.logging import get_console_logger
+from golden_retriever.common.log import get_console_logger
 from golden_retriever.common.model_inputs import ModelInputs
 from golden_retriever.data.datasets import GenerativeDataset, BaseDataset
 from golden_retriever.data.labels import Labels

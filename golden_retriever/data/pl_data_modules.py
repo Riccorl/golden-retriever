@@ -10,7 +10,7 @@ from omegaconf import DictConfig
 from pytorch_lightning.utilities.types import EVAL_DATALOADERS
 from torch.utils.data import DataLoader, Dataset
 
-from golden_retriever.common.logging import get_console_logger
+from golden_retriever.common.log import get_console_logger
 from golden_retriever.data.datasets import GenerativeDataset
 from golden_retriever.data.labels import Labels
 

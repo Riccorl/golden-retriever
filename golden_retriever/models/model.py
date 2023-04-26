@@ -14,7 +14,7 @@ from rich.pretty import pprint
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from golden_retriever.common.logging import get_console_logger
+from golden_retriever.common.log import get_console_logger
 from golden_retriever.common.model_inputs import ModelInputs
 from golden_retriever.common.utils import (
     CONFIG_NAME,

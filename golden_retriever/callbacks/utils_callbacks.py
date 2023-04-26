@@ -7,7 +7,7 @@ import pytorch_lightning as pl
 import torch
 
 from golden_retriever.callbacks.base import NLPTemplateCallback, PredictionCallback
-from golden_retriever.common.logging import get_console_logger
+from golden_retriever.common.log import get_console_logger
 
 logger = get_console_logger()
 

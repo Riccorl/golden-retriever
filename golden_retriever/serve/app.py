@@ -6,7 +6,7 @@ from typing import List
 from fastapi import FastAPI, HTTPException
 
 from golden_retriever import GoldenRetriever
-from golden_retriever.common.logging import get_console_logger
+from golden_retriever.common.log import get_console_logger
 
 logger = get_console_logger()
 

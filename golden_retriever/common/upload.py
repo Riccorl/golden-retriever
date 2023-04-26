@@ -11,7 +11,7 @@ import zipfile
 import huggingface_hub
 
 from golden_retriever.common.utils import SAPIENZANLP_DATE_FORMAT, get_md5
-from golden_retriever.common.logging import get_logger
+from golden_retriever.common.log import get_logger
 
 logger = get_logger(level=logging.DEBUG)
 
