@@ -491,7 +491,10 @@ class DPRIterableDataset(GenerativeDataset, DPRMixin):
         self, batch: List[Dict[str, torch.Tensor]]
     ) -> Dict[str, torch.Tensor]:
         collated_batch = self.collate_fn(batch)
-        if len(collated_batch.questions.input_ids) >= self.max_questions_per_batch:
+        if (
+            self.max_questions_per_batch
+            and len(collated_batch.questions.input_ids) >= self.max_questions_per_batch
+        ):
             splitted_batches = self.split_batch(
                 collated_batch, self.max_questions_per_batch
             )

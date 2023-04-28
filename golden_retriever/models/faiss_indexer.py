@@ -65,7 +65,7 @@ class FaissIndexer:
                 "x", str(math.ceil(math.sqrt(faiss_vector_size)) * 4)
             )
             self.index = faiss.index_factory(faiss_vector_size, index_type, metric)
-            # self.index = faiss.IndexFlatIP(embeddings.shape[1])
+
             # convert to GPU
             if self.use_gpu:
                 # use a single GPU

@@ -9,11 +9,11 @@ pl_module:
       language_model: ${model.language_model}
       pooling_strategy: "mean"
       layer_norm: True
-    context_encoder:
-      _target_: golden_retriever.models.model.SentenceEncoder
-      language_model: ${model.language_model}
-      pooling_strategy: "mean"
-      layer_norm: True
+    context_encoder: null
+      # _target_: golden_retriever.models.model.SentenceEncoder
+      # language_model: ${model.language_model}
+      # pooling_strategy: "mean"
+      # layer_norm: True
     loss_type: ${loss}
   optimizer: ${optimizer}
   lr_scheduler: ${scheduler}

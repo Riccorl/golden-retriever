@@ -34,8 +34,11 @@ def add_candidates(
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     documents_batch = []
-    with open(output_path, "w") as f:
-        for line in tqdm.tqdm(open(input_path)):
+
+    output_data = []
+    with open(input_path) as f:
+        lines = f.readlines()
+        for line in tqdm.tqdm(lines):
             sample = json.loads(line)
             documents_batch.append(sample)
             if len(documents_batch) == batch_size:
@@ -50,7 +53,7 @@ def add_candidates(
                         c.split(" <def>", 1)[0] for c in retriever_outs.contexts[i]
                     ]
                     sample["window_candidates"] = candidate_titles
-                    f.write(json.dumps(sample) + "\n")
+                    output_data.append(sample)
                 documents_batch = []
 
         if len(documents_batch) > 0:
@@ -62,7 +65,11 @@ def add_candidates(
                     c.split(" <def>", 1)[0] for c in retriever_outs.contexts[i]
                 ]
                 sample["window_candidates"] = candidate_titles
-                f.write(json.dumps(sample) + "\n")
+                output_data.append(sample)
+
+    with open(output_path, "w") as f:
+        for sample in output_data:
+            f.write(json.dumps(sample) + "\n")
 
 
 if __name__ == "__main__":
