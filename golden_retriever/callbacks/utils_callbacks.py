@@ -76,6 +76,8 @@ class FreeUpIndexerVRAMCallback(NLPTemplateCallback):
         **kwargs,
     ) -> Any:
         logger.log("Freeing up GPU memory")
+        import gc
+        gc.collect()
         # remove the index from the GPU memory
         # pl_module.model._context_embeddings = None
         torch.cuda.empty_cache()

@@ -36,6 +36,20 @@ INDEX_NAME = "index.json"
 INDEX_VECTOR_NAME = "index.pt"
 FAISS_INDEX_NAME = "faiss_index.bin"
 
+PRECISION_MAP = {
+    None: None,
+    16: torch.float16,
+    32: torch.float32,
+    "float16": torch.float16,
+    "float32": torch.float32,
+    "half": torch.float16,
+    "float": torch.float32,
+    "16": torch.float16,
+    "32": torch.float32,
+    "fp16": torch.float16,
+    "fp32": torch.float32,
+}
+
 logger = get_console_logger()
 
 
@@ -347,6 +361,8 @@ class GoldenRetriever(torch.nn.Module):
         use_faiss: bool = False,
         use_ort: bool = False,
         move_index_to_cpu: bool = False,
+        precision: Optional[str] = None,
+        index_precision: Optional[str] = None,
     ):
         """
         Index the contexts for later retrieval.
@@ -403,23 +419,47 @@ class GoldenRetriever(torch.nn.Module):
             context_encoder = self._load_ort_optimized_encoder(self.context_encoder)
         # Create empty lists to store the context embeddings and context index
         context_embeddings: List[torch.Tensor] = []
-        # Iterate through each batch in the dataloader
-        for batch in tqdm(dataloader, desc="Indexing"):
-            # Move the batch to the device
-            batch: ModelInputs = batch.to(next(self.parameters()).device)
-            # Compute the context embeddings
-            context_outs = context_encoder(**batch)
-            # Append the context embeddings to the list
-            # Append the context embeddings to the list
-            context_embeddings.extend([c for c in context_outs])
+
+        # fucking autocast only wants pure strings like 'cpu' or 'cuda'
+        # we need to convert the model device to that
+        device_type_for_autocast = str(self.device).split(":")[0]
+        with torch.autocast(
+            device_type=device_type_for_autocast,
+            dtype=PRECISION_MAP[precision],
+        ):
+            # Iterate through each batch in the dataloader
+            for batch in tqdm(dataloader, desc="Indexing"):
+                # Move the batch to the device
+                batch: ModelInputs = batch.to(self.device)
+                # Compute the context embeddings
+                context_outs = context_encoder(**batch)
+                # Append the context embeddings to the list
+                context_embeddings.extend([c for c in context_outs])
 
         # move the context embeddings to the CPU if required
         if move_index_to_cpu:
             context_embeddings = [c.detach().cpu() for c in context_embeddings]
 
+        # if (
+        #     index_precision is not None
+        #     and not use_faiss
+        #     and not move_index_to_cpu
+        #     and self.device.type != "cpu"
+        # ):
+        #     # move it to cpu first
+        #     context_embeddings = [c.detach().cpu() for c in context_embeddings]
+        #     # then cast it to the desired precision
+        #     context_embeddings = [
+        #         c.to(PRECISION_MAP[index_precision]) for c in context_embeddings
+        #     ]
+        #     # then move it back to the device
+        #     context_embeddings = [c.to(self.device) for c in context_embeddings]
+
         # Stack the context embeddings into a tensor and return it along with the context index
         self._context_embeddings = None
         self._context_embeddings = torch.stack(context_embeddings, dim=0)
+        # free up memory
+        del context_embeddings
         # Create a dictionary mapping the context index to the context
         self._context_index = Labels()
         self._context_index.add_labels(
@@ -429,6 +469,8 @@ class GoldenRetriever(torch.nn.Module):
             self._faiss_indexer = FaissIndexer(
                 embeddings=self._context_embeddings, use_gpu=bool(not move_index_to_cpu)
             )
+            # free up memory
+            self._context_embeddings = None
 
     def retrieve(
         self,
@@ -439,6 +481,7 @@ class GoldenRetriever(torch.nn.Module):
         token_type_ids: Optional[torch.Tensor] = None,
         k: Optional[int] = None,
         max_length: Optional[int] = None,
+        precision: Optional[str] = None,
     ) -> RetrieveOutput:
         """
         Retrieve the contexts for the questions.
@@ -490,7 +533,7 @@ class GoldenRetriever(torch.nn.Module):
                     max_length=max_length or tokenizer.model_max_length,
                 )
             )
-            model_inputs.to(next(self.parameters()).device)
+            model_inputs.to(self.device)
         else:
             model_inputs = ModelInputs({"input_ids": input_ids})
             if attention_mask is not None:
@@ -504,32 +547,39 @@ class GoldenRetriever(torch.nn.Module):
             top_k: torch.Tensor = faiss_outs.indices
             scores: torch.Tensor = faiss_outs.distances
         else:
-            # check if the device of the context embeddings is the same
-            # as the device of the input ids
-            if self._context_embeddings.device != model_inputs.input_ids.device:
-                self._context_embeddings = self._context_embeddings.to(
-                    model_inputs.input_ids.device
+            # fucking autocast only wants pure strings like 'cpu' or 'cuda'
+            # we need to convert the model device to that
+            device_type_for_autocast = str(self.device).split(":")[0]
+            with torch.autocast(
+                device_type=device_type_for_autocast,
+                dtype=PRECISION_MAP[precision],
+            ):
+                # check if the device of the context embeddings is the same
+                # as the device of the input ids
+                if self._context_embeddings.device != model_inputs.input_ids.device:
+                    self._context_embeddings = self._context_embeddings.to(
+                        model_inputs.input_ids.device
+                    )
+                model_inputs = {
+                    "questions": model_inputs,
+                    "contexts_encodings": self._context_embeddings,
+                }
+                # check that the device of the question encoder is the same as
+                # the device of the context embeddings
+                past_device = self.device
+                if past_device != self._context_embeddings:
+                    self.to(self._context_embeddings.device)
+                # Compute the similarity between the questions and the contexts
+                similarity = self(**model_inputs)["logits"]
+                # move the model back to the original device
+                if past_device != self.device:
+                    self.to(past_device)
+                # Retrieve the indices of the top k context embeddings
+                retriever_out: Tuple = torch.topk(
+                    similarity, k=min(k, similarity.shape[-1]), dim=1
                 )
-            model_inputs = {
-                "questions": model_inputs,
-                "contexts_encodings": self._context_embeddings,
-            }
-            # check that the device of the question encoder is the same as
-            # the device of the context embeddings
-            past_device = next(self.parameters()).device
-            if past_device != self._context_embeddings:
-                self.to(self._context_embeddings.device)
-            # Compute the similarity between the questions and the contexts
-            similarity = self(**model_inputs)["logits"]
-            # move the model back to the original device
-            if past_device != next(self.parameters()).device:
-                self.to(past_device)
-            # Retrieve the indices of the top k context embeddings
-            retriever_out: Tuple = torch.topk(
-                similarity, k=min(k, similarity.shape[-1]), dim=1
-            )
-            top_k: torch.Tensor = retriever_out.indices
-            scores: torch.Tensor = retriever_out.values
+                top_k: torch.Tensor = retriever_out.indices
+                scores: torch.Tensor = retriever_out.values
         # get int values
         top_k: List[List[int]] = top_k.cpu().tolist()
         # get float values
@@ -673,6 +723,13 @@ class GoldenRetriever(torch.nn.Module):
         The context index.
         """
         return self._context_index
+
+    @property
+    def device(self) -> torch.device:
+        """
+        The device of the model.
+        """
+        return next(self.parameters()).device
 
     @staticmethod
     def _load_ort_optimized_encoder(
