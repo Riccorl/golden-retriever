@@ -20,6 +20,7 @@ def add_candidates(
     batch_size: int = 512,
     device: str = "cuda",
     index_device: str = "cpu",
+    precision: str = "fp32",
     faiss: bool = False,
     topics: bool = False,
 ):
@@ -27,6 +28,7 @@ def add_candidates(
         retriever_name_or_path,
         device=device,
         index_device=index_device,
+        index_precision=precision,
         load_faiss_index=faiss,
     )
     retriever.eval()
@@ -46,7 +48,7 @@ def add_candidates(
                 if topics:
                     topics_pair = [d["doc_topic"] for d in documents_batch]
                 retriever_outs = retriever.retrieve(
-                    [d["text"] for d in documents_batch], text_pair=topics_pair, k=100
+                    [d["text"] for d in documents_batch], text_pair=topics_pair, k=100, precision=precision
                 )
                 for i, sample in enumerate(documents_batch):
                     candidate_titles = [

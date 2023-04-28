@@ -851,6 +851,7 @@ class GoldenRetriever(torch.nn.Module):
         strict: bool = True,
         device: str = "cpu",
         index_device: str = "cpu",
+        index_precision: str = "fp32",
         load_faiss_index: bool = False,
         *args,
         **kwargs,
@@ -962,7 +963,7 @@ class GoldenRetriever(torch.nn.Module):
             }
             if not faiss_index_vectors.exists():
                 # try to load the faiss index from the torch index
-                embeddings = torch.load(index_vectors, map_location=device)
+                embeddings = torch.load(index_vectors, map_location="cpu")
                 faiss_kwargs.update({"embeddings": embeddings})
                 model._faiss_indexer = FaissIndexer(**faiss_kwargs)
                 del embeddings
@@ -971,7 +972,12 @@ class GoldenRetriever(torch.nn.Module):
                 model._faiss_indexer = FaissIndexer.load(**faiss_kwargs)
         else:
             logger.log("Loading index vectors")
-            model._context_embeddings = torch.load(index_vectors, map_location=device)
+            model._context_embeddings = torch.load(index_vectors, map_location="cpu")
+            if device == "cuda":
+                model._context_embeddings = model._context_embeddings.to(
+                    PRECISION_MAP[index_precision]
+                )
+                model._context_embeddings = model._context_embeddings.to(device)
 
         # move model to device
         model.to(device)
