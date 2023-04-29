@@ -393,6 +393,15 @@ class GoldenRetriever(torch.nn.Module):
         if self._faiss_indexer is not None and not force_reindex and use_faiss:
             return
 
+        # # release the memory
+        # logger.log("Releasing memory")
+        # self._context_embeddings = None
+        # self._context_index = None
+        # self._faiss_indexer = None
+        # import gc
+        # gc.collect()
+        # torch.cuda.empty_cache()
+
         if collate_fn is None:
             tokenizer = self.context_tokenizer
             collate_fn = lambda x: ModelInputs(
@@ -437,8 +446,21 @@ class GoldenRetriever(torch.nn.Module):
                 context_embeddings.extend([c for c in context_outs])
 
         # move the context embeddings to the CPU if required
-        if move_index_to_cpu:
-            context_embeddings = [c.detach().cpu() for c in context_embeddings]
+
+        # if move_index_to_cpu:
+        context_embeddings = [c.detach().cpu() for c in context_embeddings]
+        context_embeddings = torch.stack(context_embeddings, dim=0)
+
+        if not move_index_to_cpu:
+            if index_precision:
+                context_embeddings = context_embeddings.to(
+                    PRECISION_MAP[index_precision]
+                )
+            context_embeddings = context_embeddings.to(self.device)
+        self._context_embeddings = context_embeddings
+
+        # free up memory from the unused variable
+        del context_embeddings
 
         # if (
         #     index_precision is not None
@@ -456,10 +478,8 @@ class GoldenRetriever(torch.nn.Module):
         #     context_embeddings = [c.to(self.device) for c in context_embeddings]
 
         # Stack the context embeddings into a tensor and return it along with the context index
-        self._context_embeddings = None
-        self._context_embeddings = torch.stack(context_embeddings, dim=0)
-        # free up memory
-        del context_embeddings
+        # self._context_embeddings = torch.stack(context_embeddings, dim=0)
+
         # Create a dictionary mapping the context index to the context
         self._context_index = Labels()
         self._context_index.add_labels(
@@ -471,6 +491,13 @@ class GoldenRetriever(torch.nn.Module):
             )
             # free up memory
             self._context_embeddings = None
+
+        # # release the memory again
+        # logger.log("Releasing memory")
+        # del context_embeddings
+        # import gc
+        # gc.collect()
+        # torch.cuda.empty_cache()
 
     def retrieve(
         self,

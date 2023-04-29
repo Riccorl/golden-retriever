@@ -83,7 +83,7 @@ prediction_callbacks:
         k: ${train.top_k}
         verbose: True
         prefix: "train"
-      - _target_: golden_retriever.callbacks.utils_callbacks.FreeUpIndexerVRAMCallback
 
   - _target_: golden_retriever.callbacks.utils_callbacks.ShuffleTrainDatasetCallback
   - _target_: golden_retriever.callbacks.utils_callbacks.PrefetchTrainDatasetCallback
+  - _target_: golden_retriever.callbacks.utils_callbacks.FreeUpIndexerVRAMCallback

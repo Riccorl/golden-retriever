@@ -68,7 +68,7 @@ class SavePredictionsCallback(NLPTemplateCallback):
                 json.dump(predictions, f, indent=2)
 
 
-class FreeUpIndexerVRAMCallback(NLPTemplateCallback):
+class FreeUpIndexerVRAMCallback(pl.Callback):
     def __call__(
         self,
         pl_module: pl.LightningModule,
@@ -76,11 +76,19 @@ class FreeUpIndexerVRAMCallback(NLPTemplateCallback):
         **kwargs,
     ) -> Any:
         logger.log("Freeing up GPU memory")
-        import gc
-        gc.collect()
+
         # remove the index from the GPU memory
-        # pl_module.model._context_embeddings = None
+        pl_module.model._context_embeddings = None
+        pl_module.model._context_index = None
+        pl_module.model._faiss_indexer = None
+
+        import gc
+
+        gc.collect()
         torch.cuda.empty_cache()
+
+    def on_train_epoch_start(self, pl_module: pl.LightningModule, *args, **kwargs):
+        return self(pl_module)
 
 
 class ShuffleTrainDatasetCallback(pl.Callback):
