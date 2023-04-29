@@ -67,23 +67,23 @@ prediction_callbacks:
 
   - _target_: golden_retriever.callbacks.utils_callbacks.SaveRetrieverCallback
 
-  - _target_: golden_retriever.callbacks.custom_callbacks.NegativeAugmentationCallback
-    k: ${train.top_k}
-    batch_size: 128
-    stages: [validate] #[validate, sanity_check]
-    metrics_to_monitor: validate_recall@${train.top_k}
-      # - sanity_check_recall@${train.top_k}
-    threshold: 0.0
-    max_negatives: 15
-    use_faiss: True
-    move_index_to_cpu: True
-    refresh_every_n_epochs: 1
-    other_callbacks:
-      - _target_: golden_retriever.callbacks.evaluation_callbacks.AvgRankingEvaluationCallback
-        k: ${train.top_k}
-        verbose: True
-        prefix: "train"
-      - _target_: golden_retriever.callbacks.utils_callbacks.FreeUpIndexerVRAMCallback
+  # - _target_: golden_retriever.callbacks.custom_callbacks.NegativeAugmentationCallback
+  #   k: ${train.top_k}
+  #   batch_size: 128
+  #   stages: [validate] #[validate, sanity_check]
+  #   metrics_to_monitor: validate_recall@${train.top_k}
+  #     # - sanity_check_recall@${train.top_k}
+  #   threshold: 0.0
+  #   max_negatives: 15
+  #   use_faiss: True
+  #   move_index_to_cpu: True
+  #   refresh_every_n_epochs: 1
+  #   other_callbacks:
+  #     - _target_: golden_retriever.callbacks.evaluation_callbacks.AvgRankingEvaluationCallback
+  #       k: ${train.top_k}
+  #       verbose: True
+  #       prefix: "train"
+  #     - _target_: golden_retriever.callbacks.utils_callbacks.FreeUpIndexerVRAMCallback
 
   - _target_: golden_retriever.callbacks.utils_callbacks.ShuffleTrainDatasetCallback
   - _target_: golden_retriever.callbacks.utils_callbacks.PrefetchTrainDatasetCallback

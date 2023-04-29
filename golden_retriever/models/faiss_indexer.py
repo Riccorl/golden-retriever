@@ -86,6 +86,9 @@ class FaissIndexer:
             self.index_type = index_type
             self.metric = metric
 
+    def reconstruct(self, index: int) -> Union[torch.Tensor, numpy.ndarray]:
+        return self.index.reconstruct(index)
+
     def search(
         self, query: Union[torch.Tensor, numpy.ndarray], k: int = 1
     ) -> FaissOutput:

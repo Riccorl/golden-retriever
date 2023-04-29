@@ -630,7 +630,7 @@ class GoldenRetriever(torch.nn.Module):
         Returns:
             `int`: The index of the context.
         """
-        if self._context_embeddings is None:
+        if self._context_embeddings is None and self._faiss_indexer is None:
             raise ValueError(
                 "The contexts must be indexed before they can be retrieved."
             )
@@ -647,7 +647,7 @@ class GoldenRetriever(torch.nn.Module):
         Returns:
             `str`: The context.
         """
-        if self._context_embeddings is None:
+        if self._context_embeddings is None and self._faiss_indexer is None:
             raise ValueError(
                 "The contexts must be indexed before they can be retrieved."
             )
@@ -664,10 +664,12 @@ class GoldenRetriever(torch.nn.Module):
         Returns:
             `torch.Tensor`: The context vector.
         """
-        if self._context_embeddings is None:
+        if self._context_embeddings is None and self._faiss_indexer is None:
             raise ValueError(
                 "The contexts must be indexed before they can be retrieved."
             )
+        if self._context_embeddings is None:
+            return self._faiss_indexer.reconstruct(index)
         return self._context_embeddings[index]
 
     def get_vector_from_context(self, context: str) -> torch.Tensor:
@@ -681,7 +683,7 @@ class GoldenRetriever(torch.nn.Module):
         Returns:
             `torch.Tensor`: The context vector.
         """
-        if self._context_embeddings is None:
+        if self._context_embeddings is None and self._faiss_indexer is None:
             raise ValueError(
                 "The contexts must be indexed before they can be retrieved."
             )
