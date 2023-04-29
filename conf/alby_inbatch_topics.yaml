@@ -21,7 +21,7 @@ defaults:
   - model: golden_retriever
   - loss: nce_loss
   - optimizer: radamw
-  - scheduler: linear_scheduler_with_warmup
+  - scheduler: linear_scheduler
   - data: iterable_in_batch_negatives
   - evaluation: default_evaluation
   - logging: wandb_logging

@@ -78,6 +78,9 @@ class FreeUpIndexerVRAMCallback(pl.Callback):
         logger.log("Freeing up GPU memory")
 
         # remove the index from the GPU memory
+        # remove the embeddings from the GPU memory first
+        if pl_module.model._context_embeddings is not None:
+            pl_module.model._context_embeddings.cpu()
         pl_module.model._context_embeddings = None
         pl_module.model._context_index = None
         pl_module.model._faiss_indexer = None
@@ -87,7 +90,9 @@ class FreeUpIndexerVRAMCallback(pl.Callback):
         gc.collect()
         torch.cuda.empty_cache()
 
-    def on_train_epoch_start(self, pl_module: pl.LightningModule, *args, **kwargs):
+    def on_train_epoch_start(
+        self, trainer: pl.Trainer, pl_module: pl.LightningModule, *args, **kwargs
+    ) -> None:
         return self(pl_module)
 
 
