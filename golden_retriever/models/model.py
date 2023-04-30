@@ -443,8 +443,6 @@ class GoldenRetriever(torch.nn.Module):
                 # Append the context embeddings to the list
                 context_embeddings.extend([c for c in context_outs])
 
-        # move the context embeddings to the CPU if required
-
         # if move_index_to_cpu:
         context_embeddings = [c.detach().cpu() for c in context_embeddings]
         context_embeddings = torch.stack(context_embeddings, dim=0)
