@@ -82,6 +82,7 @@ if __name__ == "__main__":
     arg_parser.add_argument("--batch_size", type=int, default=128)
     arg_parser.add_argument("--device", type=str, default="cuda")
     arg_parser.add_argument("--index_device", type=str, default="cpu")
+    arg_parser.add_argument("--precision", type=str, default="fp32")
     arg_parser.add_argument("--faiss", action="store_true")
     arg_parser.add_argument("--topics", action="store_true")
 

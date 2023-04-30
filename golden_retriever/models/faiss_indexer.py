@@ -78,6 +78,14 @@ class FaissIndexer:
                     if isinstance(embeddings, torch.Tensor)
                     else embeddings
                 )
+            
+            # convert to float32 if embeddings is a torch.Tensor and is float16
+            if (
+                isinstance(embeddings, torch.Tensor)
+                and embeddings.dtype == torch.float16
+            ):
+                embeddings = embeddings.float()
+
             # self.index.train(embeddings)
             self.index.add(embeddings)
             # faiss.extract_index_ivf(self.index.quantizer).nprobe = 123

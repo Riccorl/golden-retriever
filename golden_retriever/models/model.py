@@ -111,13 +111,6 @@ class SentenceEncoder(torch.nn.Module):
             for param in self.language_model.parameters():
                 param.requires_grad = False
 
-        # normalization layer
-        self.layer_norm_layer: Optional[torch.nn.LayerNorm] = None
-        if layer_norm:
-            self.layer_norm_layer = torch.nn.LayerNorm(
-                self.language_model.config.hidden_size
-            )
-
         # projection layer
         self.projection: Optional[torch.nn.Sequential] = None
         if projection_size is not None:
@@ -127,6 +120,16 @@ class SentenceEncoder(torch.nn.Module):
                 ),
                 torch.nn.Dropout(projection_dropout),
             )
+
+        # normalization layer
+        self.layer_norm_layer: Optional[torch.nn.LayerNorm] = None
+        if layer_norm:
+            layer_norm_size = (
+                projection_size
+                if projection_size is not None
+                else self.language_model.config.hidden_size
+            )
+            self.layer_norm_layer = torch.nn.LayerNorm(layer_norm_size, eps=1e-12)
 
         # save the other parameters
         self.language_model_name = self.language_model.config.name_or_path
@@ -171,11 +174,13 @@ class SentenceEncoder(torch.nn.Module):
                 f"Pooling strategy {pooling_strategy} not supported, use 'cls' or 'mean'"
             )
 
-        if self.layer_norm_layer is not None:
-            pooling = self.layer_norm_layer(pooling)
-
         if self.projection is not None:
             pooling = self.projection(pooling)
+
+        if self.layer_norm_layer is not None:
+            # the normalization layer takes in inout the pooled output and the attention output
+            # pooling = pooling + model_output.attentions[-1]
+            pooling = self.layer_norm_layer(pooling)
 
         return pooling
 
