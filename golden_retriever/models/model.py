@@ -429,6 +429,7 @@ class GoldenRetriever(torch.nn.Module):
         # fucking autocast only wants pure strings like 'cpu' or 'cuda'
         # we need to convert the model device to that
         device_type_for_autocast = str(self.device).split(":")[0]
+        # TODO: autocast doesn't work with CPU and stuff different from bfloat16
         with torch.autocast(
             device_type=device_type_for_autocast,
             dtype=PRECISION_MAP[precision],
