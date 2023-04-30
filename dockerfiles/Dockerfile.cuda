@@ -22,12 +22,12 @@ RUN apt-get update \
     python3-pip \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get -y autoremove \ 
-    && mkdir -p /golden_retriever/resources/model \
+    && mkdir -p /retriever \
     && pip install --upgrade --no-cache-dir -e ".[serve]" --extra-index-url https://download.pytorch.org/whl/cu118 \
     && chmod +x /serve/start.sh
 
 ARG MODEL_NAME_OR_PATH
-COPY ${MODEL_NAME_OR_PATH}/* /golden_retriever/resources/model/
+COPY ${MODEL_NAME_OR_PATH}/* /retriever
 
 WORKDIR /golden_retriever
 

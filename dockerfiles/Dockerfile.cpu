@@ -1,4 +1,5 @@
-FROM tiangolo/uvicorn-gunicorn:python3.10-slim
+# FROM tiangolo/uvicorn-gunicorn:python3.10-slim
+FROM python:3.10.11-slim-bullseye
 
 # Copy and install requirements.txt
 COPY ./requirements.txt ./requirements.txt
@@ -8,11 +9,19 @@ COPY ./README.md /README.md
 COPY ./setup.py /setup.py
 COPY ./SETUP.cfg /SETUP.cfg
 
-RUN mkdir -p /golden_retriever/resources/model \
+RUN mkdir -p /retriever \
     && pip install --upgrade --no-cache-dir -e ".[serve]" --extra-index-url https://download.pytorch.org/whl/cpu \
     && chmod +x /serve/start.sh
 
 ARG MODEL_NAME_OR_PATH
-COPY ${MODEL_NAME_OR_PATH}/* /golden_retriever/resources/model/
+COPY ${MODEL_NAME_OR_PATH}/* /retriever
 
-ENV APP_MODULE=golden_retriever.serve.app:app
+WORKDIR /golden_retriever
+
+ENV PYTHONPATH=/golden_retriever
+
+EXPOSE 80
+
+# Run the start script, it will check for an /golden_retriever/prestart.sh script (e.g. for migrations)
+# And then will start Gunicorn with Uvicorn
+CMD ["/serve/start.sh"]

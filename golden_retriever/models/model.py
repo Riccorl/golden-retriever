@@ -399,14 +399,6 @@ class GoldenRetriever(torch.nn.Module):
             return
 
         # # release the memory
-        # logger.log("Releasing memory")
-        # self._context_embeddings = None
-        # self._context_index = None
-        # self._faiss_indexer = None
-        # import gc
-        # gc.collect()
-        # torch.cuda.empty_cache()
-
         if collate_fn is None:
             tokenizer = self.context_tokenizer
             collate_fn = lambda x: ModelInputs(
@@ -467,24 +459,6 @@ class GoldenRetriever(torch.nn.Module):
         # free up memory from the unused variable
         del context_embeddings
 
-        # if (
-        #     index_precision is not None
-        #     and not use_faiss
-        #     and not move_index_to_cpu
-        #     and self.device.type != "cpu"
-        # ):
-        #     # move it to cpu first
-        #     context_embeddings = [c.detach().cpu() for c in context_embeddings]
-        #     # then cast it to the desired precision
-        #     context_embeddings = [
-        #         c.to(PRECISION_MAP[index_precision]) for c in context_embeddings
-        #     ]
-        #     # then move it back to the device
-        #     context_embeddings = [c.to(self.device) for c in context_embeddings]
-
-        # Stack the context embeddings into a tensor and return it along with the context index
-        # self._context_embeddings = torch.stack(context_embeddings, dim=0)
-
         # Create a dictionary mapping the context index to the context
         self._context_index = Labels()
         self._context_index.add_labels(
@@ -496,13 +470,6 @@ class GoldenRetriever(torch.nn.Module):
             )
             # free up memory
             self._context_embeddings = None
-
-        # # release the memory again
-        # logger.log("Releasing memory")
-        # del context_embeddings
-        # import gc
-        # gc.collect()
-        # torch.cuda.empty_cache()
 
     def retrieve(
         self,
@@ -1007,10 +974,16 @@ class GoldenRetriever(torch.nn.Module):
         else:
             logger.log("Loading index vectors")
             model._context_embeddings = torch.load(index_vectors, map_location="cpu")
-            if device == "cuda":
+            # check the precision of the index
+            if model._context_embeddings.dtype != PRECISION_MAP[index_precision]:
+                logger.log(
+                    f"Index vectors are of type {model._context_embeddings.dtype}. "
+                    f"Converting to {PRECISION_MAP[index_precision]}."
+                )
                 model._context_embeddings = model._context_embeddings.to(
                     PRECISION_MAP[index_precision]
                 )
+            if device == "cuda":
                 model._context_embeddings = model._context_embeddings.to(device)
 
         # move model to device

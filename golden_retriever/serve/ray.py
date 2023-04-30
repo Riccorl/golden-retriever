@@ -7,14 +7,14 @@ from fastapi import FastAPI, HTTPException
 from ray import serve
 
 from golden_retriever import GoldenRetriever
-from golden_retriever.common.log import get_console_logger
+from golden_retriever.common.log import get_console_logger, get_logger
 
 from ipa.preprocessing.tokenizers.spacy_tokenizer import SpacyTokenizer
 
-from spacy.lang.en import English
+from golden_retriever.models.model import RetrieveOutput
 
-
-logger = get_console_logger()
+logger = get_logger(level="DEBUG")
+console_logger = get_console_logger()
 
 VERSION = {}  # type: ignore
 with open(Path(__file__).parent.parent / "version.py", "r") as version_file:
@@ -22,8 +22,12 @@ with open(Path(__file__).parent.parent / "version.py", "r") as version_file:
 
 # variables
 DEVICE = os.environ.get("DEVICE", "cpu")
+INDEX_DEVICE = os.environ.get("INDEX_DEVICE", DEVICE)
+PRECISION = os.environ.get("PRECISION", "fp32")
+INDEX_PRECISION = os.environ.get("INDEX_PRECISION", "fp32")
 MODEL_NAME_OR_PATH = os.environ.get("MODEL_NAME_OR_PATH", None)
 TOP_K = int(os.environ.get("TOP_K", 100))
+USE_FAISS = os.environ.get("USE_FAISS", False)
 
 app = FastAPI(
     title="Golden Retriever AIDA",
@@ -32,12 +36,34 @@ app = FastAPI(
 )
 
 
-@serve.deployment(ray_actor_options={"num_gpus": 1})
+@serve.deployment(
+    ray_actor_options={"num_gpus": 1 if DEVICE == "cuda" else 0},
+    autoscaling_config={"min_replicas": 1, "max_replicas": 2},
+)
 @serve.ingress(app)
-class ModelServer:
+class GoldenRetrieverServer:
     def __init__(self):
+        # check that the model exists
+        if not os.path.exists(MODEL_NAME_OR_PATH):
+            raise ValueError(
+                f"Model {MODEL_NAME_OR_PATH} does not exist. Please specify a valid path."
+            )
+
+        # log buch of stuff for debugging
+        logger.info(f"MODEL_NAME_OR_PATH: {MODEL_NAME_OR_PATH}")
+        logger.info(f"TOP_K: {TOP_K}")
+        logger.info(f"DEVICE: {DEVICE}")
+        logger.info(f"INDEX_DEVICE: {INDEX_DEVICE}")
+        logger.info(f"PRECISION: {PRECISION}")
+        logger.info(f"INDEX_PRECISION: {INDEX_PRECISION}")
+        logger.info(f"USE_FAISS: {USE_FAISS}")
+
         self.retriever = GoldenRetriever.from_pretrained(
-            MODEL_NAME_OR_PATH, device=DEVICE
+            MODEL_NAME_OR_PATH,
+            device=DEVICE,
+            index_device=INDEX_DEVICE,
+            index_precision=INDEX_PRECISION,
+            load_faiss_index=USE_FAISS,
         )
         self.retriever.eval()
 
@@ -48,7 +74,7 @@ class ModelServer:
         # try:
         if isinstance(documents, str):
             documents = [documents]
-        return self.retriever.retrieve(documents, k=TOP_K)
+        return self.retriever.retrieve(documents, k=TOP_K, precision=PRECISION)
         # except Exception as e:
         #     raise HTTPException(status_code=500, detail=f"Server Error: {e}")
 
@@ -144,7 +170,7 @@ class ModelServer:
                     t_batch = [t for t, _ in batch]
                     t_p_batch = [t_p for _, t_p in batch]
                     predictions, _ = self.retriever.retrieve(
-                        t_batch, t_p_batch, k=TOP_K
+                        t_batch, t_p_batch, k=TOP_K, precision=PRECISION
                     )
                     windows_contexts.extend(predictions)
                     batch = []
@@ -153,7 +179,9 @@ class ModelServer:
             if len(batch) > 0:
                 t_batch = [t for t, _ in batch]
                 t_p_batch = [t_p for _, t_p in batch]
-                predictions, _ = self.retriever.retrieve(t_batch, t_p_batch, k=TOP_K)
+                predictions, _ = self.retriever.retrieve(
+                    t_batch, t_p_batch, k=TOP_K, precision=PRECISION
+                )
                 windows_contexts.extend(predictions)
 
             # add context to document windows
@@ -168,4 +196,4 @@ class ModelServer:
             raise HTTPException(status_code=500, detail=f"Server Error: {e}")
 
 
-served = ModelServer.bind()
+server = GoldenRetrieverServer.bind()
