@@ -83,6 +83,7 @@ class SentenceEncoder(torch.nn.Module):
         from_pretrained: bool = True,
         pooling_strategy: str = "mean",
         layer_norm: bool = False,
+        layer_norm_eps: float = 1e-12,
         projection_size: Optional[int] = None,
         projection_dropout: float = 0.1,
         load_ort_model: bool = False,
@@ -129,7 +130,9 @@ class SentenceEncoder(torch.nn.Module):
                 if projection_size is not None
                 else self.language_model.config.hidden_size
             )
-            self.layer_norm_layer = torch.nn.LayerNorm(layer_norm_size, eps=1e-12)
+            self.layer_norm_layer = torch.nn.LayerNorm(
+                layer_norm_size, eps=layer_norm_eps
+            )
 
         # save the other parameters
         self.language_model_name = self.language_model.config.name_or_path
