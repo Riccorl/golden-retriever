@@ -38,6 +38,7 @@ model_checkpoint_callback:
   mode: max
   verbose: True
   save_top_k: 1
+  save_last: True
   filename: 'checkpoint-val_recall@${train.top_k}_{val_recall@${train.top_k}:.4f}-epoch_{epoch:02d}'
   auto_insert_metric_name: False
 
