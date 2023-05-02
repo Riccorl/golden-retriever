@@ -1,3 +1,4 @@
+import logging
 import os
 from pathlib import Path
 from typing import List, Tuple, Union
@@ -11,9 +12,8 @@ from golden_retriever.common.log import get_console_logger, get_logger
 
 from ipa.preprocessing.tokenizers.spacy_tokenizer import SpacyTokenizer
 
-from golden_retriever.models.model import RetrieveOutput
 
-logger = get_logger(level="DEBUG")
+logger = get_logger(level=logging.INFO)
 console_logger = get_console_logger()
 
 VERSION = {}  # type: ignore
@@ -30,9 +30,9 @@ TOP_K = int(os.environ.get("TOP_K", 100))
 USE_FAISS = os.environ.get("USE_FAISS", False)
 
 app = FastAPI(
-    title="Golden Retriever AIDA",
+    title="Golden Retriever",
     version=VERSION["VERSION"],
-    description="Golden Retriever finetuned on AIDA",
+    description="Golden Retriever REST API",
 )
 
 
@@ -49,7 +49,7 @@ class GoldenRetrieverServer:
                 f"Model {MODEL_NAME_OR_PATH} does not exist. Please specify a valid path."
             )
 
-        # log buch of stuff for debugging
+        # log stuff for debugging
         logger.info(f"MODEL_NAME_OR_PATH: {MODEL_NAME_OR_PATH}")
         logger.info(f"TOP_K: {TOP_K}")
         logger.info(f"DEVICE: {DEVICE}")
@@ -70,7 +70,7 @@ class GoldenRetrieverServer:
         self.tokenizer = SpacyTokenizer(language="en")
 
     @app.post("/api/retrieve")
-    def retrieve_enpoint(self, documents: Union[str, List[str]]):
+    def retrieve_endpoint(self, documents: Union[str, List[str]]):
         # try:
         if isinstance(documents, str):
             documents = [documents]
@@ -79,7 +79,7 @@ class GoldenRetrieverServer:
         #     raise HTTPException(status_code=500, detail=f"Server Error: {e}")
 
     @app.post("/api/gerbil")
-    def gerbil_enpoint(self, documents: Union[str, List[str]]):
+    def gerbil_endpoint(self, documents: Union[str, List[str]]):
         def tokenize(
             tokenizer: SpacyTokenizer, document: str
         ) -> Tuple[List[str], List[Tuple[int, int]]]:
@@ -94,7 +94,7 @@ class GoldenRetrieverServer:
         def split_document_by_window(
             tokenizer: SpacyTokenizer,
             document: str,
-            window_size: str,
+            window_size: int,
             stride: int,
             doc_id: int = 0,
             doc_topic: str = None,
@@ -169,20 +169,30 @@ class GoldenRetrieverServer:
                 if len(batch) == 64:
                     t_batch = [t for t, _ in batch]
                     t_p_batch = [t_p for _, t_p in batch]
-                    predictions, _ = self.retriever.retrieve(
+                    batch_predictions = self.retriever.retrieve(
                         t_batch, t_p_batch, k=TOP_K, precision=PRECISION
                     )
-                    windows_contexts.extend(predictions)
+                    windows_contexts.extend(
+                        [
+                            [p.label for p in predictions]
+                            for predictions in batch_predictions
+                        ]
+                    )
                     batch = []
 
             # leftover batch
             if len(batch) > 0:
                 t_batch = [t for t, _ in batch]
                 t_p_batch = [t_p for _, t_p in batch]
-                predictions, _ = self.retriever.retrieve(
+                batch_predictions = self.retriever.retrieve(
                     t_batch, t_p_batch, k=TOP_K, precision=PRECISION
                 )
-                windows_contexts.extend(predictions)
+                windows_contexts.extend(
+                    [
+                        [p.label for p in predictions]
+                        for predictions in batch_predictions
+                    ]
+                )
 
             # add context to document windows
             for window, contexts in zip(document_windows, windows_contexts):

@@ -52,7 +52,7 @@ def add_candidates(
                 )
                 for i, sample in enumerate(documents_batch):
                     candidate_titles = [
-                        c.split(" <def>", 1)[0] for c in retriever_outs.contexts[i]
+                        c.label.split(" <def>", 1)[0] for c in retriever_outs[i]
                     ]
                     sample["window_candidates"] = candidate_titles
                     output_data.append(sample)
@@ -64,7 +64,7 @@ def add_candidates(
             )
             for i, sample in enumerate(documents_batch):
                 candidate_titles = [
-                    c.split(" <def>", 1)[0] for c in retriever_outs.contexts[i]
+                    c.label.split(" <def>", 1)[0] for c in retriever_outs[i]
                 ]
                 sample["window_candidates"] = candidate_titles
                 output_data.append(sample)

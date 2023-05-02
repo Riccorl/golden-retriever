@@ -65,14 +65,14 @@ class GoldenRetrieverOutput(tr.file_utils.ModelOutput):
 
 
 @dataclass
-class RetrieveOutput:
+class RetrievedSample:
     """
     Dataclass for the output of the GoldenRetriever model.
     """
 
-    scores: List[List[float]]
-    indices: List[List[int]]
-    contexts: List[List[str]]
+    score: float
+    index: int
+    label: str
 
 
 class SentenceEncoder(torch.nn.Module):
@@ -370,8 +370,8 @@ class GoldenRetriever(torch.nn.Module):
         use_faiss: bool = False,
         use_ort: bool = False,
         move_index_to_cpu: bool = False,
-        precision: Optional[str] = None,
-        index_precision: Optional[str] = None,
+        precision: Optional[Union[str, int]] = None,
+        index_precision: Optional[Union[str, int]] = None,
     ):
         """
         Index the contexts for later retrieval.
@@ -395,6 +395,10 @@ class GoldenRetriever(torch.nn.Module):
                 Whether to use onnxruntime for the indexing.
             move_index_to_cpu (`bool`):
                 Whether to move the index to the CPU after the indexing.
+            precision (`Optional[Union[str, int]]`):
+                The precision to use for the model.
+            index_precision (`Optional[Union[str, int]]`):
+                The precision to use for the index.
         """
         if self._context_embeddings is not None and not force_reindex:
             return
@@ -450,7 +454,7 @@ class GoldenRetriever(torch.nn.Module):
         # move the context embeddings to the CPU
         context_embeddings = [c.detach().cpu() for c in context_embeddings]
         # stack it
-        context_embeddings = torch.stack(context_embeddings, dim=0)
+        context_embeddings: torch.Tensor = torch.stack(context_embeddings, dim=0)
         # move the context embeddings to the gpu if needed
         # the move to cpu and then to gpu is needed to avoid OOM when using mixed precision
         if not move_index_to_cpu:
@@ -485,8 +489,8 @@ class GoldenRetriever(torch.nn.Module):
         token_type_ids: Optional[torch.Tensor] = None,
         k: Optional[int] = None,
         max_length: Optional[int] = None,
-        precision: Optional[str] = None,
-    ) -> RetrieveOutput:
+        precision: Optional[Union[str, int]] = None,
+    ) -> List[List[RetrievedSample]]:
         """
         Retrieve the contexts for the questions.
 
@@ -505,9 +509,11 @@ class GoldenRetriever(torch.nn.Module):
                 The number of top contexts to retrieve.
             max_length (`Optional[int]`):
                 The maximum length of the questions.
+            precision (`Optional[Union[str, int]]`):
+                The precision to use for the model.
 
         Returns:
-            `Tuple[List[List[str]], List[List[int]]]`: The retrieved contexts and their indices.
+            `List[List[RetrievedSample]]`: The retrieved contexts and their indices.
         """
         if self._context_embeddings is None and self._faiss_indexer is None:
             raise ValueError(
@@ -548,8 +554,8 @@ class GoldenRetriever(torch.nn.Module):
             faiss_outs: FaissOutput = self._faiss_indexer.search(
                 self.question_encoder(**model_inputs), k=k
             )
-            top_k: torch.Tensor = faiss_outs.indices
-            scores: torch.Tensor = faiss_outs.distances
+            batch_top_k: torch.Tensor = faiss_outs.indices
+            batch_scores: torch.Tensor = faiss_outs.distances
         else:
             # fucking autocast only wants pure strings like 'cpu' or 'cuda'
             # we need to convert the model device to that
@@ -582,19 +588,29 @@ class GoldenRetriever(torch.nn.Module):
                 retriever_out: Tuple = torch.topk(
                     similarity, k=min(k, similarity.shape[-1]), dim=1
                 )
-                top_k: torch.Tensor = retriever_out.indices
-                scores: torch.Tensor = retriever_out.values
+                batch_top_k: torch.Tensor = retriever_out.indices
+                batch_scores: torch.Tensor = retriever_out.values
         # get int values
-        top_k: List[List[int]] = top_k.cpu().tolist()
+        batch_top_k: List[List[int]] = batch_top_k.cpu().tolist()
         # get float values
-        scores: List[List[float]] = scores.cpu().tolist()
+        batch_scores: List[List[float]] = batch_scores.cpu().tolist()
         # Retrieve the contexts corresponding to the indices
-        contexts = [
+        batch_contexts = [
             [self._context_index.get_label_from_index(i) for i in indices]
-            for indices in top_k
+            for indices in batch_top_k
         ]
-        # return contexts, top_k
-        return RetrieveOutput(contexts=contexts, indices=top_k, scores=scores)
+        # build the output object
+        batch_retrieved_samples = [
+            [
+                RetrievedSample(label=context, index=index, score=score)
+                for context, index, score in zip(contexts, indices, scores)
+            ]
+            for contexts, indices, scores in zip(
+                batch_contexts, batch_top_k, batch_scores
+            )
+        ]
+        # return
+        return batch_retrieved_samples
 
     def get_index_from_context(self, context: str) -> int:
         """
@@ -857,7 +873,7 @@ class GoldenRetriever(torch.nn.Module):
         strict: bool = True,
         device: str = "cpu",
         index_device: str = "cpu",
-        index_precision: str = "fp32",
+        index_precision: Optional[str] = None,
         load_faiss_index: bool = False,
         filenames: Optional[List[str]] = None,
         *args,
@@ -876,8 +892,12 @@ class GoldenRetriever(torch.nn.Module):
                 The device to load the retriever to. Defaults to `cpu`.
             index_device (`str`, optional):
                 The device to load the index to. Defaults to `cpu`.
+            index_precision (`str`, optional):
+                The precision to load the index to. Defaults to None.
             load_faiss_index (`bool`, optional):
                 Whether to load the faiss index. Defaults to `False`.
+            filenames (`Optional[List[str]]`, optional):
+                The filenames of the files to load. If `None`, the default filenames will be used.
             *args:
                 Additional positional arguments.
             **kwargs:
@@ -985,7 +1005,10 @@ class GoldenRetriever(torch.nn.Module):
             logger.log("Loading index vectors")
             model._context_embeddings = torch.load(index_vectors, map_location="cpu")
             # check the precision of the index
-            if model._context_embeddings.dtype != PRECISION_MAP[index_precision]:
+            if (
+                index_precision
+                and model._context_embeddings.dtype != PRECISION_MAP[index_precision]
+            ):
                 logger.log(
                     f"Index vectors are of type {model._context_embeddings.dtype}. "
                     f"Converting to {PRECISION_MAP[index_precision]}."
