@@ -27,6 +27,8 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         num_workers: int = 8,
         use_faiss: bool = False,
         move_index_to_cpu: bool = True,
+        precision: Union[str, int] = 32,
+        index_precision: Union[str, int] = 32,
         force_reindex: bool = True,
         retriever_dir: Optional[Path] = None,
         stages: Set[Union[str, RunningStage]] = None,
@@ -41,6 +43,8 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         self.num_workers = num_workers
         self.use_faiss = use_faiss
         self.move_index_to_cpu = move_index_to_cpu
+        self.precision = precision
+        self.index_precision = index_precision
         self.force_reindex = force_reindex
         self.retriever_dir = retriever_dir
 
@@ -136,8 +140,8 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                 force_reindex=force_reindex,
                 use_faiss=self.use_faiss,
                 move_index_to_cpu=self.move_index_to_cpu,
-                precision="fp16",
-                index_precision="fp16",
+                precision=self.precision,
+                index_precision=self.index_precision,
             )
 
             pl_module_original_device = pl_module.device
@@ -156,10 +160,10 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                 batch = batch.to(pl_module.device)
                 # get the top-k indices
                 retriever_output = retriever.retrieve(
-                    **batch.questions, k=self.k, precision="fp16"
+                    **batch.questions, k=self.k, precision=self.precision
                 )
                 # compute recall at k
-                for batch_idx, retrieved_index in enumerate(retriever_output.indices):
+                for batch_idx, retrieved_samples in enumerate(retriever_output):
                     # get the positive contexts
                     gold_contexts = batch.positives[batch_idx]
                     # get the index of the gold contexts in the retrieved contexts
@@ -167,10 +171,11 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                         retriever.get_index_from_context(context)
                         for context in gold_contexts
                     ]
+                    retrieved_indices = [r.index for r in retrieved_samples]
                     # correct predictions are the contexts that are in the top-k and are gold
-                    correct_indices = set(gold_context_indices) & set(retrieved_index)
+                    correct_indices = set(gold_context_indices) & set(retrieved_indices)
                     # wrong predictions are the contexts that are in the top-k and are not gold
-                    wrong_indices = set(retrieved_index) - set(gold_context_indices)
+                    wrong_indices = set(retrieved_indices) - set(gold_context_indices)
                     # add the predictions to the list
                     prediction_output = {
                         "sample_idx": batch.sample_idx[batch_idx],

@@ -12,6 +12,27 @@ import tqdm
 from golden_retriever import GoldenRetriever
 
 
+def compute_retriever_stats(dataset) -> None:
+    correct, total = 0, 0
+    for sample in dataset:
+        window_candidates = sample["window_candidates"]
+        window_candidates = [c.replace("_", " ").lower() for c in window_candidates]
+
+        for ss, se, label in sample["window_labels"]:
+            if label == "--NME--":
+                continue
+            if label.replace("_", " ").lower() in window_candidates:
+                correct += 1
+            total += 1
+
+    recall = correct / total
+    print("Recall:", recall)
+
+    # doc_level_correct, doc_level_total = 0, 0
+    # for sample in dataset:
+    #     doc_id = sample["doc_id"]
+
+
 @torch.no_grad()
 def add_candidates(
     retriever_name_or_path: Union[str, os.PathLike],
@@ -48,13 +69,19 @@ def add_candidates(
                 if topics:
                     topics_pair = [d["doc_topic"] for d in documents_batch]
                 retriever_outs = retriever.retrieve(
-                    [d["text"] for d in documents_batch], text_pair=topics_pair, k=100, precision=precision
+                    [d["text"] for d in documents_batch],
+                    text_pair=topics_pair,
+                    k=100,
+                    precision=precision,
                 )
                 for i, sample in enumerate(documents_batch):
                     candidate_titles = [
                         c.label.split(" <def>", 1)[0] for c in retriever_outs[i]
                     ]
                     sample["window_candidates"] = candidate_titles
+                    sample["window_candidates_scores"] = [
+                        c.score for c in retriever_outs[i]
+                    ]
                     output_data.append(sample)
                 documents_batch = []
 
@@ -67,11 +94,17 @@ def add_candidates(
                     c.label.split(" <def>", 1)[0] for c in retriever_outs[i]
                 ]
                 sample["window_candidates"] = candidate_titles
+                sample["window_candidates_scores"] = [
+                    c.score for c in retriever_outs[i]
+                ]
                 output_data.append(sample)
 
     with open(output_path, "w") as f:
         for sample in output_data:
             f.write(json.dumps(sample) + "\n")
+
+    # measure some metrics
+    compute_retriever_stats(output_data)
 
 
 if __name__ == "__main__":
