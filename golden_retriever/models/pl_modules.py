@@ -76,7 +76,7 @@ class GoldenRetrieverPLModule(pl.LightningModule):
                     ],
                     "weight_decay": self.hparams.optimizer.weight_decay,
                     # "lr": 1e-4,
-                }, 
+                },
                 {
                     "params": [
                         p

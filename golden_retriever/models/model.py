@@ -22,6 +22,7 @@ from golden_retriever.common.utils import (
     from_cache,
     is_package_available,
     is_remote_url,
+    sapienzanlp_model_urls,
 )
 from golden_retriever.data.datasets import BaseDataset
 from golden_retriever.data.labels import Labels
@@ -446,10 +447,12 @@ class GoldenRetriever(torch.nn.Module):
                 # Append the context embeddings to the list
                 context_embeddings.extend([c for c in context_outs])
 
-        # if move_index_to_cpu:
+        # move the context embeddings to the CPU
         context_embeddings = [c.detach().cpu() for c in context_embeddings]
+        # stack it
         context_embeddings = torch.stack(context_embeddings, dim=0)
-
+        # move the context embeddings to the gpu if needed
+        # the move to cpu and then to gpu is needed to avoid OOM when using mixed precision
         if not move_index_to_cpu:
             if index_precision:
                 context_embeddings = context_embeddings.to(
@@ -856,6 +859,7 @@ class GoldenRetriever(torch.nn.Module):
         index_device: str = "cpu",
         index_precision: str = "fp32",
         load_faiss_index: bool = False,
+        filenames: Optional[List[str]] = None,
         *args,
         **kwargs,
     ) -> "GoldenRetriever":
@@ -898,11 +902,15 @@ class GoldenRetriever(torch.nn.Module):
             # probably model_name_or_dir is a sapienzanlp model id
             # guess the url and try to download
             model_name_or_dir_ = model_name_or_dir
-            raise ValueError(f"Providing a model id is not supported yet.")
-            # model_archive = sapienzanlp_model_urls(model_name_or_dir_)
+            # raise ValueError(f"Providing a model id is not supported yet.")
+            model_archive = sapienzanlp_model_urls(model_name_or_dir_)
+
+        if filenames is None:
+            filenames = [CONFIG_NAME, WEIGHTS_NAME, INDEX_VECTOR_NAME, INDEX_NAME]
 
         model_dir = from_cache(
             model_archive,
+            filenames=filenames,
             cache_dir=cache_dir,
             force_download=force_download,
         )

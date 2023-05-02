@@ -8,11 +8,16 @@ import tempfile
 from functools import partial
 from hashlib import sha256
 from pathlib import Path
-from typing import Any, BinaryIO, Optional, Union
+from typing import Any, BinaryIO, Dict, List, Optional, Union
 from urllib.parse import urlparse
 from zipfile import ZipFile, is_zipfile
 
 import huggingface_hub
+from huggingface_hub import hf_hub_download
+
+from transformers.utils.hub import download_url as hf_hub_download_url
+from transformers.utils.hub import cached_file as hf_cached_file
+
 import requests
 import tqdm
 from filelock import FileLock
@@ -25,12 +30,35 @@ ONNX_WEIGHTS_NAME = "weights.onnx"
 CONFIG_NAME = "config.yaml"
 LABELS_NAME = "labels.json"
 
+# SAPIENZANLP_USER_NAME = "sapienzanlp"
+SAPIENZANLP_USER_NAME = "riccorl"
+SAPIENZANLP_HF_MODEL_REPO_URL = "riccorl/{model_id}"
+SAPIENZANLP_HF_MODEL_REPO_ARCHIVE_URL = (
+    f"{SAPIENZANLP_HF_MODEL_REPO_URL}/resolve/main/model.zip"
+)
 # path constants
 SAPIENZANLP_CACHE_DIR = os.getenv("SAPIENZANLP_CACHE_DIR", Path.home() / ".sapienzanlp")
 SAPIENZANLP_DATE_FORMAT = "%Y-%m-%d %H-%M-%S"
 
 
 logger = get_logger()
+
+
+def sapienzanlp_model_urls(model_id: str) -> str:
+    """
+    Returns the URL for a possible SapienzaNLP valid model.
+
+    Args:
+        model_id (:obj:`str`):
+            A SapienzaNLP model id.
+
+    Returns:
+        :obj:`str`: The url for the model id.
+    """
+    # check if there is already the namespace of the user
+    if "/" in model_id:
+        return model_id
+    return SAPIENZANLP_HF_MODEL_REPO_URL.format(model_id=model_id)
 
 
 def is_package_available(package_name: str) -> bool:
@@ -280,10 +308,54 @@ def download_and_cache(
     return cache_path
 
 
+def download_from_hf(
+    path_or_repo_id: Union[str, Path],
+    filenames: Optional[List[str]],
+    cache_dir: Union[str, Path] = None,
+    force_download: bool = False,
+    resume_download: bool = False,
+    proxies: Optional[Dict[str, str]] = None,
+    use_auth_token: Optional[Union[bool, str]] = None,
+    revision: Optional[str] = None,
+    local_files_only: bool = False,
+    subfolder: str = "",
+):
+    if isinstance(path_or_repo_id, Path):
+        path_or_repo_id = str(path_or_repo_id)
+
+    downloaded_paths = []
+    for filename in filenames:
+        downloaded_path = hf_cached_file(
+            path_or_repo_id,
+            filename,
+            cache_dir=cache_dir,
+            force_download=force_download,
+            proxies=proxies,
+            resume_download=resume_download,
+            use_auth_token=use_auth_token,
+            revision=revision,
+            local_files_only=local_files_only,
+            subfolder=subfolder,
+        )
+        downloaded_paths.append(downloaded_path)
+
+    # we want the folder where the files are downloaded
+    # the best guess is the parent folder of the first file
+    probably_the_folder = Path(downloaded_paths[0]).parent
+    return probably_the_folder
+
+
 def from_cache(
     url_or_filename: Union[str, Path],
     cache_dir: Union[str, Path] = None,
     force_download: bool = False,
+    resume_download: bool = False,
+    proxies: Optional[Dict[str, str]] = None,
+    use_auth_token: Optional[Union[bool, str]] = None,
+    revision: Optional[str] = None,
+    local_files_only: bool = False,
+    subfolder: str = "",
+    filenames: Optional[List[str]] = None,
 ) -> Path:
     """
 
@@ -298,25 +370,54 @@ def from_cache(
     if cache_dir is None:
         cache_dir = SAPIENZANLP_CACHE_DIR
 
-    if is_remote_url(url_or_filename):
+    if file_exists(url_or_filename):
+        logger.info(f"{url_or_filename} is a local path or file")
+        output_path = url_or_filename
+    elif is_remote_url(url_or_filename):
         # URL, so get it from the cache (downloading if necessary)
         output_path = download_and_cache(
             url_or_filename,
             cache_dir=cache_dir,
             force_download=force_download,
         )
-    elif file_exists(url_or_filename):
-        logger.info(f"{url_or_filename} is a local path or file")
-        # File, and it exists.
-        output_path = url_or_filename
-    elif urlparse(url_or_filename).scheme == "":
-        # File, but it doesn't exist.
-        raise EnvironmentError(f"file {url_or_filename} not found")
     else:
-        # Something unknown
-        raise ValueError(
-            f"unable to parse {url_or_filename} as a URL or as a local path"
+        if filenames is None:
+            filenames = [WEIGHTS_NAME, CONFIG_NAME, LABELS_NAME]
+        output_path = download_from_hf(
+            url_or_filename,
+            filenames,
+            cache_dir,
+            force_download,
+            resume_download,
+            proxies,
+            use_auth_token,
+            revision,
+            local_files_only,
+            subfolder,
         )
+
+    # if is_hf_hub_url(url_or_filename):
+    # HuggingFace Hub
+    # output_path = hf_hub_download_url(url_or_filename)
+    # elif is_remote_url(url_or_filename):
+    #     # URL, so get it from the cache (downloading if necessary)
+    #     output_path = download_and_cache(
+    #         url_or_filename,
+    #         cache_dir=cache_dir,
+    #         force_download=force_download,
+    #     )
+    # elif file_exists(url_or_filename):
+    #     logger.info(f"{url_or_filename} is a local path or file")
+    #     # File, and it exists.
+    #     output_path = url_or_filename
+    # elif urlparse(url_or_filename).scheme == "":
+    #     # File, but it doesn't exist.
+    #     raise EnvironmentError(f"file {url_or_filename} not found")
+    # else:
+    #     # Something unknown
+    #     raise ValueError(
+    #         f"unable to parse {url_or_filename} as a URL or as a local path"
+    #     )
 
     if dir_exists(output_path) or (
         not is_zipfile(output_path) and not tarfile.is_tarfile(output_path)

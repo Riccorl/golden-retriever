@@ -53,7 +53,7 @@ def upload(
     organization: Optional[str] = None,
     repo_name: Optional[str] = None,
     commit: Optional[str] = None,
-    transformers: bool = False,
+    archive: bool = False,
 ):
     token = huggingface_hub.HfFolder.get_token()
     if token is None:
@@ -77,15 +77,16 @@ def upload(
         )
 
         tmp_path = Path(tmpdir)
-        if transformers:
+        if archive:
+            # otherwise we zip the model_dir
+            logger.debug(f"Zipping {model_dir} to {tmp_path}")
+            zip_run(model_dir, tmp_path)
+            create_info_file(tmp_path)
+        else:
             # if the user wants to upload a transformers model, we don't need to zip it
             # we just need to copy the files to the tmpdir
             logger.debug(f"Copying {model_dir} to {tmpdir}")
             os.system(f"cp -r {model_dir}/* {tmpdir}")
-        else:
-            # otherwise we zip the model_dir
-            zip_run(model_dir, tmp_path)
-            create_info_file(tmp_path)
 
         # this method automatically puts large files (>10MB) into git lfs
         repo.push_to_hub(commit_message=commit or "Automatic push from sapienzanlp")
@@ -109,9 +110,12 @@ def parse_args() -> argparse.Namespace:
         "--commit", help="Commit message to use when pushing to the HuggingFace Hub"
     )
     parser.add_argument(
-        "--transformers",
+        "--archive",
         action="store_true",
-        help="Upload as a transformers compatible model",
+        help="""
+            Whether to compress the model directory before uploading it. 
+            If True, the model directory will be zipped and the zip file will be uploaded. 
+            If False, the model directory will be uploaded as is.""",
     )
     return parser.parse_args()
 

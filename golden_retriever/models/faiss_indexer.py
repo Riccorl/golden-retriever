@@ -78,7 +78,7 @@ class FaissIndexer:
                     if isinstance(embeddings, torch.Tensor)
                     else embeddings
                 )
-            
+
             # convert to float32 if embeddings is a torch.Tensor and is float16
             if (
                 isinstance(embeddings, torch.Tensor)
