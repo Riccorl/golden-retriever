@@ -172,6 +172,10 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                         for context in gold_contexts
                     ]
                     retrieved_indices = [r.index for r in retrieved_samples]
+                    retrieved_contexts = [
+                        r.label for r in retrieved_samples
+                    ]
+                    retrieved_scores = [r.score for r in retrieved_samples]
                     # correct predictions are the contexts that are in the top-k and are gold
                     correct_indices = set(gold_context_indices) & set(retrieved_indices)
                     # wrong predictions are the contexts that are in the top-k and are not gold
@@ -180,8 +184,8 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                     prediction_output = {
                         "sample_idx": batch.sample_idx[batch_idx],
                         "gold": gold_contexts,
-                        "predictions": retriever_output.contexts[batch_idx],
-                        "scores": retriever_output.scores[batch_idx],
+                        "predictions": retrieved_contexts,
+                        "scores": retrieved_scores,
                         "correct": [
                             retriever.get_context_from_index(i) for i in correct_indices
                         ],

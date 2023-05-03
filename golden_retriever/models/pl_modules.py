@@ -75,7 +75,7 @@ class GoldenRetrieverPLModule(pl.LightningModule):
                         p for n, p in param_optimizer if "language_model" not in n
                     ],
                     "weight_decay": self.hparams.optimizer.weight_decay,
-                    # "lr": 1e-4,
+                    "lr": 1e-4,
                 },
                 {
                     "params": [

@@ -8,7 +8,7 @@ pl_module:
       _target_: golden_retriever.models.model.SentenceEncoder
       language_model: ${model.language_model}
       pooling_strategy: "mean"
-      projection_size: null
+      # projection_size: 512
       layer_norm: True
       layer_norm_eps: 1e-12
     context_encoder: null

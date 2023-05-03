@@ -122,7 +122,6 @@ def train(conf: omegaconf.DictConfig) -> None:
         if "ckpt_path" in conf.train and conf.train.ckpt_path is not None:
             logger.log(f"Loading checkpoint from {conf.train.ckpt_path}")
             pl_module.load_state_dict(torch.load(conf.train.ckpt_path)["state_dict"])
-
         # try:
         #     pl_module = torch.compile(pl_module, backend="inductor")
         # except Exception as e:

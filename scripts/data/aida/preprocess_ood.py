@@ -109,7 +109,7 @@ def preprocess(
         # doc_id, doc_topic = doc_info.split(" ")
         doc_id = doc_info
         doc_topic = None
-    
+
         if "testa" in doc_id:
             split = "dev"
         elif "testb" in doc_id:
@@ -155,29 +155,30 @@ def preprocess(
             window["window_labels"] = window_level_labels
 
             # now we need to map the labels to the tokens
-            window_level_labels_but_for_tokens = []
-            for label in window_level_labels:
-                start_char, end_char, label_text = label
-                start_token = None
-                end_token = None
-                for token_id, (start, end) in enumerate(
-                    zip(
-                        window["token2char_start"].values(),
-                        window["token2char_end"].values(),
-                    )
-                ):
-                    if start_char == start:
-                        start_token = token_id
-                    if end_char == end:
-                        end_token = token_id + 1
-                if start_token is None or end_token is None:
-                    raise ValueError(
-                        f"Could not find token for label: {label} in window: {window}"
-                    )
-                window_level_labels_but_for_tokens.append(
-                    [start_token, end_token, label_text]
-                )
-            window["window_labels_tokens"] = window_level_labels_but_for_tokens
+            # window_level_labels_but_for_tokens = []
+            # for label in window_level_labels:
+            #     start_char, end_char, label_text = label
+            #     start_token = None
+            #     end_token = None
+            #     for token_id, (start, end) in enumerate(
+            #         zip(
+            #             window["token2char_start"].values(),
+            #             window["token2char_end"].values(),
+            #         )
+            #     ):
+            #         if start_char == start:
+            #             start_token = token_id
+            #         if end_char == end:
+            #             end_token = token_id + 1
+            #     if start_token is None or end_token is None:
+            #         raise ValueError(
+            #             f"Could not find token for label: {label} in window: {window} "
+            #             f"(start_token: {start_token}, end_token: {end_token})"
+            #         )
+            #     window_level_labels_but_for_tokens.append(
+            #         [start_token, end_token, label_text]
+            #     )
+            # window["window_labels_tokens"] = window_level_labels_but_for_tokens
 
         if split == "train":
             windowized_data_train.extend(windowized_document)
