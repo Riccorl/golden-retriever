@@ -53,6 +53,8 @@ prediction_callbacks:
     batch_size: 128
     use_faiss: False
     move_index_to_cpu: False
+    precision: 16
+    index_precision: 16
     other_callbacks:
       - _target_: golden_retriever.callbacks.evaluation_callbacks.TopKEvaluationCallback
         k: ${train.top_k}
@@ -78,6 +80,8 @@ prediction_callbacks:
     max_negatives: 15
     use_faiss: False
     move_index_to_cpu: False
+    precision: 16
+    index_precision: 16
     refresh_every_n_epochs: 1
     other_callbacks:
       - _target_: golden_retriever.callbacks.evaluation_callbacks.AvgRankingEvaluationCallback

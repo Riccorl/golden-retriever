@@ -33,6 +33,17 @@ def compute_retriever_stats(dataset) -> None:
     #     doc_id = sample["doc_id"]
 
 
+def batch_generation(samples, batch_size):
+    batch = []
+    for sample in samples:
+        batch.append(sample)
+        if len(batch) == batch_size:
+            yield batch
+            batch = []
+    if len(batch) > 0:
+        yield batch
+
+
 @torch.no_grad()
 def add_candidates(
     retriever_name_or_path: Union[str, os.PathLike],
@@ -58,36 +69,24 @@ def add_candidates(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     documents_batch = []
 
+    debug_retrieval_stuff = {}
+
     output_data = []
     with open(input_path) as f:
-        lines = f.readlines()
-        for line in tqdm.tqdm(lines):
-            sample = json.loads(line)
-            documents_batch.append(sample)
-            if len(documents_batch) == batch_size:
-                topics_pair = None
-                if topics:
-                    topics_pair = [d["doc_topic"] for d in documents_batch]
-                retriever_outs = retriever.retrieve(
-                    [d["text"] for d in documents_batch],
-                    text_pair=topics_pair,
-                    k=100,
-                    precision=precision,
-                )
-                for i, sample in enumerate(documents_batch):
-                    candidate_titles = [
-                        c.label.split(" <def>", 1)[0] for c in retriever_outs[i]
-                    ]
-                    sample["window_candidates"] = candidate_titles
-                    sample["window_candidates_scores"] = [
-                        c.score for c in retriever_outs[i]
-                    ]
-                    output_data.append(sample)
-                documents_batch = []
+        samples = [json.loads(line) for line in f.readlines()]
 
-        if len(documents_batch) > 0:
+    with torch.inference_mode():
+        for documents_batch in tqdm.tqdm(
+            batch_generation(samples, batch_size)
+        ):
+            topics_pair = None
+            if topics:
+                topics_pair = [d["doc_topic"] for d in documents_batch]
             retriever_outs = retriever.retrieve(
-                [d["text"] for d in documents_batch], k=100
+                [d["text"] for d in documents_batch],
+                text_pair=topics_pair,
+                k=100,
+                precision=precision,
             )
             for i, sample in enumerate(documents_batch):
                 candidate_titles = [
@@ -98,6 +97,9 @@ def add_candidates(
                     c.score for c in retriever_outs[i]
                 ]
                 output_data.append(sample)
+                debug_retrieval_stuff[f"{sample['doc_id']}_{sample['window_id']}"] = [
+                    (c.label.split(" <def>", 1)[0], c.score) for c in retriever_outs[i]
+                ]
 
     with open(output_path, "w") as f:
         for sample in output_data:

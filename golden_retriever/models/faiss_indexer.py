@@ -104,7 +104,7 @@ class FaissIndexer:
         if self.normalize:
             faiss.normalize_L2(query)
         if isinstance(query, torch.Tensor) and not self.use_gpu:
-            query = query.cpu()
+            query = query.detach().cpu()
         query_results = self.index.search(query, k)
         return FaissOutput(indices=query_results[1], distances=query_results[0])
 

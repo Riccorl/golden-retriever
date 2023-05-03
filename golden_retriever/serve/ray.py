@@ -28,6 +28,7 @@ INDEX_PRECISION = os.environ.get("INDEX_PRECISION", "fp32")
 MODEL_NAME_OR_PATH = os.environ.get("MODEL_NAME_OR_PATH", None)
 TOP_K = int(os.environ.get("TOP_K", 100))
 USE_FAISS = os.environ.get("USE_FAISS", False)
+WINDOW_BATCH_SIZE = int(os.environ.get("WINDOW_BATCH_SIZE", 32))
 
 app = FastAPI(
     title="Golden Retriever",
@@ -166,7 +167,7 @@ class GoldenRetrieverServer:
             batch = []
             for t, t_p in zip(text, text_pair):
                 batch.append((t, t_p))
-                if len(batch) == 64:
+                if len(batch) == WINDOW_BATCH_SIZE:
                     t_batch = [t for t, _ in batch]
                     t_p_batch = [t_p for _, t_p in batch]
                     batch_predictions = self.retriever.retrieve(

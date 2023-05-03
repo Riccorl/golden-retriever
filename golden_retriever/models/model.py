@@ -1,3 +1,4 @@
+import contextlib
 import os
 import tempfile
 from dataclasses import dataclass
@@ -38,7 +39,7 @@ INDEX_VECTOR_NAME = "index.pt"
 FAISS_INDEX_NAME = "faiss_index.bin"
 
 PRECISION_MAP = {
-    None: None,
+    None: torch.float32,
     16: torch.float16,
     32: torch.float32,
     "float16": torch.float16,
@@ -260,7 +261,6 @@ class GoldenRetriever(torch.nn.Module):
         question_encodings: Optional[torch.Tensor] = None,
         contexts_encodings: Optional[torch.Tensor] = None,
         contexts_per_question: Optional[List[int]] = None,
-        inner_batch_size: Optional[int] = None,
         return_loss: bool = False,
         return_encodings: bool = False,
         *args,
@@ -326,15 +326,6 @@ class GoldenRetriever(torch.nn.Module):
                 question_encodings = F.normalize(question_encodings, p=2, dim=1)
                 contexts_encodings = F.normalize(contexts_encodings, p=2, dim=1)
 
-            # if inner_batch_size is not None:
-            #     # split the contexts into batches
-            #     contexts_encodings = torch.split(contexts_encodings, 10_000)
-            #     logits = []
-            #     for batch in contexts_encodings:
-            #         # logits.append(torch.einsum("ij,ij->i", question_encodings, batch))
-            #         logits.append(torch.matmul(question_encodings, batch.T))
-            #     logits = torch.cat(logits)
-            # else:
             logits = torch.matmul(question_encodings, contexts_encodings.T)
 
         output = {"logits": logits}
@@ -437,11 +428,18 @@ class GoldenRetriever(torch.nn.Module):
         # fucking autocast only wants pure strings like 'cpu' or 'cuda'
         # we need to convert the model device to that
         device_type_for_autocast = str(self.device).split(":")[0]
-        # TODO: autocast doesn't work with CPU and stuff different from bfloat16
-        with torch.autocast(
-            device_type=device_type_for_autocast,
-            dtype=PRECISION_MAP[precision],
-        ):
+        # autocast doesn't work with CPU and stuff different from bfloat16
+        autocast_ctx_mngr = (
+            contextlib.nullcontext()
+            if device_type_for_autocast == "cpu"
+            else (
+                torch.autocast(
+                    device_type=device_type_for_autocast,
+                    dtype=PRECISION_MAP[precision],
+                )
+            )
+        )
+        with autocast_ctx_mngr:
             # Iterate through each batch in the dataloader
             for batch in tqdm(dataloader, desc="Indexing"):
                 # Move the batch to the device
@@ -560,10 +558,18 @@ class GoldenRetriever(torch.nn.Module):
             # fucking autocast only wants pure strings like 'cpu' or 'cuda'
             # we need to convert the model device to that
             device_type_for_autocast = str(self.device).split(":")[0]
-            with torch.autocast(
-                device_type=device_type_for_autocast,
-                dtype=PRECISION_MAP[precision],
-            ):
+            # autocast doesn't work with CPU and stuff different from bfloat16
+            autocast_ctx_mngr = (
+                contextlib.nullcontext()
+                if device_type_for_autocast == "cpu"
+                else (
+                    torch.autocast(
+                        device_type=device_type_for_autocast,
+                        dtype=PRECISION_MAP[precision],
+                    )
+                )
+            )
+            with autocast_ctx_mngr:
                 # check if the device of the context embeddings is the same
                 # as the device of the input ids
                 if self._context_embeddings.device != model_inputs.input_ids.device:
@@ -591,9 +597,9 @@ class GoldenRetriever(torch.nn.Module):
                 batch_top_k: torch.Tensor = retriever_out.indices
                 batch_scores: torch.Tensor = retriever_out.values
         # get int values
-        batch_top_k: List[List[int]] = batch_top_k.cpu().tolist()
+        batch_top_k: List[List[int]] = batch_top_k.detach().cpu().tolist()
         # get float values
-        batch_scores: List[List[float]] = batch_scores.cpu().tolist()
+        batch_scores: List[List[float]] = batch_scores.detach().cpu().tolist()
         # Retrieve the contexts corresponding to the indices
         batch_contexts = [
             [self._context_index.get_label_from_index(i) for i in indices]
@@ -988,13 +994,20 @@ class GoldenRetriever(torch.nn.Module):
             raise ValueError(f"Index `{model_dir / INDEX_NAME}` does not exist.")
 
         # select between faiss and dense index
+        logger.log("Loading index vectors")
+        embeddings = torch.load(index_vectors, map_location="cpu")
+        if index_precision and embeddings.dtype != PRECISION_MAP[index_precision]:
+            logger.log(
+                f"Index vectors are of type {embeddings.dtype}. "
+                f"Converting to {PRECISION_MAP[index_precision]}."
+            )
+            embeddings = embeddings.to(PRECISION_MAP[index_precision])
+
         if load_faiss_index:
             faiss_kwargs = {
                 "use_gpu": bool(index_device == "cuda"),
             }
             if not faiss_index_vectors.exists():
-                # try to load the faiss index from the torch index
-                embeddings = torch.load(index_vectors, map_location="cpu")
                 faiss_kwargs.update({"embeddings": embeddings})
                 model._faiss_indexer = FaissIndexer(**faiss_kwargs)
                 del embeddings
@@ -1002,22 +1015,9 @@ class GoldenRetriever(torch.nn.Module):
                 faiss_kwargs.update({"loading_dir": model_dir})
                 model._faiss_indexer = FaissIndexer.load(**faiss_kwargs)
         else:
-            logger.log("Loading index vectors")
-            model._context_embeddings = torch.load(index_vectors, map_location="cpu")
-            # check the precision of the index
-            if (
-                index_precision
-                and model._context_embeddings.dtype != PRECISION_MAP[index_precision]
-            ):
-                logger.log(
-                    f"Index vectors are of type {model._context_embeddings.dtype}. "
-                    f"Converting to {PRECISION_MAP[index_precision]}."
-                )
-                model._context_embeddings = model._context_embeddings.to(
-                    PRECISION_MAP[index_precision]
-                )
             if device == "cuda":
-                model._context_embeddings = model._context_embeddings.to(device)
+                embeddings = embeddings.to(device)
+            model._context_embeddings = embeddings
 
         # move model to device
         model.to(device)
