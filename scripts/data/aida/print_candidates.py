@@ -28,7 +28,8 @@ def add_candidates(
                     else:
                         w.write(f"{candidate}\n")
                 w.write("\n")
-            
+
+
 if __name__ == "__main__":
     arg_parser = argparse.ArgumentParser()
     arg_parser.add_argument("--input_path", type=str, required=True)

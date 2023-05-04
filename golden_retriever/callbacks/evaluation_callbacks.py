@@ -1,3 +1,4 @@
+import logging
 from typing import Dict, List, Optional
 
 import pytorch_lightning as pl
@@ -5,9 +6,10 @@ import torch
 from sklearn.metrics import label_ranking_average_precision_score
 
 from golden_retriever.callbacks.base import DEFAULT_STAGES, NLPTemplateCallback
-from golden_retriever.common.log import get_console_logger
+from golden_retriever.common.log import get_console_logger, get_logger
 
-logger = get_console_logger()
+console_logger = get_console_logger()
+logger = get_logger(__name__, level=logging.INFO)
 
 
 class TopKEvaluationCallback(NLPTemplateCallback):
@@ -36,7 +38,7 @@ class TopKEvaluationCallback(NLPTemplateCallback):
         **kwargs,
     ) -> dict:
         if self.verbose:
-            logger.log(f"Computing recall@{self.k}")
+            logger.info(f"Computing recall@{self.k}")
 
         # metrics to return
         metrics = {}
@@ -70,7 +72,7 @@ class TopKEvaluationCallback(NLPTemplateCallback):
         )
 
         if self.verbose:
-            logger.log(
+            logger.info(
                 f"Recall@{self.k} on {stage.value}: {metrics[f'{stage.value}_recall@{self.k}']}"
             )
 
@@ -103,7 +105,7 @@ class LRAPEvaluationCallback(NLPTemplateCallback):
         **kwargs,
     ) -> dict:
         if self.verbose:
-            logger.log(f"Computing recall@{self.k}")
+            logger.info(f"Computing recall@{self.k}")
 
         # metrics to return
         metrics = {}
@@ -132,7 +134,7 @@ class LRAPEvaluationCallback(NLPTemplateCallback):
         )
 
         if self.verbose:
-            logger.log(
+            logger.info(
                 f"Recall@{self.k} on {stage.value}: {metrics[f'{stage.value}_recall@{self.k}']}"
             )
 
@@ -163,7 +165,7 @@ class AvgRankingEvaluationCallback(NLPTemplateCallback):
         **kwargs,
     ) -> dict:
         if self.verbose:
-            logger.log(f"Computing AVG Ranking@{self.k}")
+            logger.info(f"Computing AVG Ranking@{self.k}")
 
         # metrics to return
         metrics = {}
@@ -195,7 +197,7 @@ class AvgRankingEvaluationCallback(NLPTemplateCallback):
         pl_module.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=False)
 
         if self.verbose:
-            logger.log(
+            logger.info(
                 f"AVG Ranking@{self.k} on {prefix}: {metrics[f'{prefix}_avg_ranking@{self.k}']}"
             )
 
@@ -228,7 +230,7 @@ class NYTTopKEvaluationCallback(TopKEvaluationCallback):
         *args,
         **kwargs,
     ) -> dict:
-        logger.log(f"Computing recall@{self.k}")
+        logger.info(f"Computing recall@{self.k}")
 
         # metrics to return
         metrics = {}
@@ -241,7 +243,7 @@ class NYTTopKEvaluationCallback(TopKEvaluationCallback):
 
         for dataloader_idx, samples in predictions.items():
             # now compute the question embeddings and compute the top-k accuracy
-            logger.log(f"Computing recall@{self.k} for dataloader {dataloader_idx}")
+            logger.info(f"Computing recall@{self.k} for dataloader {dataloader_idx}")
             hits, total = 0, 0
             for sample in samples:
                 gold_contexts = sample["gold"]

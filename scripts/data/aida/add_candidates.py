@@ -78,9 +78,7 @@ def add_candidates(
     len_samples = len(samples)
     len_samples_from_batch = 0
     with torch.inference_mode():
-        for documents_batch in tqdm.tqdm(
-            batch_generation(samples, batch_size)
-        ):  
+        for documents_batch in tqdm.tqdm(batch_generation(samples, batch_size)):
             len_samples_from_batch += len(documents_batch)
             topics_pair = None
             if topics:

@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
@@ -7,9 +8,10 @@ import pytorch_lightning as pl
 import torch
 
 from golden_retriever.callbacks.base import NLPTemplateCallback, PredictionCallback
-from golden_retriever.common.log import get_console_logger
+from golden_retriever.common.log import get_console_logger, get_logger
 
-logger = get_console_logger()
+console_logger = get_console_logger()
+logger = get_logger(__name__, level=logging.INFO)
 
 
 class SavePredictionsCallback(NLPTemplateCallback):
@@ -36,7 +38,7 @@ class SavePredictionsCallback(NLPTemplateCallback):
     ) -> dict:
         # write the predictions to a file inside the experiment folder
         if self.saving_dir is None and trainer.logger is None:
-            logger.log(
+            logger.info(
                 "You need to specify an output directory (`saving_dir`) or a logger to save the predictions.\n"
                 "Skipping saving predictions."
             )
@@ -52,7 +54,7 @@ class SavePredictionsCallback(NLPTemplateCallback):
                         Path(trainer.logger.experiment.dir) / "predictions"
                     )
                 except:
-                    logger.log(
+                    logger.info(
                         "You need to specify an output directory (`saving_dir`) or a logger to save the predictions.\n"
                         "Skipping saving predictions."
                     )
@@ -63,7 +65,7 @@ class SavePredictionsCallback(NLPTemplateCallback):
                 / f"{datasets[dataloader_idx].name}_{dataloader_idx}.json"
             )
             if self.verbose:
-                logger.log(f"Saving predictions to {predictions_path}")
+                logger.info(f"Saving predictions to {predictions_path}")
             with open(predictions_path, "w") as f:
                 json.dump(predictions, f, indent=2)
 
@@ -75,7 +77,7 @@ class FreeUpIndexerVRAMCallback(pl.Callback):
         *args,
         **kwargs,
     ) -> Any:
-        logger.log("Freeing up GPU memory")
+        logger.info("Freeing up GPU memory")
 
         # remove the index from the GPU memory
         # remove the embeddings from the GPU memory first
@@ -104,7 +106,7 @@ class ShuffleTrainDatasetCallback(pl.Callback):
 
     def on_validation_epoch_end(self, trainer: pl.Trainer, *args, **kwargs):
         if self.verbose:
-            logger.log(f"Shuffling train dataset at epoch {trainer.current_epoch}")
+            logger.info(f"Shuffling train dataset at epoch {trainer.current_epoch}")
         trainer.datamodule.train_dataset.shuffle_data(
             seed=self.seed + trainer.current_epoch
         )
@@ -117,7 +119,7 @@ class PrefetchTrainDatasetCallback(pl.Callback):
 
     def on_validation_epoch_end(self, trainer: pl.Trainer, *args, **kwargs):
         if self.verbose:
-            logger.log(f"Prefetching train dataset at epoch {trainer.current_epoch}")
+            logger.info(f"Prefetching train dataset at epoch {trainer.current_epoch}")
         trainer.datamodule.train_dataset.prefetch()
 
 
@@ -142,7 +144,7 @@ class SaveRetrieverCallback(pl.Callback):
         **kwargs,
     ):
         if self.saving_dir is None and trainer.logger is None:
-            logger.log(
+            logger.info(
                 "You need to specify an output directory (`saving_dir`) or a logger to save the retriever.\n"
                 "Skipping saving retriever."
             )
@@ -151,16 +153,19 @@ class SaveRetrieverCallback(pl.Callback):
             retriever_folder = Path(self.saving_dir)
         else:
             try:
-                retriever_folder = Path(trainer.logger.experiment.dir) / f"retriever_{trainer.current_epoch}"
+                retriever_folder = (
+                    Path(trainer.logger.experiment.dir)
+                    / f"retriever_{trainer.current_epoch}"
+                )
             except:
-                logger.log(
+                logger.info(
                     "You need to specify an output directory (`saving_dir`) or a logger to save the retriever.\n"
                     "Skipping saving retriever."
                 )
                 return
         retriever_folder.mkdir(exist_ok=True, parents=True)
         if self.verbose:
-            logger.log(f"Saving retriever to {retriever_folder}")
+            logger.info(f"Saving retriever to {retriever_folder}")
         pl_module.model.save_pretrained(retriever_folder)
 
     def on_save_checkpoint(

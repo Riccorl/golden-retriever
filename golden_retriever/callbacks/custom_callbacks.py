@@ -1,3 +1,4 @@
+import logging
 import time
 from collections import defaultdict
 from pathlib import Path
@@ -11,12 +12,13 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from golden_retriever.callbacks.base import PredictionCallback
-from golden_retriever.common.log import get_console_logger
+from golden_retriever.common.log import get_console_logger, get_logger
 from golden_retriever.common.model_inputs import ModelInputs
 from golden_retriever.data.datasets import BaseDataset
 from golden_retriever.models.model import GoldenRetriever
 
-logger = get_console_logger()
+console_logger = get_console_logger()
+logger = get_logger(__name__, level=logging.INFO)
 
 
 class GoldenRetrieverPredictionCallback(PredictionCallback):
@@ -61,7 +63,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         **kwargs,
     ) -> dict:
         stage = trainer.state.stage
-        logger.log(f"Computing predictions for stage {stage.value}")
+        logger.info(f"Computing predictions for stage {stage.value}")
         if stage not in self.stages:
             raise ValueError(
                 f"Stage {stage} not supported, only {self.stages} are supported"
@@ -97,7 +99,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         # compute the context embeddings index for each dataloader
         for dataloader_idx, dataloader in enumerate(self.dataloaders):
             current_dataset: BaseDataset = self.datasets[dataloader_idx]
-            logger.log(
+            logger.info(
                 f"Computing context embeddings for dataset {current_dataset.name}"
             )
             contexts = self._get_contexts_dataloader(current_dataset, trainer)
@@ -153,7 +155,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                 pl_module.to("cpu")
 
             # now compute the question embeddings and compute the top-k accuracy
-            logger.log(f"Computing predictions for dataset {current_dataset.name}")
+            logger.info(f"Computing predictions for dataset {current_dataset.name}")
             predictions = []
             start = time.time()
             for batch in tqdm(dataloader, desc="Retrieving contexts"):
@@ -172,9 +174,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                         for context in gold_contexts
                     ]
                     retrieved_indices = [r.index for r in retrieved_samples]
-                    retrieved_contexts = [
-                        r.label for r in retrieved_samples
-                    ]
+                    retrieved_contexts = [r.label for r in retrieved_samples]
                     retrieved_scores = [r.score for r in retrieved_samples]
                     # correct predictions are the contexts that are in the top-k and are gold
                     correct_indices = set(gold_context_indices) & set(retrieved_indices)
@@ -197,7 +197,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                         prediction_output["id"] = batch.id[batch_idx]
                     predictions.append(prediction_output)
             end = time.time()
-            logger.log("Time to retrieve:", end - start)
+            logger.info("Time to retrieve:", end - start)
             dataloader_predictions[dataloader_idx] = predictions
 
             if pl_module_original_device != pl_module.device:
@@ -209,7 +209,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
     @staticmethod
     def _get_contexts_dataloader(dataset, trainer):
         if dataset.contexts is None:
-            logger.log(
+            logger.info(
                 f"Contexts not found in dataset {dataset.name}, computing them from the dataloaders"
             )
             # get the contexts from the all the dataloader context ids
@@ -334,7 +334,7 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
         if trainer.current_epoch % self.refresh_every_n_epochs != 0:
             return {}
 
-        logger.log(
+        logger.info(
             f"At least one metric from {self.metrics_to_monitor} is above threshold {self.threshold}. Computing hard negatives."
         )
 
@@ -379,7 +379,7 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
             update_dict[prediction["sample_idx"]][
                 "retrieved_hard_negatives"
             ] = retrieved_hard_negatives
-        logger.log(f"Adding hard negatives to the dataset.")
+        logger.info(f"Adding hard negatives to the dataset.")
         trainer.datamodule.train_dataset.add_fields_to_samples(update_dict)
 
         # normalize predictions as in the original GoldenRetrieverPredictionCallback

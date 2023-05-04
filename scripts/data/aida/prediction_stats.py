@@ -5,7 +5,6 @@ import json
 if __name__ == "__main__":
     path = "experiments/minilm-l12-15hard-400inbatch-42maxlen-tokens-radamw-layernorm-fullindex/2023-04-10/19-30-07/wandb/latest-run/files/predictions/val_debug.json"
 
-
     with open("data/dpr-like/el/aida_tokens/train.json") as f:
         train = json.load(f)
 
@@ -31,13 +30,15 @@ if __name__ == "__main__":
     print("Missed entities:", len(totally_missed_freq))
     print("Missed entities in train:", len(set(totally_missed_freq) & set(definitions)))
 
-    print(f"Top frequent wrong prediction: {totally_missed_freq.most_common(1)[0][1]}, {totally_missed_freq.most_common(1)[0][0][:100]} [...]")
+    print(
+        f"Top frequent wrong prediction: {totally_missed_freq.most_common(1)[0][1]}, {totally_missed_freq.most_common(1)[0][0][:100]} [...]"
+    )
     # print the top 10
     print("\nTop 10 wrong predictions:")
     print("freq\tentity")
     for wrong, freq in totally_missed_freq.most_common(10):
         print(f"{freq}\t{wrong[:100]} [...]")
-    
+
     # count how many times each definition appears in the predictions
     counts = Counter(definitions)
 
@@ -54,7 +55,12 @@ if __name__ == "__main__":
         if wrong in counts:
             wrong_frequency_in_train[wrong] = (freq, counts[wrong])
     # sort by frequency in train
-    wrong_frequency_in_train = {k: v for k, v in sorted(wrong_frequency_in_train.items(), key=lambda item: item[1][1], reverse=True)}
+    wrong_frequency_in_train = {
+        k: v
+        for k, v in sorted(
+            wrong_frequency_in_train.items(), key=lambda item: item[1][1], reverse=True
+        )
+    }
 
     # # print some stats
     # print("Total number of definitions:", len(definitions))

@@ -12,7 +12,7 @@ def check_definitions(
 
     with open(definitions_path, "r") as f:
         definitions = [line.strip() for line in f]
-    
+
     definitions = set(definitions)
 
     missing_definitions = []

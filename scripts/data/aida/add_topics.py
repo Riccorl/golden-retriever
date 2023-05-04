@@ -1,6 +1,7 @@
 import json
 import argparse
 
+
 def add_topics(input_path, entqa_path, output_path):
     # with open(input_path) as f:
     #     input_data = json.load(f)
@@ -27,6 +28,7 @@ def add_topics(input_path, entqa_path, output_path):
         # json.dump(input_data, f)
         for sample in input_data:
             f.write(json.dumps(sample) + "\n")
+
 
 if __name__ == "__main__":
     arg_parser = argparse.ArgumentParser()

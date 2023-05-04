@@ -31,7 +31,7 @@ def aida_to_dpr(
             title = title.strip()
             definition = definition.strip()
             definitions[title] = definition
-                # f_def.write(line_data["title"] + " <def> " + line_data["text"] + "\n")
+            # f_def.write(line_data["title"] + " <def> " + line_data["text"] + "\n")
             # tokenizer.decode(line_data["text_ids"])
             # definitions[line_data["title"]].replace("[unused2]", ": ")
 
