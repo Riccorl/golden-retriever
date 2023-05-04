@@ -1,7 +1,7 @@
 import logging
 import os
 from pathlib import Path
-from typing import List, Tuple, Union
+from typing import List, Optional, Tuple, Union
 
 import ray
 from fastapi import FastAPI, HTTPException
@@ -13,7 +13,7 @@ from golden_retriever.common.log import get_console_logger, get_logger
 from ipa.preprocessing.tokenizers.spacy_tokenizer import SpacyTokenizer
 
 
-logger = get_logger(level=logging.INFO)
+logger = get_logger(__name__, level=logging.INFO)
 console_logger = get_console_logger()
 
 VERSION = {}  # type: ignore
@@ -71,11 +71,21 @@ class GoldenRetrieverServer:
         self.tokenizer = SpacyTokenizer(language="en")
 
     @app.post("/api/retrieve")
-    def retrieve_endpoint(self, documents: Union[str, List[str]]):
+    def retrieve_endpoint(
+        self,
+        documents: Union[str, List[str]],
+        document_topics: Optional[Union[str, List[str]]] = None,
+    ):
         # try:
         if isinstance(documents, str):
             documents = [documents]
-        return self.retriever.retrieve(documents, k=TOP_K, precision=PRECISION)
+        if document_topics is not None:
+            if isinstance(document_topics, str):
+                document_topics = [document_topics]
+            assert len(documents) == len(document_topics)
+        return self.retriever.retrieve(
+            documents, text_pair=document_topics, k=TOP_K, precision=PRECISION
+        )
         # except Exception as e:
         #     raise HTTPException(status_code=500, detail=f"Server Error: {e}")
 

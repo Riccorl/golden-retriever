@@ -6,11 +6,12 @@ from typing import Union
 import torch
 
 from golden_retriever import GoldenRetriever
+from golden_retriever.models.pl_modules import GoldenRetrieverPLModule
 
 
 @torch.no_grad()
 def build_index(
-    retriever_name_or_path: Union[str, os.PathLike],
+    checkpoint_path: Union[str, os.PathLike],
     candidates_path: Union[str, os.PathLike],
     output_path: Union[str, os.PathLike],
     batch_size: int = 512,
@@ -20,14 +21,11 @@ def build_index(
     precision: str = "fp32",
     faiss: bool = False,
 ):
-    retriever = GoldenRetriever.from_pretrained(
-        retriever_name_or_path,
-        device=device,
-        index_device=index_device,
-        index_precision=precision,
-        load_index_vector=False,
-        load_faiss_index=faiss,
+    pl_module: GoldenRetrieverPLModule = GoldenRetrieverPLModule.load_from_checkpoint(
+        checkpoint_path
     )
+    pl_module.to(device)
+    retriever: GoldenRetriever = pl_module.model
     retriever.eval()
 
     with open(candidates_path) as f:
@@ -41,6 +39,7 @@ def build_index(
         precision=precision,
         index_precision=precision,
         move_index_to_cpu=bool(index_device == "cpu"),
+        use_faiss=faiss,
     )
 
     output_path = Path(output_path)
@@ -50,7 +49,7 @@ def build_index(
 
 if __name__ == "__main__":
     arg_parser = argparse.ArgumentParser()
-    arg_parser.add_argument("--retriever_name_or_path", type=str, required=True)
+    arg_parser.add_argument("--checkpoint_path", type=str, required=True)
     arg_parser.add_argument("--candidates_path", type=str, required=True)
     arg_parser.add_argument("--output_path", type=str, required=True)
     arg_parser.add_argument("--batch_size", type=int, default=128)

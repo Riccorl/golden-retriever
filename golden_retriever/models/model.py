@@ -1,4 +1,5 @@
 import contextlib
+import logging
 import os
 import tempfile
 from dataclasses import dataclass
@@ -15,7 +16,7 @@ from rich.pretty import pprint
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from golden_retriever.common.log import get_console_logger
+from golden_retriever.common.log import get_console_logger, get_logger
 from golden_retriever.common.model_inputs import ModelInputs
 from golden_retriever.common.utils import (
     CONFIG_NAME,
@@ -52,7 +53,8 @@ PRECISION_MAP = {
     "fp32": torch.float32,
 }
 
-logger = get_console_logger()
+console_logger = get_console_logger()
+logger = get_logger(__name__, level=logging.INFO)
 
 
 @dataclass
@@ -350,11 +352,12 @@ class GoldenRetriever(torch.nn.Module):
         return GoldenRetrieverOutput(**output)
 
     @torch.no_grad()
+    @torch.inference_mode()
     def index(
         self,
         contexts: List[str],
         batch_size: int = 32,
-        num_workers: int = 0,
+        num_workers: int = 4,
         context_max_length: Optional[int] = None,
         collate_fn: Optional[Callable] = None,
         force_reindex: bool = False,
@@ -478,6 +481,8 @@ class GoldenRetriever(torch.nn.Module):
             # free up memory
             self._context_embeddings = None
 
+    @torch.no_grad()
+    @torch.inference_mode()
     def retrieve(
         self,
         text: Optional[Union[str, List[str]]] = None,
@@ -840,10 +845,10 @@ class GoldenRetriever(torch.nn.Module):
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        logger.log(f"Saving retriever to {output_dir}")
-        logger.log(f"Saving config to {output_dir / CONFIG_NAME}")
+        logger.info(f"Saving retriever to {output_dir}")
+        logger.info(f"Saving config to {output_dir / CONFIG_NAME}")
         # pretty print the config
-        pprint(config, console=logger, expand_all=True)
+        pprint(config, console=console_logger, expand_all=True)
 
         # override the from_pretrained parameter of the encoders
         # we don't want to load the pretrained weights from HF Hub when loading the retriever
@@ -857,20 +862,20 @@ class GoldenRetriever(torch.nn.Module):
             raise ValueError("The contexts must be indexed before they can be saved.")
 
         # save the current state of the retriever
-        logger.log(f"Saving retriever state to {output_dir / WEIGHTS_NAME}")
+        logger.info(f"Saving retriever state to {output_dir / WEIGHTS_NAME}")
         torch.save(self.state_dict(), output_dir / WEIGHTS_NAME)
         # save the context embeddings
-        logger.log(f"Saving context embeddings to {output_dir / INDEX_VECTOR_NAME}")
+        logger.info(f"Saving context embeddings to {output_dir / INDEX_VECTOR_NAME}")
         torch.save(self._context_embeddings, output_dir / INDEX_VECTOR_NAME)
         # save the context index
-        logger.log(f"Saving context index to {output_dir / INDEX_NAME}")
+        logger.info(f"Saving context index to {output_dir / INDEX_NAME}")
         self._context_index.save(output_dir / INDEX_NAME)
         # save the faiss indexer
         # if self._faiss_indexer is not None:
         #     logger.log(f"Saving faiss index to {output_dir / FAISS_INDEX_NAME}")
         #     self._faiss_indexer.save(output_dir)
 
-        logger.log("Saving retriever to disk done.")
+        logger.info("Saving retriever to disk done.")
 
     @classmethod
     def from_pretrained(
@@ -881,6 +886,8 @@ class GoldenRetriever(torch.nn.Module):
         index_device: str = "cpu",
         index_precision: Optional[str] = None,
         load_faiss_index: bool = False,
+        load_index_vector: bool = True,
+        compile: bool = False,
         filenames: Optional[List[str]] = None,
         *args,
         **kwargs,
@@ -900,6 +907,8 @@ class GoldenRetriever(torch.nn.Module):
                 The device to load the index to. Defaults to `cpu`.
             index_precision (`str`, optional):
                 The precision to load the index to. Defaults to None.
+            load_index_vector   (`bool`, optional):
+                Whether to load the index vector. Defaults to `True`.
             load_faiss_index (`bool`, optional):
                 Whether to load the faiss index. Defaults to `False`.
             filenames (`Optional[List[str]]`, optional):
@@ -941,14 +950,14 @@ class GoldenRetriever(torch.nn.Module):
             force_download=force_download,
         )
 
-        logger.log(f"Loading retriever from {model_dir}")
+        logger.info(f"Loading retriever from {model_dir}")
         # get model stuff
         if device == "cpu":
             num_threads = os.getenv(
                 "TORCH_NUM_THREADS", psutil.cpu_count(logical=False)
             )
             torch.set_num_threads(num_threads)
-            logger.log(f"Model is running on {num_threads} threads")
+            logger.info(f"Model is running on {num_threads} threads")
 
         # parse config file
         config_path = model_dir / CONFIG_NAME
@@ -957,7 +966,7 @@ class GoldenRetriever(torch.nn.Module):
                 f"Model configuration file not found at {config_path}."
             )
         config = OmegaConf.load(config_path)
-        pprint(OmegaConf.to_container(config), console=logger, expand_all=True)
+        pprint(OmegaConf.to_container(config), console=console_logger, expand_all=True)
 
         # load the index vocabulary
         context_index = Labels.from_file(model_dir / INDEX_NAME)
@@ -965,7 +974,7 @@ class GoldenRetriever(torch.nn.Module):
         weights_path = model_dir / WEIGHTS_NAME
 
         # load model from config
-        logger.log("Loading model")
+        logger.info("Loading model")
         model = hydra.utils.instantiate(
             config, context_index=context_index, *args, **kwargs
         )
@@ -975,50 +984,62 @@ class GoldenRetriever(torch.nn.Module):
             model_state, strict=strict
         )
         if unexpected_keys or missing_keys:
-            logger.log(
+            logger.info(
                 f"Error loading state dict for {model.__class__.__name__}\n\t"
                 f"Missing keys: {missing_keys}\n\t"
                 f"Unexpected keys: {unexpected_keys}"
             )
 
-        # run some checks
-        index_vectors = model_dir / INDEX_VECTOR_NAME
-        faiss_index_vectors = model_dir / FAISS_INDEX_NAME
-        if load_faiss_index and not faiss_index_vectors.exists():
-            logger.log(
-                f"{FAISS_INDEX_NAME} does not exist. Trying to convert from dense index."
-            )
-        if not index_vectors.exists():
-            raise ValueError(f"Index vectors `{index_vectors}` does not exist.")
-        if not (model_dir / INDEX_NAME).exists():
-            raise ValueError(f"Index `{model_dir / INDEX_NAME}` does not exist.")
+        if load_index_vector:
+            # run some checks
+            index_vectors = model_dir / INDEX_VECTOR_NAME
+            faiss_index_vectors = model_dir / FAISS_INDEX_NAME
+            if load_faiss_index and not faiss_index_vectors.exists():
+                logger.info(
+                    f"{FAISS_INDEX_NAME} does not exist. Trying to convert from dense index."
+                )
+            if not index_vectors.exists():
+                raise ValueError(f"Index vectors `{index_vectors}` does not exist.")
+            if not (model_dir / INDEX_NAME).exists():
+                raise ValueError(f"Index `{model_dir / INDEX_NAME}` does not exist.")
 
-        # select between faiss and dense index
-        logger.log("Loading index vectors")
-        embeddings = torch.load(index_vectors, map_location="cpu")
-        if index_precision and embeddings.dtype != PRECISION_MAP[index_precision]:
-            logger.log(
-                f"Index vectors are of type {embeddings.dtype}. "
-                f"Converting to {PRECISION_MAP[index_precision]}."
-            )
-            embeddings = embeddings.to(PRECISION_MAP[index_precision])
+            # select between faiss and dense index
+            logger.info("Loading index vectors")
+            embeddings = torch.load(index_vectors, map_location="cpu")
+            if index_precision and embeddings.dtype != PRECISION_MAP[index_precision]:
+                logger.info(
+                    f"Index vectors are of type {embeddings.dtype}. "
+                    f"Converting to {PRECISION_MAP[index_precision]}."
+                )
+                embeddings = embeddings.to(PRECISION_MAP[index_precision])
 
-        if load_faiss_index:
-            faiss_kwargs = {
-                "use_gpu": bool(index_device == "cuda"),
-            }
-            if not faiss_index_vectors.exists():
-                faiss_kwargs.update({"embeddings": embeddings})
-                model._faiss_indexer = FaissIndexer(**faiss_kwargs)
-                del embeddings
+            if load_faiss_index:
+                faiss_kwargs = {
+                    "use_gpu": bool(index_device == "cuda"),
+                }
+                if not faiss_index_vectors.exists():
+                    faiss_kwargs.update({"embeddings": embeddings})
+                    model._faiss_indexer = FaissIndexer(**faiss_kwargs)
+                    del embeddings
+                else:
+                    faiss_kwargs.update({"loading_dir": model_dir})
+                    model._faiss_indexer = FaissIndexer.load(**faiss_kwargs)
             else:
-                faiss_kwargs.update({"loading_dir": model_dir})
-                model._faiss_indexer = FaissIndexer.load(**faiss_kwargs)
-        else:
-            if device == "cuda":
-                embeddings = embeddings.to(device)
-            model._context_embeddings = embeddings
+                if device == "cuda":
+                    embeddings = embeddings.to(device)
+                model._context_embeddings = embeddings
 
         # move model to device
         model.to(device)
+
+        if compile:
+            try:
+                model = torch.compile(model)
+            except Exception as e:
+                # show the error message
+                print(e)
+                logger.log(
+                    f"Failed to compile the model, you may need to install PyTorch 2.0"
+                )
+
         return model
