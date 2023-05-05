@@ -197,9 +197,8 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                         prediction_output["id"] = batch.id[batch_idx]
                     predictions.append(prediction_output)
             end = time.time()
-            logger.info("Time to retrieve:", end - start)
+            logger.info(f"Time to retrieve: {str(end - start)}")
             dataloader_predictions[dataloader_idx] = predictions
-
             if pl_module_original_device != pl_module.device:
                 pl_module.to(pl_module_original_device)
 

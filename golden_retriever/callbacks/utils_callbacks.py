@@ -153,10 +153,7 @@ class SaveRetrieverCallback(pl.Callback):
             retriever_folder = Path(self.saving_dir)
         else:
             try:
-                retriever_folder = (
-                    Path(trainer.logger.experiment.dir)
-                    / f"retriever_{trainer.current_epoch}"
-                )
+                retriever_folder = Path(trainer.logger.experiment.dir) / "retriever"
             except:
                 logger.info(
                     "You need to specify an output directory (`saving_dir`) or a logger to save the retriever.\n"
