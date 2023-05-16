@@ -8,10 +8,10 @@ from omegaconf import DictConfig
 from pytorch_lightning.trainer.states import RunningStage
 from torch.utils.data import DataLoader, Dataset
 
-from golden_retriever.common.log import get_console_logger
+from golden_retriever.common.log import get_logger
 from golden_retriever.data.datasets import BaseDataset
 
-logger = get_console_logger()
+logger = get_logger()
 
 
 STAGES_COMPATIBILITY_MAP = {
@@ -107,16 +107,16 @@ class PredictionCallback(pl.Callback):
         Args:
             dataset (`Optional[Union[Dataset, DictConfig]]`):
                 The dataset to use. If `None`, the datamodule is used.
-            batch_size (`int`):
-                The batch size to use for the dataloaders.
-            num_workers (`int`):
-                The number of workers to use for the dataloaders.
-            stage (`Stage`):
-                The stage that indicates whether the dataloaders are for validation or testing.
+            dataloader (`Optional[DataLoader]`):
+                The dataloader to use. If `None`, the datamodule is used.
             trainer (`pl.Trainer`):
                 The trainer that contains the datamodule.
-            tokenizer (`tr.PreTrainedTokenizer`):
-                The tokenizer to use for the dataloaders.
+            dataloader_kwargs (`Optional[Dict[str, Any]]`):
+                The kwargs to pass to the dataloader.
+            collate_fn (`Optional[Callable]`):
+                The collate function to use.
+            collate_fn_kwargs (`Optional[Dict[str, Any]]`):
+                The kwargs to pass to the collate function.
 
         Returns:
             `Tuple[List[Dataset], List[DataLoader]]`: The datasets and dataloaders.

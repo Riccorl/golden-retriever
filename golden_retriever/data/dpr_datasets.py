@@ -12,12 +12,13 @@ from datasets import load_dataset
 from numpy.random import choice
 from tqdm import tqdm
 
-from golden_retriever.common.log import get_console_logger
+from golden_retriever.common.log import get_console_logger, get_logger
 from golden_retriever.common.model_inputs import ModelInputs
 from golden_retriever.data.datasets import GenerativeDataset, BaseDataset
 from golden_retriever.data.labels import Labels
 
-logger = get_console_logger()
+console_logger = get_console_logger()
+logger = get_logger()
 
 
 class DPRMixin:
@@ -168,7 +169,7 @@ class DPRMixin:
         **kwargs,
     ) -> Any:
         if sample_by_frequency:
-            logger.log("Computing contexts frequencies")
+            logger.info("Computing contexts frequencies")
             context_frequencies = self.compute_contexts_frequency(data, context_manager)
             # get only those contexts that have frequency > 0
             context_idx_above_zero = [
@@ -189,7 +190,7 @@ class DPRMixin:
             context_frequencies = np.ones(context_manager.get_label_size())
             sampled_context_manager = context_manager
         sample_space_size = sampled_context_manager.get_label_size()
-        logger.log(f"Sampling negative contexts from {sample_space_size} samples")
+        logger.info(f"Sampling negative contexts from {sample_space_size} samples")
         # update the samples with the sampled negatives
         population = [i for i in range(sample_space_size)]
         data = data.map(
@@ -694,10 +695,7 @@ class DPRIterableDataset(GenerativeDataset, DPRMixin):
         # data = data.to_iterable_dataset(num_shards=4)
 
         end = time.time()
-        logger.log(
-            f"Pre-processing [bold cyan]{self.name}[/bold cyan] "
-            f"data took [bold]{end - start:.2f}[/bold] seconds"
-        )
+        logger.info(f"Pre-processing {self.name} data took {end - start:.2f} seconds")
         return data
 
     def save_data(
@@ -1009,7 +1007,7 @@ class DPRDataset(BaseDataset, DPRMixin):
         )
 
         end = time.time()
-        logger.log(
+        logger.info(
             f"Pre-processing [bold cyan]{self.name}[/bold cyan] "
             f"data took [bold]{end - start:.2f}[/bold] seconds"
         )

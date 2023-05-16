@@ -122,12 +122,14 @@ def train(conf: omegaconf.DictConfig) -> None:
         if "ckpt_path" in conf.train and conf.train.ckpt_path is not None:
             logger.log(f"Loading checkpoint from {conf.train.ckpt_path}")
             pl_module.load_state_dict(torch.load(conf.train.ckpt_path)["state_dict"])
-        # try:
-        #     pl_module = torch.compile(pl_module, backend="inductor")
-        # except Exception as e:
-        #     # show the error message
-        #     print(e)
-        #     logger.log(f"Failed to compile the model, you may need to install PyTorch 2.0")
+
+        if "compile" in conf.model.pl_module and conf.model.pl_module.compile:
+            try:
+                pl_module = torch.compile(pl_module, backend="inductor")
+            except Exception as e:
+                logger.log(
+                    f"Failed to compile the model, you may need to install PyTorch 2.0"
+                )
 
     # callbacks declaration
     callbacks_store = [ModelSummary(max_depth=2)]
@@ -197,16 +199,24 @@ def train(conf: omegaconf.DictConfig) -> None:
             best_model_path = model_checkpoint_callback.best_model_path
         else:
             raise ValueError(
-                "Either `checkpoint_path` or `model_checkpoint_callback` should be specified in the evaluation configuration"
+                "Either `checkpoint_path` or `model_checkpoint_callback` should "
+                "be specified in the evaluation configuration"
             )
         logger.log(f"Loading best model from {best_model_path}")
-        best_pl_module = GoldenRetrieverPLModule.load_from_checkpoint(best_model_path)
-        # try:
-        #     best_pl_module = torch.compile(best_pl_module, backend="inductor")
-        # except Exception as e:
-        #     logger.log(
-        #         f"Failed to compile the model, you may need to install PyTorch 2.0"
-        #     )
+
+        try:
+            best_pl_module = GoldenRetrieverPLModule.load_from_checkpoint(best_model_path)
+        except Exception as e:
+            logger.log(f"Failed to load the model from checkpoint: {e}")
+            logger.log(f"Using last model instead")
+            best_pl_module = pl_module
+        if "compile" in conf.model.pl_module and conf.model.pl_module.compile:
+            try:
+                best_pl_module = torch.compile(best_pl_module, backend="inductor")
+            except Exception as e:
+                logger.log(
+                    f"Failed to compile the model, you may need to install PyTorch 2.0"
+                )
 
     # module test
     trainer.test(best_pl_module, datamodule=pl_data_module)

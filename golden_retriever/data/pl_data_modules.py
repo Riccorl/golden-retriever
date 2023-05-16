@@ -10,11 +10,11 @@ from omegaconf import DictConfig
 from pytorch_lightning.utilities.types import EVAL_DATALOADERS
 from torch.utils.data import DataLoader, Dataset
 
-from golden_retriever.common.log import get_console_logger
+from golden_retriever.common.log import get_logger
 from golden_retriever.data.datasets import GenerativeDataset
 from golden_retriever.data.labels import Labels
 
-logger = get_console_logger()
+logger = get_logger()
 
 
 class PLDataModule(pl.LightningDataModule):
@@ -64,9 +64,9 @@ class PLDataModule(pl.LightningDataModule):
             path (str): The path to save the labels to
         """
         if self.labels is None:
-            logger.log("No labels to save")
+            logger.info("No labels to save")
             return
-        self.labels.to_file(path)
+        self.labels.save(path)
 
     def prepare_data(self, *args, **kwargs):
         """

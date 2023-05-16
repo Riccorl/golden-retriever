@@ -6,9 +6,9 @@ import torch
 from torch.utils.data import Dataset, IterableDataset
 from torch.utils.data.dataset import T_co
 
-from golden_retriever.common.log import get_console_logger
+from golden_retriever.common.log import get_logger
 
-logger = get_console_logger()
+logger = get_logger()
 
 
 class BaseDataset(Dataset):

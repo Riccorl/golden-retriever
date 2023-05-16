@@ -286,8 +286,6 @@ class GoldenRetriever(torch.nn.Module):
                 The encodings of the contexts.
             contexts_per_question (`List[int]`):
                 The number of contexts per question.
-            inner_batch_size (`int`):
-                The batch size to use for the context encoding.
             return_loss (`bool`):
                 Whether to compute the loss.
             return_encodings (`bool`):
@@ -913,6 +911,8 @@ class GoldenRetriever(torch.nn.Module):
                 Whether to load the index vector. Defaults to `True`.
             load_faiss_index (`bool`, optional):
                 Whether to load the faiss index. Defaults to `False`.
+            compile (`bool`, optional):
+                Whether to compile the model using Torch 2.0. Defaults to `False`.
             filenames (`Optional[List[str]]`, optional):
                 The filenames of the files to load. If `None`, the default filenames will be used.
             *args:
@@ -1040,7 +1040,7 @@ class GoldenRetriever(torch.nn.Module):
             except Exception as e:
                 # show the error message
                 print(e)
-                logger.log(
+                logger.info(
                     f"Failed to compile the model, you may need to install PyTorch 2.0"
                 )
 

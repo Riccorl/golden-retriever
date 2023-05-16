@@ -72,13 +72,13 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         # get the tokenizer
         tokenizer = trainer.datamodule.tokenizer
 
-        if datasets is not None or dataloaders is not None:
-            self.datasets = datasets
-            self.dataloaders = dataloaders
+        # if datasets is not None or dataloaders is not None:
+        #     self.datasets = datasets
+        #     self.dataloaders = dataloaders
 
         self.datasets, self.dataloaders = self._get_datasets_and_dataloaders(
-            self.datasets,
-            self.dataloaders,
+            datasets,
+            dataloaders,
             trainer,
             dataloader_kwargs={
                 "batch_size": self.batch_size,
