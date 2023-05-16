@@ -88,9 +88,11 @@ def add_candidates(
             collate_fn=collate_fn,
         )
 
-        retriever_outs = []
         # we also dump the candidates to a file after a while
+        retrieved_accumulator = []
         with torch.inference_mode():
+            num_completed_docs = 0
+
             for documents_batch in tqdm.tqdm(dataloader):
                 retrieve_kwargs = {
                     **documents_batch,
@@ -98,39 +100,51 @@ def add_candidates(
                     "precision": precision,
                 }
                 batch_out = retriever.retrieve(**retrieve_kwargs)
-                retriever_outs.extend(batch_out)
+                retrieved_accumulator.extend(batch_out)
 
-                if len(retriever_outs) % 100000 == 0:
+                if len(retrieved_accumulator) % 300_000 == 0:
                     output_data = []
-                    for sample, retriever_out in zip(samples, retriever_outs):
+                    # get the correct document from the original dataset
+                    # the dataloader is not shuffled, so we can just count the number of
+                    # documents we have seen so far
+                    for sample, retrieved in zip(
+                        samples[num_completed_docs : num_completed_docs + len(retrieved_accumulator)],
+                        retrieved_accumulator,
+                    ):
                         candidate_titles = [
-                            c.label.split(" <def>", 1)[0] for c in retriever_out
+                            c.label.split(" <def>", 1)[0] for c in retrieved
                         ]
                         sample["window_candidates"] = candidate_titles
-                        sample["window_candidates_scores"] = [
-                            c.score for c in retriever_out
-                        ]
+                        sample["window_candidates_scores"] = [c.score for c in retrieved]
                         output_data.append(sample)
 
                     for sample in output_data:
                         f_out.write(json.dumps(sample) + "\n")
 
-                    retriever_outs = []
-
-            if len(retriever_outs) > 0:
+                    num_completed_docs += len(retrieved_accumulator)
+                    retrieved_accumulator = []
+                
+            if len(retrieved_accumulator) > 0:
                 output_data = []
-                for sample, retriever_out in zip(samples, retriever_outs):
+                # get the correct document from the original dataset
+                # the dataloader is not shuffled, so we can just count the number of
+                # documents we have seen so far
+                for sample, retrieved in zip(
+                    samples[num_completed_docs : num_completed_docs + len(retrieved_accumulator)],
+                    retrieved_accumulator,
+                ):
                     candidate_titles = [
-                        c.label.split(" <def>", 1)[0] for c in retriever_out
+                        c.label.split(" <def>", 1)[0] for c in retrieved
                     ]
                     sample["window_candidates"] = candidate_titles
-                    sample["window_candidates_scores"] = [
-                        c.score for c in retriever_out
-                    ]
+                    sample["window_candidates_scores"] = [c.score for c in retrieved]
                     output_data.append(sample)
 
                 for sample in output_data:
                     f_out.write(json.dumps(sample) + "\n")
+
+                num_completed_docs += len(retrieved_accumulator)
+                retrieved_accumulator = []
 
     # compute_retriever_stats(samples)
 

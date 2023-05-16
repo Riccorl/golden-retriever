@@ -6,6 +6,8 @@ from typing import List, Tuple, Union
 
 from ipa.preprocessing.tokenizers.stanza_tokenizer import StanzaTokenizer
 from ipa.preprocessing.tokenizers.spacy_tokenizer import SpacyTokenizer
+from ipa.preprocessing.tokenizers.whitespace_tokenizer import WhitespaceTokenizer
+
 from tqdm import tqdm
 
 
@@ -79,9 +81,17 @@ def preprocess(
     window_stride: int = 16,
     title_mapping: str = None,
     language: str = "en",
-    stanza_device: str = "cpu",
+    tokenizer_device: str = "cpu",
+    split_on_spaces: bool = False,
 ):
-    tokenizer = SpacyTokenizer(language=language, use_gpu=bool(stanza_device != "cpu"))
+    if split_on_spaces:
+        tokenizer = WhitespaceTokenizer()
+    else:
+        tokenizer = SpacyTokenizer(
+            language=language,
+            use_gpu=bool(tokenizer_device != "cpu"),
+            # split_on_spaces=split_on_spaces,
+        )
 
     if title_mapping is not None:
         with open(title_mapping) as f:
@@ -210,6 +220,7 @@ if __name__ == "__main__":
     arg_parser.add_argument("--window_stride", type=int, default=16)
     arg_parser.add_argument("--title_mapping", type=str)
     arg_parser.add_argument("--language", type=str, default="en")
-    arg_parser.add_argument("--stanza_device", type=str, default="cpu")
+    arg_parser.add_argument("--tokenizer_device", type=str, default="cpu")
+    arg_parser.add_argument("--split_on_spaces", action="store_true")
 
     preprocess(**vars(arg_parser.parse_args()))

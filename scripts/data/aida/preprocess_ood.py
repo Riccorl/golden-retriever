@@ -92,14 +92,14 @@ def preprocess(
     tokenizer_device: str = "cpu",
     split_on_spaces: bool = False,
 ):
-    # if split_on_spaces:
-    #     tokenizer = WhitespaceTokenizer()
-    # else:
-    tokenizer = SpacyTokenizer(
-        language=language,
-        use_gpu=bool(tokenizer_device != "cpu"),
-        # split_on_spaces=split_on_spaces,
-    )
+    if split_on_spaces:
+        tokenizer = WhitespaceTokenizer()
+    else:
+        tokenizer = SpacyTokenizer(
+            language=language,
+            use_gpu=bool(tokenizer_device != "cpu"),
+            # split_on_spaces=split_on_spaces,
+        )
 
     if title_mapping is not None:
         with open(title_mapping) as f:
@@ -107,11 +107,7 @@ def preprocess(
 
     data = []
     with open(input_file_path) as f:
-        for line in f:
-            if len(data) >= 1_000_000:
-                print(f"Processed {len(data)} documents, skipping")
-                break
-            data.append(json.loads(line))
+        data = [json.loads(line) for line in f]
 
     output_file_path = Path(output_file_path)
     output_file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -119,7 +115,7 @@ def preprocess(
     num_windows = 0
     with open(output_file_path, "w") as f:
         for document in tqdm(data, desc="Windowizing documents"):
-            if num_windows >= 1_000_000:
+            if num_windows >= 5_000_000:
                 print(f"Processed {num_windows} windows, skipping")
                 break
             doc_id = int(document["doc_id"])
