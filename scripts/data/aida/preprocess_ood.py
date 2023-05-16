@@ -2,17 +2,20 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 from typing import List, Tuple, Union
 
-from ipa.preprocessing.tokenizers.stanza_tokenizer import StanzaTokenizer
 from ipa.preprocessing.tokenizers.spacy_tokenizer import SpacyTokenizer
+from ipa.preprocessing.tokenizers.base_tokenizer import BaseTokenizer
+from ipa.preprocessing.tokenizers.whitespace_tokenizer import WhitespaceTokenizer
 from tqdm import tqdm
 
 
 def tokenize(
-    tokenizer: StanzaTokenizer, document: str
+    tokenizer: BaseTokenizer, document: str
 ) -> Tuple[List[str], List[Tuple[int, int]]]:
     tokenized_document = tokenizer(document)
+    # tokenized_document = [(m.group(0), m.start(), m.end() - 1) for m in re.finditer(r'\S+', document)]
     tokens = []
     tokens_char_mapping = []
     for token in tokenized_document:
@@ -22,16 +25,23 @@ def tokenize(
 
 
 def split_document_by_window(
-    tokenizer: StanzaTokenizer,
+    tokenizer: BaseTokenizer,
     document: str,
     window_size: str,
     stride: int,
     doc_id: int = 0,
     doc_topic: str = None,
 ) -> List[dict]:
-    document_tokens, tokens_char_mapping = tokenize(tokenizer, document)
+    try:
+        document_tokens, tokens_char_mapping = tokenize(tokenizer, document)
+    except Exception as e:
+        print(document)
+        raise e
+
+    # add the first token of the document as the doc_topic
     if doc_topic is None:
         doc_topic = document_tokens[0]
+
     document_windows = []
     for window_id, i in enumerate(range(0, len(document_tokens), stride)):
         # if the last stride is smaller than the window size, then we can
@@ -79,9 +89,17 @@ def preprocess(
     window_stride: int = 16,
     title_mapping: str = None,
     language: str = "en",
-    stanza_device: str = "cpu",
+    tokenizer_device: str = "cpu",
+    split_on_spaces: bool = False,
 ):
-    tokenizer = SpacyTokenizer(language=language, use_gpu=bool(stanza_device != "cpu"))
+    # if split_on_spaces:
+    #     tokenizer = WhitespaceTokenizer()
+    # else:
+    tokenizer = SpacyTokenizer(
+        language=language,
+        use_gpu=bool(tokenizer_device != "cpu"),
+        # split_on_spaces=split_on_spaces,
+    )
 
     if title_mapping is not None:
         with open(title_mapping) as f:
@@ -90,114 +108,55 @@ def preprocess(
     data = []
     with open(input_file_path) as f:
         for line in f:
+            if len(data) >= 1_000_000:
+                print(f"Processed {len(data)} documents, skipping")
+                break
             data.append(json.loads(line))
-
-    # missing labels for debugging
-    # missing_labels = set()
-
-    windowized_data_train = []
-    windowized_data_dev = []
-    windowized_data_test = []
-    for document in tqdm(data, desc="Windowizing documents"):
-        doc_info = document["doc_id"]
-
-        # clean doc_info, e.g. "-DOCSTART- (1 EU)"
-        doc_info = (
-            doc_info.replace("-DOCSTART-", "").replace("(", "").replace(")", "").strip()
-        )
-        # print(doc_info)
-        # doc_id, doc_topic = doc_info.split(" ")
-        doc_id = doc_info
-        doc_topic = None
-
-        if "testa" in doc_id:
-            split = "dev"
-        elif "testb" in doc_id:
-            split = "test"
-        else:
-            split = "train"
-
-        doc_id = doc_id.replace("testa", "").replace("testb", "").strip()
-        doc_id = int(doc_id)
-
-        windowized_document = split_document_by_window(
-            tokenizer=tokenizer,
-            document=document["doc_text"],
-            window_size=window_size,
-            stride=window_stride,
-            doc_id=doc_id,
-            doc_topic=doc_topic,
-        )
-
-        # we need to add the labels
-        doc_level_labels = document["doc_annotations"]
-        # if we have a title mapping, we need to map the labels to the
-        # new titles
-        if title_mapping is not None:
-            # compute the missing labels
-            # missing_labels |= set(title_mapping.keys()) - set(
-            #     [label for _, _, label in doc_level_labels]
-            # )
-            doc_level_labels = [
-                [start, end, title_mapping.get(label, label)]
-                for start, end, label in doc_level_labels
-            ]
-
-        # these are the labels for the whole document, we need add them to the correct window
-        for window in windowized_document:
-            window_level_labels = []
-            for doc_level_label in doc_level_labels:
-                start_char, end_char, label_text = doc_level_label
-                if start_char >= window["offset"] and end_char <= window[
-                    "offset"
-                ] + len(window["text"]):
-                    window_level_labels.append(doc_level_label)
-            window["window_labels"] = window_level_labels
-
-            # now we need to map the labels to the tokens
-            # window_level_labels_but_for_tokens = []
-            # for label in window_level_labels:
-            #     start_char, end_char, label_text = label
-            #     start_token = None
-            #     end_token = None
-            #     for token_id, (start, end) in enumerate(
-            #         zip(
-            #             window["token2char_start"].values(),
-            #             window["token2char_end"].values(),
-            #         )
-            #     ):
-            #         if start_char == start:
-            #             start_token = token_id
-            #         if end_char == end:
-            #             end_token = token_id + 1
-            #     if start_token is None or end_token is None:
-            #         raise ValueError(
-            #             f"Could not find token for label: {label} in window: {window} "
-            #             f"(start_token: {start_token}, end_token: {end_token})"
-            #         )
-            #     window_level_labels_but_for_tokens.append(
-            #         [start_token, end_token, label_text]
-            #     )
-            # window["window_labels_tokens"] = window_level_labels_but_for_tokens
-
-        if split == "train":
-            windowized_data_train.extend(windowized_document)
-        elif split == "dev":
-            windowized_data_dev.extend(windowized_document)
-        elif split == "test":
-            windowized_data_test.extend(windowized_document)
-        else:
-            raise ValueError(f"Unknown split: {split}")
 
     output_file_path = Path(output_file_path)
     output_file_path.parent.mkdir(parents=True, exist_ok=True)
 
+    num_windows = 0
     with open(output_file_path, "w") as f:
-        for window in windowized_data_train:
-            f.write(json.dumps(window) + "\n")
+        for document in tqdm(data, desc="Windowizing documents"):
+            if num_windows >= 1_000_000:
+                print(f"Processed {num_windows} windows, skipping")
+                break
+            doc_id = int(document["doc_id"])
+            doc_topic = None
 
-    # print(f"Missing labels: {missing_labels}")
-    # print(f"Total number of missing labels: {len(missing_labels)}")
+            windowized_document = split_document_by_window(
+                tokenizer=tokenizer,
+                document=document["doc_text"],
+                window_size=window_size,
+                stride=window_stride,
+                doc_id=doc_id,
+                doc_topic=doc_topic,
+            )
+
+            # we need to add the labels
+            doc_level_labels = document["doc_annotations"]
+            # if we have a title mapping, we need to map the labels to the new titles
+            if title_mapping is not None:
+                doc_level_labels = [
+                    [start, end, title_mapping.get(label, label)]
+                    for start, end, label in doc_level_labels
+                ]
+
+            # these are the labels for the whole document, we need add them to the correct window
+            for window in windowized_document:
+                window_level_labels = []
+                for doc_level_label in doc_level_labels:
+                    start_char, end_char, label_text = doc_level_label
+                    if start_char >= window["offset"] and end_char <= window[
+                        "offset"
+                    ] + len(window["text"]):
+                        window_level_labels.append(doc_level_label)
+                window["window_labels"] = window_level_labels
+
+            for window in windowized_document:
+                num_windows += 1
+                f.write(json.dumps(window) + "\n")
 
 
 if __name__ == "__main__":
@@ -208,6 +167,7 @@ if __name__ == "__main__":
     arg_parser.add_argument("--window_stride", type=int, default=16)
     arg_parser.add_argument("--title_mapping", type=str)
     arg_parser.add_argument("--language", type=str, default="en")
-    arg_parser.add_argument("--stanza_device", type=str, default="cpu")
+    arg_parser.add_argument("--tokenizer_device", type=str, default="cpu")
+    arg_parser.add_argument("--split_on_spaces", action="store_true")
 
     preprocess(**vars(arg_parser.parse_args()))

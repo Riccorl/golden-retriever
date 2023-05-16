@@ -546,13 +546,15 @@ class GoldenRetriever(torch.nn.Module):
                     max_length=max_length or tokenizer.model_max_length,
                 )
             )
-            model_inputs.to(self.device)
         else:
             model_inputs = ModelInputs({"input_ids": input_ids})
             if attention_mask is not None:
                 model_inputs["attention_mask"] = attention_mask
             if token_type_ids is not None:
                 model_inputs["token_type_ids"] = token_type_ids
+
+        model_inputs.to(self.device)
+
         if self._faiss_indexer is not None:
             faiss_outs: FaissOutput = self._faiss_indexer.search(
                 self.question_encoder(**model_inputs), k=k

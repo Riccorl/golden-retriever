@@ -1,7 +1,9 @@
 # Path: scripts/data/aida/add_candidates.py
 
 import argparse
+import contextlib
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Union
@@ -10,6 +12,11 @@ import torch
 import tqdm
 
 from golden_retriever import GoldenRetriever
+from golden_retriever.common.log import get_logger
+from golden_retriever.common.model_inputs import ModelInputs
+from golden_retriever.data.datasets import BaseDataset
+
+logger = get_logger(level=logging.INFO)
 
 
 def compute_retriever_stats(dataset) -> None:
@@ -28,28 +35,14 @@ def compute_retriever_stats(dataset) -> None:
     recall = correct / total
     print("Recall:", recall)
 
-    # doc_level_correct, doc_level_total = 0, 0
-    # for sample in dataset:
-    #     doc_id = sample["doc_id"]
-
-
-def batch_generation(samples, batch_size):
-    batch = []
-    for sample in samples:
-        batch.append(sample)
-        if len(batch) == batch_size:
-            yield batch
-            batch = []
-    if len(batch) > 0:
-        yield batch
-
 
 @torch.no_grad()
 def add_candidates(
     retriever_name_or_path: Union[str, os.PathLike],
     input_path: Union[str, os.PathLike],
     output_path: Union[str, os.PathLike],
-    batch_size: int = 512,
+    batch_size: int = 128,
+    num_workers: int = 4,
     device: str = "cuda",
     index_device: str = "cpu",
     precision: str = "fp32",
@@ -65,52 +58,81 @@ def add_candidates(
     )
     retriever.eval()
 
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    documents_batch = []
-
-    debug_retrieval_stuff = {}
-
-    output_data = []
+    logger.info(f"Loading from {input_path}")
     with open(input_path) as f:
         samples = [json.loads(line) for line in f.readlines()]
 
-    len_samples = len(samples)
-    len_samples_from_batch = 0
-    with torch.inference_mode():
-        for documents_batch in tqdm.tqdm(batch_generation(samples, batch_size)):
-            len_samples_from_batch += len(documents_batch)
-            topics_pair = None
-            if topics:
-                topics_pair = [d["doc_topic"] for d in documents_batch]
-            retriever_outs = retriever.retrieve(
-                [d["text"] for d in documents_batch],
-                text_pair=topics_pair,
-                k=100,
-                precision=precision,
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_path, "w") as f_out:
+        # get tokenizer
+        tokenizer = retriever.question_tokenizer
+        collate_fn = lambda batch: ModelInputs(
+            tokenizer(
+                [b["text"] for b in batch],
+                text_pair=[b["doc_topic"] for b in batch]
+                if topics and "doc_topic" in batch[0]
+                else None,
+                padding=True,
+                return_tensors="pt",
+                truncation=True,
             )
-            for i, sample in enumerate(documents_batch):
-                candidate_titles = [
-                    c.label.split(" <def>", 1)[0] for c in retriever_outs[i]
-                ]
-                sample["window_candidates"] = candidate_titles
-                sample["window_candidates_scores"] = [
-                    c.score for c in retriever_outs[i]
-                ]
-                output_data.append(sample)
-                debug_retrieval_stuff[f"{sample['doc_id']}_{sample['window_id']}"] = [
-                    (c.label.split(" <def>", 1)[0], c.score) for c in retriever_outs[i]
-                ]
+        )
+        logger.info(f"Creating dataloader with batch size {batch_size}")
+        dataloader = torch.utils.data.DataLoader(
+            BaseDataset(name="context", data=samples),
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=num_workers,
+            pin_memory=False,
+            collate_fn=collate_fn,
+        )
 
-    with open(output_path, "w") as f:
-        for sample in output_data:
-            f.write(json.dumps(sample) + "\n")
+        retriever_outs = []
+        # we also dump the candidates to a file after a while
+        with torch.inference_mode():
+            for documents_batch in tqdm.tqdm(dataloader):
+                retrieve_kwargs = {
+                    **documents_batch,
+                    "k": 100,
+                    "precision": precision,
+                }
+                batch_out = retriever.retrieve(**retrieve_kwargs)
+                retriever_outs.extend(batch_out)
 
-    # measure some metrics
-    compute_retriever_stats(output_data)
+                if len(retriever_outs) % 100000 == 0:
+                    output_data = []
+                    for sample, retriever_out in zip(samples, retriever_outs):
+                        candidate_titles = [
+                            c.label.split(" <def>", 1)[0] for c in retriever_out
+                        ]
+                        sample["window_candidates"] = candidate_titles
+                        sample["window_candidates_scores"] = [
+                            c.score for c in retriever_out
+                        ]
+                        output_data.append(sample)
 
-    print("len_samples", len_samples)
-    print("len_samples_from_batch", len_samples_from_batch)
+                    for sample in output_data:
+                        f_out.write(json.dumps(sample) + "\n")
+
+                    retriever_outs = []
+
+            if len(retriever_outs) > 0:
+                output_data = []
+                for sample, retriever_out in zip(samples, retriever_outs):
+                    candidate_titles = [
+                        c.label.split(" <def>", 1)[0] for c in retriever_out
+                    ]
+                    sample["window_candidates"] = candidate_titles
+                    sample["window_candidates_scores"] = [
+                        c.score for c in retriever_out
+                    ]
+                    output_data.append(sample)
+
+                for sample in output_data:
+                    f_out.write(json.dumps(sample) + "\n")
+
+    # compute_retriever_stats(samples)
 
 
 if __name__ == "__main__":

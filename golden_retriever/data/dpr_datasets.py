@@ -444,15 +444,15 @@ class DPRIterableDataset(GenerativeDataset, DPRMixin):
                 ),
             }
         self.data = self.load(path, tokenizer=self.tokenizer, shuffle=shuffle)
-        if self.max_negatives_to_sample > 0:
-            self.data = self._sample_dataset_negatives(
-                self.data,
-                self.tokenizer,
-                self.context_manager,
-                self.sample_by_frequency,
-                self.max_negatives_to_sample,
-                self.max_context_length,
-            )
+        #        if self.max_negatives_to_sample > 0:
+        #           self.data = self._sample_dataset_negatives(
+        #               self.data,
+        #              self.tokenizer,
+        #             self.context_manager,
+        #            self.sample_by_frequency,
+        #           self.max_negatives_to_sample,
+        #          self.max_context_length,
+        #     )
         self.prefatched_data = []
         if self.prefetch_batches:
             self.prefetch()
