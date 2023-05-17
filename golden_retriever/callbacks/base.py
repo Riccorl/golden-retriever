@@ -32,8 +32,10 @@ class PredictionCallback(pl.Callback):
     def __init__(
         self,
         batch_size: int = 32,
-        stages: Set[Union[str, RunningStage]] = None,
-        other_callbacks: Optional[List[DictConfig]] = None,
+        stages: Optional[Set[Union[str, RunningStage]]] = None,
+        other_callbacks: Optional[
+            Union[List[DictConfig], List["NLPTemplateCallback"]]
+        ] = None,
         datasets: Optional[Union[DictConfig, BaseDataset]] = None,
         dataloaders: Optional[Union[DataLoader, List[DataLoader]]] = None,
         *args,
@@ -121,6 +123,7 @@ class PredictionCallback(pl.Callback):
         Returns:
             `Tuple[List[Dataset], List[DataLoader]]`: The datasets and dataloaders.
         """
+        print("chupamela")
         # if a dataset is provided, use it
         if dataset is not None:
             dataloader_kwargs = dataloader_kwargs or {}

@@ -448,14 +448,18 @@ class GoldenRetriever(torch.nn.Module):
                 # Compute the context embeddings
                 context_outs = context_encoder(**batch)
                 # Append the context embeddings to the list
-                context_embeddings.extend([c for c in context_outs])
+                if move_index_to_cpu:
+                    context_embeddings.extend([c.detach().cpu() for c in context_outs])
+                else:
+                    context_embeddings.extend([c for c in context_outs])
 
-        # move the context embeddings to the CPU
-        context_embeddings = [c.detach().cpu() for c in context_embeddings]
+        # move the context embeddings to the CPU if not already done
+        # the move to cpu and then to gpu is needed to avoid OOM when using mixed precision
+        if not move_index_to_cpu:
+            context_embeddings = [c.detach().cpu() for c in context_embeddings]
         # stack it
         context_embeddings: torch.Tensor = torch.stack(context_embeddings, dim=0)
         # move the context embeddings to the gpu if needed
-        # the move to cpu and then to gpu is needed to avoid OOM when using mixed precision
         if not move_index_to_cpu:
             if index_precision:
                 context_embeddings = context_embeddings.to(

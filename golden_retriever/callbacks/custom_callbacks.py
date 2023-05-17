@@ -33,7 +33,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         index_precision: Union[str, int] = 32,
         force_reindex: bool = True,
         retriever_dir: Optional[Path] = None,
-        stages: Set[Union[str, RunningStage]] = None,
+        stages: Optional[Set[Union[str, RunningStage]]] = None,
         other_callbacks: Optional[List[DictConfig]] = None,
         dataset: Optional[Union[DictConfig, BaseDataset]] = None,
         dataloader: Optional[DataLoader] = None,

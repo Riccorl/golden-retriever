@@ -3,16 +3,18 @@ import os
 from pathlib import Path
 from typing import List, Optional, Tuple, Union
 
-import ray
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
+from golden_retriever.serve.tokenizers import (
+    WhitespaceTokenizer,
+    SpacyTokenizer,
+    RegexTokenizer,
+)
 from ray import serve
 
 from golden_retriever import GoldenRetriever
 from golden_retriever.common.log import get_console_logger, get_logger
-
-from ipa.preprocessing.tokenizers.spacy_tokenizer import SpacyTokenizer
-from ipa.preprocessing.tokenizers.whitespace_tokenizer import WhitespaceTokenizer
-
+from golden_retriever.serve.window.manager import WindowManager
+from golden_retriever.data.utils import batch_generator
 
 logger = get_logger(__name__, level=logging.INFO)
 console_logger = get_console_logger()
@@ -31,6 +33,9 @@ TOP_K = int(os.environ.get("TOP_K", 100))
 USE_FAISS = os.environ.get("USE_FAISS", False)
 WINDOW_BATCH_SIZE = int(os.environ.get("WINDOW_BATCH_SIZE", 32))
 SPLIT_ON_SPACES = os.environ.get("SPLIT_ON_SPACES", False)
+NUM_GPUS = int(os.environ.get("NUM_GPUS", 1))
+MIN_REPLICAS = int(os.environ.get("MIN_REPLICAS", 1))
+MAX_REPLICAS = int(os.environ.get("MAX_REPLICAS", 1))
 
 app = FastAPI(
     title="Golden Retriever",
@@ -40,8 +45,8 @@ app = FastAPI(
 
 
 @serve.deployment(
-    ray_actor_options={"num_gpus": 1 if DEVICE == "cuda" else 0},
-    autoscaling_config={"min_replicas": 1, "max_replicas": 2},
+    ray_actor_options={"num_gpus": NUM_GPUS if DEVICE == "cuda" else 0},
+    autoscaling_config={"min_replicas": MIN_REPLICAS, "max_replicas": MAX_REPLICAS},
 )
 @serve.ingress(app)
 class GoldenRetrieverServer:
@@ -73,10 +78,12 @@ class GoldenRetrieverServer:
         self.retriever.eval()
 
         if SPLIT_ON_SPACES:
-            self.tokenizer = WhitespaceTokenizer()
+            # self.tokenizer = WhitespaceTokenizer()
+            self.tokenizer = RegexTokenizer()
         else:
             self.tokenizer = SpacyTokenizer(language="en")
-        # self.tokenizer = WhitespaceTokenizer()
+
+        self.window_manager = WindowManager(tokenizer=self.tokenizer)
 
     @app.post("/api/retrieve")
     def retrieve_endpoint(
@@ -99,144 +106,31 @@ class GoldenRetrieverServer:
 
     @app.post("/api/gerbil")
     def gerbil_endpoint(self, documents: Union[str, List[str]]):
-        def tokenize(
-            tokenizer: SpacyTokenizer, document: str
-        ) -> Tuple[List[str], List[Tuple[int, int]]]:
-            tokenized_document = tokenizer(document)
-            tokens = []
-            tokens_char_mapping = []
-            for token in tokenized_document:
-                tokens.append(token.text)
-                tokens_char_mapping.append((token.start_char, token.end_char))
-            return tokens, tokens_char_mapping
-
-        def split_document_by_window(
-            tokenizer: SpacyTokenizer,
-            document: str,
-            window_size: int,
-            stride: int,
-            doc_id: int = 0,
-            doc_topic: str = None,
-        ) -> List[dict]:
-            document_tokens, tokens_char_mapping = tokenize(tokenizer, document)
-            if doc_topic is None:
-                doc_topic = document_tokens[0] if len(document_tokens) > 0 else ""
-            document_windows = []
-            if len(document_tokens) <= window_size:
-                text = document
-                document_windows.append(
-                    dict(
-                        doc_id=doc_id,
-                        window_id=0,
-                        text=text,
-                        tokens=document_tokens,
-                        doc_topic=doc_topic,
-                        offset=0,
-                        token2char_start={
-                            i: tokens_char_mapping[i][0]
-                            for i in range(len(document_tokens))
-                        },
-                        token2char_end={
-                            i: tokens_char_mapping[i][1]
-                            for i in range(len(document_tokens))
-                        },
-                    )
-                )
-            else:
-                for window_id, i in enumerate(range(0, len(document_tokens), stride)):
-                    # if the last stride is smaller than the window size, then we can
-                    # include more tokens form the previous window.
-                    if i != 0 and i + window_size > len(document_tokens):
-                        overflowing_tokens = i + window_size - len(document_tokens)
-                        if overflowing_tokens >= stride:
-                            break
-                        i -= overflowing_tokens
-
-                    involved_token_indices = list(
-                        range(i, min(i + window_size, len(document_tokens) - 1))
-                    )
-                    window_tokens = [document_tokens[j] for j in involved_token_indices]
-                    window_text_start = tokens_char_mapping[involved_token_indices[0]][
-                        0
-                    ]
-                    window_text_end = tokens_char_mapping[involved_token_indices[-1]][1]
-                    text = document[window_text_start:window_text_end]
-                    document_windows.append(
-                        dict(
-                            doc_id=doc_id,
-                            window_id=window_id,
-                            text=text,
-                            tokens=window_tokens,
-                            doc_topic=doc_topic,
-                            offset=window_text_start,
-                            token2char_start={
-                                i: tokens_char_mapping[ti][0]
-                                for i, ti in enumerate(involved_token_indices)
-                            },
-                            token2char_end={
-                                i: tokens_char_mapping[ti][1]
-                                for i, ti in enumerate(involved_token_indices)
-                            },
-                        )
-                    )
-            return document_windows
-
-        # try:
         # normalize input
         if isinstance(documents, str):
             documents = [documents]
 
         # output list
         windows_contexts = []
-        try:
-            # split documents into windows
-            document_windows = [
-                window
-                for d_id, d in enumerate(documents)
-                for window in split_document_by_window(
-                    self.tokenizer, d, window_size=24, stride=12, doc_id=d_id
-                )
-            ]
-        except:
-            print("Error in splitting documents into windows")
-            print(documents)
-            # split documents into windows
-            document_windows = [
-                window
-                for d_id, d in enumerate(documents)
-                for window in split_document_by_window(
-                    self.tokenizer, d, window_size=24, stride=12, doc_id=d_id
-                )
-            ]
+        # split documents into windows
+        document_windows = [
+            window
+            for d_id, d in enumerate(documents)
+            for window in self.window_manager(
+                self.tokenizer, d, window_size=24, stride=12, doc_id=d_id
+            )
+        ]
 
         # get text and topic from document windows and create new list
-        text = [window["text"] for window in document_windows]
-        text_pair = [window["doc_topic"] for window in document_windows]
+        model_inputs = [
+            tuple(window.text, window.doc_topic) for window in document_windows
+        ]
 
-        # batch retrieval
-        batch = []
-        for t, t_p in zip(text, text_pair):
-            batch.append((t, t_p))
-            if len(batch) == WINDOW_BATCH_SIZE:
-                t_batch = [t for t, _ in batch]
-                t_p_batch = [t_p for _, t_p in batch]
-                batch_predictions = self.retriever.retrieve(
-                    t_batch, t_p_batch, k=TOP_K, precision=PRECISION
-                )
-                windows_contexts.extend(
-                    [
-                        [p.label for p in predictions]
-                        for predictions in batch_predictions
-                    ]
-                )
-                batch = []
-
-        # leftover batch
-        if len(batch) > 0:
-            t_batch = [t for t, _ in batch]
-            t_p_batch = [t_p for _, t_p in batch]
+        # batch generator
+        for batch in batch_generator(model_inputs, batch_size=WINDOW_BATCH_SIZE):
+            text, text_pair = zip(*batch)
             batch_predictions = self.retriever.retrieve(
-                t_batch, t_p_batch, k=TOP_K, precision=PRECISION
+                text, text_pair, k=TOP_K, precision=PRECISION
             )
             windows_contexts.extend(
                 [[p.label for p in predictions] for predictions in batch_predictions]
@@ -244,6 +138,7 @@ class GoldenRetrieverServer:
 
         # add context to document windows
         for window, contexts in zip(document_windows, windows_contexts):
+            # clean up contexts (remove everything after first <def> tag if present)
             contexts = [c.split(" <def>", 1)[0] for c in contexts]
             window["window_candidates"] = contexts
 

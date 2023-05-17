@@ -1,4 +1,4 @@
-from typing import List, Optional, Union
+from typing import Any, Iterable, List, Optional, Union
 
 import numpy as np
 
@@ -61,3 +61,26 @@ class NegativeSampler:
             :, :sample_size
         ]
         return sampled_indices
+
+
+def batch_generator(samples: Iterable[Any], batch_size: int) -> Iterable[Any]:
+    """
+    Generate batches from samples.
+
+    Args:
+        samples (`Iterable[Any]`): Iterable of samples.
+        batch_size (`int`): Batch size.
+
+    Returns:
+        `Iterable[Any]`: Iterable of batches.
+    """
+    batch = []
+    for sample in samples:
+        batch.append(sample)
+        if len(batch) == batch_size:
+            yield batch
+            batch = []
+
+    # leftover batch
+    if len(batch) > 0:
+        yield batch

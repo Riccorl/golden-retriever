@@ -17,8 +17,8 @@ from pytorch_lightning.loggers import WandbLogger
 from rich.pretty import pprint
 
 from golden_retriever.common.log import get_console_logger
-from golden_retriever.data.pl_data_modules import PLDataModule
-from golden_retriever.models.pl_modules import GoldenRetrieverPLModule
+from golden_retriever.lightning_modules.pl_data_modules import PLDataModule
+from golden_retriever.lightning_modules.pl_modules import GoldenRetrieverPLModule
 
 logger = get_console_logger()
 

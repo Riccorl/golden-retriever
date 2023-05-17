@@ -2,7 +2,7 @@ max_contexts_per_batch: 400
 max_questions_per_batch: 64
 
 datamodule:
-  _target_: golden_retriever.data.pl_data_modules.PLDataModule
+  _target_: golden_retriever.lightning_modules.pl_data_modules.PLDataModule
   tokenizer: ${model.language_model}
   datasets:
     train:

@@ -1,5 +1,5 @@
 datamodule:
-  _target_: golden_retriever.data.pl_data_modules.PLDataModule
+  _target_: golden_retriever.lightning_modules.pl_data_modules.PLDataModule
   tokenizer: ${model.language_model}
   datasets:
     train:

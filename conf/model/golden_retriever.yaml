@@ -1,7 +1,7 @@
 language_model: "sentence-transformers/all-MiniLM-L12-v2"
 
 pl_module:
-  _target_: golden_retriever.models.pl_modules.GoldenRetrieverPLModule
+  _target_: golden_retriever.lightning_modules.pl_modules.GoldenRetrieverPLModule
   model:
     _target_: golden_retriever.models.model.GoldenRetriever
     question_encoder:
