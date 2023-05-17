@@ -11,6 +11,7 @@ from golden_retriever import GoldenRetriever
 from golden_retriever.common.log import get_console_logger, get_logger
 
 from ipa.preprocessing.tokenizers.spacy_tokenizer import SpacyTokenizer
+from ipa.preprocessing.tokenizers.whitespace_tokenizer import WhitespaceTokenizer
 
 
 logger = get_logger(__name__, level=logging.INFO)
@@ -29,6 +30,7 @@ MODEL_NAME_OR_PATH = os.environ.get("MODEL_NAME_OR_PATH", None)
 TOP_K = int(os.environ.get("TOP_K", 100))
 USE_FAISS = os.environ.get("USE_FAISS", False)
 WINDOW_BATCH_SIZE = int(os.environ.get("WINDOW_BATCH_SIZE", 32))
+SPLIT_ON_SPACES = os.environ.get("SPLIT_ON_SPACES", False)
 
 app = FastAPI(
     title="Golden Retriever",
@@ -58,6 +60,8 @@ class GoldenRetrieverServer:
         logger.info(f"PRECISION: {PRECISION}")
         logger.info(f"INDEX_PRECISION: {INDEX_PRECISION}")
         logger.info(f"USE_FAISS: {USE_FAISS}")
+        logger.info(f"WINDOW_BATCH_SIZE: {WINDOW_BATCH_SIZE}")
+        logger.info(f"SPLIT_ON_SPACES: {SPLIT_ON_SPACES}")
 
         self.retriever = GoldenRetriever.from_pretrained(
             MODEL_NAME_OR_PATH,
@@ -68,7 +72,11 @@ class GoldenRetrieverServer:
         )
         self.retriever.eval()
 
-        self.tokenizer = SpacyTokenizer(language="en")
+        if SPLIT_ON_SPACES:
+            self.tokenizer = WhitespaceTokenizer()
+        else:
+            self.tokenizer = SpacyTokenizer(language="en")
+        # self.tokenizer = WhitespaceTokenizer()
 
     @app.post("/api/retrieve")
     def retrieve_endpoint(
