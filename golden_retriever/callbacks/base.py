@@ -123,7 +123,6 @@ class PredictionCallback(pl.Callback):
         Returns:
             `Tuple[List[Dataset], List[DataLoader]]`: The datasets and dataloaders.
         """
-        print("chupamela")
         # if a dataset is provided, use it
         if dataset is not None:
             dataloader_kwargs = dataloader_kwargs or {}
