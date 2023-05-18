@@ -41,7 +41,7 @@ SAPIENZANLP_CACHE_DIR = os.getenv("SAPIENZANLP_CACHE_DIR", Path.home() / ".sapie
 SAPIENZANLP_DATE_FORMAT = "%Y-%m-%d %H-%M-%S"
 
 
-logger = get_logger()
+logger = get_logger(__name__)
 
 
 def sapienzanlp_model_urls(model_id: str) -> str:

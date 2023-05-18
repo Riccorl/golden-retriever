@@ -1,19 +1,20 @@
+from dataclasses import dataclass
 import os
+from typing import Union
 
-
+@dataclass
 class ServerParameterManager:
-    def __init__(self) -> None:
-        self.device = os.environ.get("DEVICE", "cpu")
-        self.index_device = os.environ.get("INDEX_DEVICE", self.device)
-        self.precision = os.environ.get("PRECISION", "fp32")
-        self.index_precision = os.environ.get("INDEX_PRECISION", self.precision)
-        self.model_name_or_path = os.environ.get("MODEL_NAME_OR_PATH", None)
-        self.top_k = int(os.environ.get("TOP_K", 100))
-        self.use_faiss = os.environ.get("USE_FAISS", False)
-        self.window_batch_size = int(os.environ.get("WINDOW_BATCH_SIZE", 32))
-        self.window_size = int(os.environ.get("WINDOW_SIZE", 32))
-        self.window_stride = int(os.environ.get("WINDOW_SIZE", 16))
-        self.split_on_spaces = os.environ.get("SPLIT_ON_SPACES", False)
+    device: str = os.environ.get("DEVICE", "cpu")
+    index_device: str = os.environ.get("INDEX_DEVICE", device)
+    precision: Union[str, int] = os.environ.get("PRECISION", "fp32")
+    index_precision: Union[str, int] = os.environ.get("INDEX_PRECISION", precision)
+    model_name_or_path: str = os.environ.get("MODEL_NAME_OR_PATH", None)
+    top_k: int = int(os.environ.get("TOP_K", 100))
+    use_faiss: bool = os.environ.get("USE_FAISS", False)
+    window_batch_size: int = int(os.environ.get("WINDOW_BATCH_SIZE", 32))
+    window_size: int = int(os.environ.get("WINDOW_SIZE", 32))
+    window_stride: int = int(os.environ.get("WINDOW_SIZE", 16))
+    split_on_spaces: bool = os.environ.get("SPLIT_ON_SPACES", False)
 
 
 class RayParameterManager:
