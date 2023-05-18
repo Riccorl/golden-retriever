@@ -13,6 +13,7 @@ class Window:
     offset: int
     token2char_start: dict
     token2char_end: dict
+    window_candidates: Optional[List[str]] = None
 
 
 class WindowManager:
