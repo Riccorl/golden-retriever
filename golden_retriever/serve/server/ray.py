@@ -1,18 +1,17 @@
 import logging
 import os
 from pathlib import Path
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Union
 
 from fastapi import FastAPI
 from ray import serve
 
 from golden_retriever import GoldenRetriever
-from golden_retriever.common.log import get_console_logger, get_logger
+from golden_retriever.common.log import get_logger
 from golden_retriever.data.utils import batch_generator
 from golden_retriever.serve.tokenizers import (
     RegexTokenizer,
     SpacyTokenizer,
-    WhitespaceTokenizer,
 )
 from golden_retriever.serve.utils import RayParameterManager, ServerParameterManager
 from golden_retriever.serve.window.manager import WindowManager
@@ -87,9 +86,11 @@ class GoldenRetrieverServer:
         self.retriever.eval()
 
         if self.split_on_spaces:
+            logger.info("Using RegexTokenizer")
             # self.tokenizer = WhitespaceTokenizer()
             self.tokenizer = RegexTokenizer()
         else:
+            logger.info("Using SpacyTokenizer")
             self.tokenizer = SpacyTokenizer(language="en")
 
         self.window_manager = WindowManager(tokenizer=self.tokenizer)
