@@ -43,9 +43,12 @@ class GoldenRetrieverPLModule(pl.LightningModule):
             "loss",
             forward_output["loss"],
             batch_size=batch.questions.input_ids.size(0),
+            prog_bar=True,
         )
-        self.log("question_batch_size", batch.questions.input_ids.size(0))
-        self.log("context_batch_size", batch.contexts.input_ids.size(0))
+        self.log(
+            "question_batch_size", batch.questions.input_ids.size(0), prog_bar=True
+        )
+        self.log("context_batch_size", batch.contexts.input_ids.size(0), prog_bar=True)
         return forward_output["loss"]
 
     def validation_step(self, batch: ModelInputs, batch_idx: int) -> None:

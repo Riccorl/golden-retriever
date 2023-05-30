@@ -42,42 +42,61 @@ def split_document_by_window(
         doc_topic = document_tokens[0]
 
     document_windows = []
-    for window_id, i in enumerate(range(0, len(document_tokens), stride)):
-        # if the last stride is smaller than the window size, then we can
-        # include more tokens form the previous window.
-        if i != 0 and i + window_size > len(document_tokens):
-            overflowing_tokens = i + window_size - len(document_tokens)
-            if overflowing_tokens >= stride:
-                break
-            i -= overflowing_tokens
-
-        involved_token_indices = list(
-            range(i, min(i + window_size, len(document_tokens) - 1))
-        )
-
-        window_tokens = [document_tokens[j] for j in involved_token_indices]
-        window_text_start = tokens_char_mapping[involved_token_indices[0]][0]
-        window_text_end = tokens_char_mapping[involved_token_indices[-1]][1]
-        text = document[window_text_start:window_text_end]
-
+    if len(document_tokens) <= window_size:
+        text = document
         document_windows.append(
             dict(
                 doc_id=doc_id,
-                window_id=window_id,
+                window_id=0,
                 text=text,
-                tokens=window_tokens,
+                tokens=document_tokens,
                 doc_topic=doc_topic,
-                offset=window_text_start,
+                offset=0,
                 token2char_start={
-                    i: tokens_char_mapping[ti][0]
-                    for i, ti in enumerate(involved_token_indices)
+                    i: tokens_char_mapping[i][0] for i in range(len(document_tokens))
                 },
                 token2char_end={
-                    i: tokens_char_mapping[ti][1]
-                    for i, ti in enumerate(involved_token_indices)
+                    i: tokens_char_mapping[i][1] for i in range(len(document_tokens))
                 },
             )
         )
+    else:
+        for window_id, i in enumerate(range(0, len(document_tokens), stride)):
+            # if the last stride is smaller than the window size, then we can
+            # include more tokens form the previous window.
+            if i != 0 and i + window_size > len(document_tokens):
+                overflowing_tokens = i + window_size - len(document_tokens)
+                if overflowing_tokens >= stride:
+                    break
+                i -= overflowing_tokens
+
+            involved_token_indices = list(
+                range(i, min(i + window_size, len(document_tokens) - 1))
+            )
+
+            window_tokens = [document_tokens[j] for j in involved_token_indices]
+            window_text_start = tokens_char_mapping[involved_token_indices[0]][0]
+            window_text_end = tokens_char_mapping[involved_token_indices[-1]][1]
+            text = document[window_text_start:window_text_end]
+
+            document_windows.append(
+                dict(
+                    doc_id=doc_id,
+                    window_id=window_id,
+                    text=text,
+                    tokens=window_tokens,
+                    doc_topic=doc_topic,
+                    offset=window_text_start,
+                    token2char_start={
+                        i: tokens_char_mapping[ti][0]
+                        for i, ti in enumerate(involved_token_indices)
+                    },
+                    token2char_end={
+                        i: tokens_char_mapping[ti][1]
+                        for i, ti in enumerate(involved_token_indices)
+                    },
+                )
+            )
     return document_windows
 
 
@@ -112,13 +131,17 @@ def preprocess(
 
     num_windows = 0
     with open(output_file_path, "w") as f:
-        for document in tqdm(data, desc="Windowizing documents"):
-            doc_id = int(document["doc_id"])
+        for doc_id, document in tqdm(enumerate(data), desc="Windowizing documents"):
+            # doc_id = int(document["doc_id"])
             doc_topic = None
+
+            if len(document["entities"]) == 0:
+                # no entities in the document, we skip it
+                continue
 
             windowized_document = split_document_by_window(
                 tokenizer=tokenizer,
-                document=document["doc_text"],
+                document=document["text"],
                 window_size=window_size,
                 stride=window_stride,
                 doc_id=doc_id,
@@ -126,12 +149,12 @@ def preprocess(
             )
 
             # we need to add the labels
-            doc_level_labels = document["doc_annotations"]
+            doc_level_labels = document["entities"]
             # if we have a title mapping, we need to map the labels to the new titles
             if title_mapping is not None:
                 doc_level_labels = [
                     [start, end, title_mapping.get(label, label)]
-                    for start, end, label in doc_level_labels
+                    for label, start, end in doc_level_labels
                 ]
 
             # these are the labels for the whole document, we need add them to the correct window

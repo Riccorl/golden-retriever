@@ -44,7 +44,7 @@ class SavePredictionsCallback(NLPTemplateCallback):
             )
             return
         datasets = callback.datasets
-        for dataloader_idx, predictions in predictions.items():
+        for dataloader_idx, dataloader_predictions in predictions.items():
             # save to file
             if self.saving_dir is not None:
                 prediction_folder = Path(self.saving_dir)
@@ -67,7 +67,12 @@ class SavePredictionsCallback(NLPTemplateCallback):
             if self.verbose:
                 logger.info(f"Saving predictions to {predictions_path}")
             with open(predictions_path, "w") as f:
-                json.dump(predictions, f, indent=2)
+                for prediction in dataloader_predictions:
+                    for k, v in prediction.items():
+                        if isinstance(v, set):
+                            # print(f"Warning: converting set to list for key `{k}`")
+                            prediction[k] = list(v)
+                    f.write(json.dumps(prediction) + "\n")
 
 
 class FreeUpIndexerVRAMCallback(pl.Callback):
@@ -118,9 +123,12 @@ class PrefetchTrainDatasetCallback(pl.Callback):
         self.verbose = verbose
 
     def on_validation_epoch_end(self, trainer: pl.Trainer, *args, **kwargs):
-        if self.verbose:
-            logger.info(f"Prefetching train dataset at epoch {trainer.current_epoch}")
-        trainer.datamodule.train_dataset.prefetch()
+        if trainer.datamodule.train_dataset.prefetch_batches:
+            if self.verbose:
+                logger.info(
+                    f"Prefetching train dataset at epoch {trainer.current_epoch}"
+                )
+            trainer.datamodule.train_dataset.prefetch()
 
 
 class SaveRetrieverCallback(pl.Callback):
@@ -134,6 +142,7 @@ class SaveRetrieverCallback(pl.Callback):
         super().__init__()
         self.saving_dir = saving_dir
         self.verbose = verbose
+        self.free_up_indexer_callback = FreeUpIndexerVRAMCallback()
 
     @torch.no_grad()
     def __call__(
@@ -172,3 +181,4 @@ class SaveRetrieverCallback(pl.Callback):
         checkpoint: Dict[str, Any],
     ):
         self(trainer, pl_module)
+        self.free_up_indexer_callback(pl_module)

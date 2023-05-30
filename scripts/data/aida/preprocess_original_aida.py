@@ -4,15 +4,16 @@ import os
 from pathlib import Path
 from typing import List, Tuple, Union
 
-from ipa.preprocessing.tokenizers.stanza_tokenizer import StanzaTokenizer
-from ipa.preprocessing.tokenizers.spacy_tokenizer import SpacyTokenizer
-from ipa.preprocessing.tokenizers.whitespace_tokenizer import WhitespaceTokenizer
+# from ipa.preprocessing.tokenizers.stanza_tokenizer import StanzaTokenizer
+# from ipa.preprocessing.tokenizers.spacy_tokenizer import SpacyTokenizer
+from golden_retriever.serve.tokenizers import WhitespaceTokenizer, SpacyTokenizer, RegexTokenizer
+from golden_retriever.serve.tokenizers.base_tokenizer import BaseTokenizer
 
 from tqdm import tqdm
 
 
 def tokenize(
-    tokenizer: StanzaTokenizer, document: str
+    tokenizer: BaseTokenizer, document: str
 ) -> Tuple[List[str], List[Tuple[int, int]]]:
     tokenized_document = tokenizer(document)
     tokens = []
@@ -24,7 +25,7 @@ def tokenize(
 
 
 def split_document_by_window(
-    tokenizer: StanzaTokenizer,
+    tokenizer: BaseTokenizer,
     document: str,
     window_size: str,
     stride: int,
@@ -85,7 +86,8 @@ def preprocess(
     split_on_spaces: bool = False,
 ):
     if split_on_spaces:
-        tokenizer = WhitespaceTokenizer()
+        # tokenizer = WhitespaceTokenizer()
+        tokenizer = RegexTokenizer()
     else:
         tokenizer = SpacyTokenizer(
             language=language,

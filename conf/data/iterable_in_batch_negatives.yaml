@@ -1,5 +1,8 @@
 max_contexts_per_batch: 400
 max_questions_per_batch: 64
+prefetch_batches: True
+from_generator: False
+use_topics: True
 
 datamodule:
   _target_: golden_retriever.lightning_modules.pl_data_modules.PLDataModule
@@ -11,11 +14,11 @@ datamodule:
       contexts_path: ${data_overrides.contexts_path}
       max_context_length: 64
       max_questions_per_batch: ${data.max_questions_per_batch}
-      # max_negatives_to_sample: 200
-      # max_contexts: 200
-      prefetch_batches: True
+      prefetch_batches: ${data.prefetch_batches}
+      from_generator: ${data.from_generator}
       max_contexts_per_batch: ${data.max_contexts_per_batch}
       shuffle: True
+      use_topics: ${data.use_topics}
       path: ${data_overrides.train_path}
 
     val:
@@ -24,10 +27,10 @@ datamodule:
         contexts_path: ${data_overrides.contexts_path}
         max_context_length: 64
         max_questions_per_batch: ${data.max_questions_per_batch}
-        # max_negatives_to_sample: 200
-        # max_contexts: 200
-        prefetch_batches: True
+        prefetch_batches: ${data.prefetch_batches}
+        from_generator: ${data.from_generator}
         max_contexts_per_batch: ${data.max_contexts_per_batch}
+        use_topics: ${data.use_topics}
         path: ${data_overrides.val_path}
 
     test:
@@ -36,8 +39,8 @@ datamodule:
         contexts_path: ${data_overrides.contexts_path}
         max_context_length: 64
         max_questions_per_batch: ${data.max_questions_per_batch}
-        # max_negatives_to_sample: 200
-        # max_contexts: 200
-        prefetch_batches: True
+        prefetch_batches: ${data.prefetch_batches}
+        from_generator: ${data.from_generator}
         max_contexts_per_batch: ${data.max_contexts_per_batch}
+        use_topics: ${data.use_topics}
         path: ${data_overrides.test_path}

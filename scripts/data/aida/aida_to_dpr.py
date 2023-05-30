@@ -2,7 +2,7 @@ import json
 import os
 from pathlib import Path
 from typing import Union, Dict, List, Optional, Any
-from transformers import AutoTokenizer, BertTokenizer
+# from transformers import AutoTokenizer, BertTokenizer
 
 
 def aida_to_dpr(

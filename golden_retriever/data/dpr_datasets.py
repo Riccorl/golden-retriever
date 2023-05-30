@@ -1,3 +1,4 @@
+from collections import defaultdict
 import json
 import os
 import time
@@ -8,7 +9,7 @@ import numpy as np
 import psutil
 import torch
 import transformers as tr
-from datasets import load_dataset
+from datasets import load_dataset, IterableDataset
 from numpy.random import choice
 from tqdm import tqdm
 
@@ -34,6 +35,10 @@ class DPRMixin:
         max_contexts: int,
         max_question_length: int,
         max_context_length: int,
+        use_topics: bool,
+        keep_in_memory: bool,
+        streaming: bool,
+        from_generator: bool,
         *args,
         **kwargs,
     ) -> Any:
@@ -46,9 +51,8 @@ class DPRMixin:
         #   - "hard_negative_ctxs": a list of hard negative contexts
         # use the huggingface dataset library to load the data, by default it will load the
         # data in a dict with the key being "train". datasets needs str paths and not Path
-        data = load_dataset("json", data_files=[str(p) for p in paths])["train"]
-        data = data.map(
-            partial(
+        map_kwargs = {
+            "function": partial(
                 process_sample_fn,
                 tokenizer=tokenizer,
                 max_positives=max_positives,
@@ -57,24 +61,58 @@ class DPRMixin:
                 max_contexts=max_contexts,
                 max_question_length=max_question_length,
                 max_context_length=max_context_length,
-            ),
-            keep_in_memory=True,
-            load_from_cache_file=True,
-            num_proc=psutil.cpu_count(),
-        )
+                use_topics=use_topics,
+            )
+        }
+        if from_generator:
+            logger.info("Loading data from generator")
+
+            def dataset_generator():
+                sample_idx = 0
+                for p in paths:
+                    with open(p, "r") as f:
+                        for _sample_json in f:
+                            yield {"sample_idx": sample_idx, **json.loads(_sample_json)}
+                            sample_idx += 1
+
+            data = IterableDataset.from_generator(dataset_generator)
+        else:
+            logger.info("Loading data from files")
+            data = load_dataset(
+                "json",
+                data_files=[str(p) for p in paths],
+                split="train",
+                streaming=streaming,
+            )
+            map_kwargs = {
+                **map_kwargs,
+                **{
+                    "keep_in_memory": keep_in_memory,
+                    "load_from_cache_file": True,
+                    "num_proc": psutil.cpu_count(),
+                },
+            }
+            # add id if not present
+            data = data.add_column("sample_idx", range(len(data)))
+
+        # preprocess the data
+        data = data.map(**map_kwargs)
+
         # shuffle the data
         if shuffle:
             data.shuffle(seed=42)
-        # add id if not present
-        data = data.add_column("sample_idx", range(len(data)))
+
         return data
 
     @property
     def contexts(self):
         return list(self.context_manager.get_labels().keys())
 
-    def shuffle_data(self, seed: int = 42):
-        self.data = self.data.shuffle(seed=seed)
+    def shuffle_data(self, seed: int = 42, buffer_size: int = 1000):
+        if isinstance(self.data, IterableDataset):
+            self.data = self.data.shuffle(seed=seed, buffer_size=buffer_size)
+        else:
+            self.data = self.data.shuffle(seed=seed)
 
     @staticmethod
     def _process_dataset_sample(
@@ -86,6 +124,7 @@ class DPRMixin:
         max_contexts: int = -1,
         max_question_length: int = 256,
         max_context_length: int = 128,
+        use_topics: bool = False,
     ):
         # remove duplicates and limit the number of contexts
         positive_ctxs = list(set([p["text"].strip() for p in sample["positive_ctxs"]]))
@@ -100,7 +139,7 @@ class DPRMixin:
         if max_hard_negatives != -1:
             hard_negative_ctxs = hard_negative_ctxs[:max_hard_negatives]
 
-        if "doc_topic" in sample:
+        if "doc_topic" in sample and use_topics:
             question = tokenizer(
                 sample["question"],
                 sample["doc_topic"],
@@ -370,7 +409,10 @@ class DPRMixin:
             sample.update(updates[sample["sample_idx"]])
             return sample
 
-        self.data = self.data.map(update_fn)
+        if isinstance(self.data, IterableDataset):
+            self.data = self.data.map(update_fn)
+        else:
+            self.data = self.data.map(update_fn, desc="Updating data")
 
 
 class DPRIterableDataset(GenerativeDataset, DPRMixin):
@@ -392,6 +434,9 @@ class DPRIterableDataset(GenerativeDataset, DPRMixin):
         contexts_path: Union[str, os.PathLike] = None,
         tokenizer: Optional[Union[str, tr.PreTrainedTokenizer]] = None,
         prefetch_batches: bool = False,
+        use_topics: bool = False,
+        keep_in_memory: bool = False,
+        from_generator: bool = False,
         **kwargs,
     ):
         super().__init__(
@@ -412,10 +457,11 @@ class DPRIterableDataset(GenerativeDataset, DPRMixin):
         self.max_negatives_to_sample = max_negatives_to_sample
         self.sample_by_frequency = sample_by_frequency
         self.prefetch_batches = prefetch_batches
+        self.use_topics = use_topics
 
         if type(self) == DPRDataset and max_positives != 1:
             raise ValueError(
-                "DPRIterableDataset only supports one positive per question. "
+                "`DPRIterableDataset` only supports one positive per question. "
                 "Please use `InBatchNegativesDPRDataset` for multiple positives."
             )
         self.context_manager = Labels()
@@ -444,16 +490,17 @@ class DPRIterableDataset(GenerativeDataset, DPRMixin):
                     value=self.tokenizer.pad_token_type_id,
                 ),
             }
-        self.data = self.load(path, tokenizer=self.tokenizer, shuffle=shuffle)
-        #        if self.max_negatives_to_sample > 0:
-        #           self.data = self._sample_dataset_negatives(
-        #               self.data,
-        #              self.tokenizer,
-        #             self.context_manager,
-        #            self.sample_by_frequency,
-        #           self.max_negatives_to_sample,
-        #          self.max_context_length,
-        #     )
+
+        self.hard_negatives_dict = {}
+
+        self.data = self.load(
+            path,
+            tokenizer=self.tokenizer,
+            shuffle=shuffle,
+            keep_in_memory=keep_in_memory,
+            from_generator=from_generator,
+        )
+        # self.data_iterator = iter(self.data)
         self.prefatched_data = []
         if self.prefetch_batches:
             self.prefetch()
@@ -462,6 +509,12 @@ class DPRIterableDataset(GenerativeDataset, DPRMixin):
         batch = []
         contexts_in_batch = set()
         for sample in self.data:
+            # fuck my life
+            # if sample["sample_idx"] in self.hard_negatives_dict:
+            #     sample["retrieved_hard_negatives"] = self.hard_negatives_dict[
+            #         sample["sample_idx"]
+            #     ]
+
             if len(contexts_in_batch) >= self.max_contexts_per_batch:
                 yield batch
                 batch = []
@@ -484,6 +537,13 @@ class DPRIterableDataset(GenerativeDataset, DPRMixin):
                     for sample in batch
                     if context_type in sample
                     for s in sample[context_type]
+                )
+                # also add the contexts from the hard negatives dict
+                contexts_in_batch |= set(
+                    tuple(s["input_ids"])
+                    for sample in batch
+                    if sample["sample_idx"] in self.hard_negatives_dict
+                    for s in self.hard_negatives_dict[sample["sample_idx"]]
                 )
         if not self.drop_last_batch and len(batch) > 0:
             yield batch
@@ -663,6 +723,9 @@ class DPRIterableDataset(GenerativeDataset, DPRMixin):
         paths: Union[str, os.PathLike, List[str], List[os.PathLike]],
         tokenizer: tr.PreTrainedTokenizer = None,
         shuffle: bool = False,
+        keep_in_memory: bool = True,
+        streaming: bool = False,
+        from_generator: bool = False,
         *args,
         **kwargs,
     ) -> Any:
@@ -690,9 +753,11 @@ class DPRIterableDataset(GenerativeDataset, DPRMixin):
             self.max_contexts,
             self.max_question_length,
             self.max_context_length,
+            self.use_topics,
+            keep_in_memory,
+            streaming,
+            from_generator,
         )
-        # convert to iterable dataset
-        # data = data.to_iterable_dataset(num_shards=4)
 
         end = time.time()
         logger.info(f"Pre-processing {self.name} data took {end - start:.2f} seconds")
@@ -721,7 +786,7 @@ class DPRIterableDataset(GenerativeDataset, DPRMixin):
                 for key in remove_columns:
                     if key in sample:
                         sample.pop(key)
-                json.dump(sample, f, indent=2)
+                f.write(json.dumps(sample) + "\n")
 
     def collate_fn(self, batch: Any, *args, **kwargs) -> Any:
         questions = [sample["question"] for sample in batch]
@@ -774,6 +839,9 @@ class InBatchNegativesDPRIterableDataset(DPRIterableDataset, DPRMixin):
         sample_by_frequency: bool = False,
         contexts_path: Union[str, os.PathLike] = None,
         tokenizer: Optional[Union[str, tr.PreTrainedTokenizer]] = None,
+        prefetch_batches: bool = False,
+        use_topics: bool = False,
+        keep_in_memory: bool = False,
         **kwargs,
     ):
         super().__init__(
@@ -792,6 +860,9 @@ class InBatchNegativesDPRIterableDataset(DPRIterableDataset, DPRMixin):
             sample_by_frequency,
             contexts_path,
             tokenizer,
+            prefetch_batches,
+            use_topics,
+            keep_in_memory,
             **kwargs,
         )
 
@@ -799,6 +870,7 @@ class InBatchNegativesDPRIterableDataset(DPRIterableDataset, DPRMixin):
         # get data from batch
         questions = [sample["question"] for sample in batch]
         positives = [sample["positives"] for sample in batch]
+        sample_idxs = [sample["sample_idx"] for sample in batch]
 
         # this is needed to get the correct labels for each question
         positives_ctxs = [sample["positive_ctxs"] for sample in batch]
@@ -807,12 +879,16 @@ class InBatchNegativesDPRIterableDataset(DPRIterableDataset, DPRMixin):
             negatives_ctxs += [sample["sampled_negative_ctxs"] for sample in batch]
 
         hard_negatives_ctxs = [sample["hard_negative_ctxs"] for sample in batch]
+
         # use negatives from predictions if available
-        if "retrieved_hard_negatives" in batch[0]:
-            # add augmented negative contexts to contexts
-            hard_negatives_ctxs += [
-                sample["retrieved_hard_negatives"] for sample in batch
-            ]
+        # if "retrieved_hard_negatives" in batch[0]:
+        #     # add augmented negative contexts to contexts
+        #     hard_negatives_ctxs += [
+        #         sample["retrieved_hard_negatives"] for sample in batch
+        #     ]
+        for sample_idx in sample_idxs:
+            if sample_idx in self.hard_negatives_dict:
+                hard_negatives_ctxs.append(self.hard_negatives_dict[sample_idx])
 
         # convert the questions to a batch
         questions = self.convert_to_batch(questions)
@@ -878,6 +954,8 @@ class DPRDataset(BaseDataset, DPRMixin):
         sample_by_frequency: bool = False,
         contexts_path: Union[str, os.PathLike] = None,
         tokenizer: Optional[Union[str, tr.PreTrainedTokenizer]] = None,
+        use_topics: bool = False,
+        keep_in_memory: bool = True,
         **kwargs,
     ):
         super().__init__(name, path, **kwargs)
@@ -889,6 +967,7 @@ class DPRDataset(BaseDataset, DPRMixin):
         self.max_context_length = max_context_length
         self.max_negatives_to_sample = max_negatives_to_sample
         self.sample_by_frequency = sample_by_frequency
+        self.use_topics = use_topics
 
         if type(self) == DPRDataset and max_positives != 1:
             raise ValueError(
@@ -922,7 +1001,15 @@ class DPRDataset(BaseDataset, DPRMixin):
                     value=self.tokenizer.pad_token_type_id,
                 ),
             }
-        self.data = self.load(path, tokenizer=self.tokenizer, shuffle=shuffle)
+
+        self.hard_negatives_dict = defaultdict(list)
+
+        self.data = self.load(
+            path,
+            tokenizer=self.tokenizer,
+            shuffle=shuffle,
+            keep_in_memory=keep_in_memory,
+        )
         if self.max_negatives_to_sample > 0:
             self.data = self._sample_dataset_negatives(
                 self.data,
@@ -977,6 +1064,9 @@ class DPRDataset(BaseDataset, DPRMixin):
         paths: Union[str, os.PathLike, List[str], List[os.PathLike]],
         tokenizer: tr.PreTrainedTokenizer = None,
         shuffle: bool = False,
+        keep_in_memory: bool = True,
+        streaming: bool = False,
+        from_generator: bool = False,
         *args,
         **kwargs,
     ) -> Any:
@@ -1004,6 +1094,10 @@ class DPRDataset(BaseDataset, DPRMixin):
             self.max_contexts,
             self.max_question_length,
             self.max_context_length,
+            self.use_topics,
+            keep_in_memory,
+            streaming,
+            from_generator,
         )
 
         end = time.time()
@@ -1030,6 +1124,8 @@ class InBatchNegativesDPRDataset(DPRDataset):
         sample_by_frequency: bool = False,
         contexts_path: Union[str, os.PathLike] = None,
         tokenizer: Optional[Union[str, tr.PreTrainedTokenizer]] = None,
+        use_topics: bool = False,
+        keep_in_memory: bool = True,
         **kwargs,
     ):
         super().__init__(
@@ -1046,6 +1142,8 @@ class InBatchNegativesDPRDataset(DPRDataset):
             sample_by_frequency,
             contexts_path,
             tokenizer,
+            use_topics,
+            keep_in_memory,
             **kwargs,
         )
 
@@ -1129,6 +1227,8 @@ class SampledNegativesDPRDataset(DPRDataset):
         sample_by_frequency: bool = False,
         contexts_path: Union[str, os.PathLike] = None,
         tokenizer: Optional[Union[str, tr.PreTrainedTokenizer]] = None,
+        use_topics: bool = False,
+        keep_in_memory: bool = True,
         **kwargs,
     ):
         super().__init__(
@@ -1145,6 +1245,8 @@ class SampledNegativesDPRDataset(DPRDataset):
             sample_by_frequency,
             contexts_path,
             tokenizer,
+            use_topics,
+            keep_in_memory,
         )
 
     def collate_fn(self, batch: Any, *args, **kwargs) -> Any:
