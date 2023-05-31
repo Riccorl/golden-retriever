@@ -506,14 +506,10 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
         predictions = {0: predictions}
         return predictions
 
+    @staticmethod
     def tokenize(texts, tokenizer, max_length):
-        wrong_contexts = [
-            context_id
-            for context_id in top_k_contexts
-            if context_id not in gold_contexts
-        ][: self.max_negatives]
-        wrong_contexts_ids = trainer.datamodule.tokenizer(
-            wrong_contexts,
-            max_length=trainer.datamodule.train_dataset.max_context_length,
+        tokenized_texts = tokenizer(
+            texts,
+            max_length=max_length,
             truncation=True,
         )
