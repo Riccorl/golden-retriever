@@ -354,12 +354,8 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
         # since we only have one dataloader, we can get the predictions directly
         predictions = list(predictions.values())[0]
         # store the predictions in a dictionary for faster access based on the sample index
-        # update_dict = defaultdict(lambda: defaultdict(list))
-        hard_negatives_dict = {} #defaultdict(list)
-        # retrieved_hard_negatives = []
-        for prediction in tqdm(
-            predictions, desc="Processing predictions for hard negatives"
-        ):
+        hard_negatives_dict = {}
+        for prediction in tqdm(predictions, desc="Tokenizing hard negatives"):
             top_k_contexts = prediction["predictions"]
             gold_contexts = prediction["gold"]
             # get the ids of the max_negatives wrong contexts with the highest similarity
@@ -368,38 +364,64 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
                 for context_id in top_k_contexts
                 if context_id not in gold_contexts
             ][: self.max_negatives]
-            hard_negatives_dict[prediction["sample_idx"]] = wrong_contexts
-
-        # tokenization for the hard negatives
-        tokenized_hard_negatives = {} #defaultdict(list)
-        for sample_idx, wrong_contexts in tqdm(
-            hard_negatives_dict.items(), desc="Tokenizing hard negatives"
-        ):
             wrong_contexts_ids = trainer.datamodule.tokenizer(
                 wrong_contexts,
                 max_length=trainer.datamodule.train_dataset.max_context_length,
                 truncation=True,
             )
-            hard_negs = []
-            for c_index in range(len(wrong_contexts)):
-                p_dict = {
-                    "input_ids": wrong_contexts_ids["input_ids"][c_index],
-                    "attention_mask": wrong_contexts_ids["attention_mask"][c_index],
-                }
+            hard_negatives_per_sample = []
+            for idx, input_ids in enumerate(wrong_contexts_ids["input_ids"]):
                 if "token_type_ids" in wrong_contexts_ids:
-                    p_dict["token_type_ids"] = wrong_contexts_ids["token_type_ids"][
-                        c_index
-                    ]
-                hard_negs.append(p_dict)
-            tokenized_hard_negatives[sample_idx] = hard_negs
-        
-        # update the dataset with the hard negatives
-        trainer.datamodule.train_dataset.hard_negatives_dict = tokenized_hard_negatives
+                    hn_sample_dict = {
+                        "input_ids": input_ids,
+                        "attention_mask": wrong_contexts_ids["attention_mask"][idx],
+                        "token_type_ids": wrong_contexts_ids["token_type_ids"][idx],
+                    }
+                else:
+                    hn_sample_dict = {
+                        "input_ids": input_ids,
+                        "attention_mask": wrong_contexts_ids["attention_mask"][idx],
+                    }
+                hard_negatives_per_sample.append(hn_sample_dict)
 
-        # free up unnecessary memory
-        del predictions
-        del hard_negatives_dict
-        
+            # for context_index in range(len(wrong_contexts)):
+            #     p_dict = {
+            #         "input_ids": wrong_contexts_ids["input_ids"][context_index],
+            #         "attention_mask": wrong_contexts_ids["attention_mask"][context_index],
+            #     }
+            #     if "token_type_ids" in wrong_contexts_ids:
+            #         p_dict["token_type_ids"] = wrong_contexts_ids["token_type_ids"][
+            #             context_index
+            #         ]
+            #     hard_negs.append(p_dict)
+            hard_negatives_dict[prediction["sample_idx"]] = hard_negatives_per_sample
+
+        # tokenization for the hard negatives
+        # tokenized_hard_negatives = {}
+        # for sample_idx, wrong_contexts in tqdm(
+        #     hard_negatives_dict.items(), desc="Tokenizing hard negatives"
+        # ):
+        #     wrong_contexts_ids = trainer.datamodule.tokenizer(
+        #         wrong_contexts,
+        #         max_length=trainer.datamodule.train_dataset.max_context_length,
+        #         truncation=True,
+        #     )
+        #     hard_negs = []
+        #     for c_index in range(len(wrong_contexts)):
+        #         p_dict = {
+        #             "input_ids": wrong_contexts_ids["input_ids"][c_index],
+        #             "attention_mask": wrong_contexts_ids["attention_mask"][c_index],
+        #         }
+        #         if "token_type_ids" in wrong_contexts_ids:
+        #             p_dict["token_type_ids"] = wrong_contexts_ids["token_type_ids"][
+        #                 c_index
+        #             ]
+        #         hard_negs.append(p_dict)
+        #     tokenized_hard_negatives[sample_idx] = hard_negs
+
+        # # update the dataset with the hard negatives
+        trainer.datamodule.train_dataset.hard_negatives_dict = hard_negatives_dict
+
         # retrieved_hard_negatives.append(wrong_contexts)
         # wrong_contexts_ids = trainer.datamodule.tokenizer(
         #     wrong_contexts,
@@ -423,37 +445,48 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
 
         # trainer.datamodule.train_dataset.hard_negatives_dict = tokenized_hard_negatives
 
-        # def _add_hard_negatives_to_sample(sample, hard_negatives_dict):
-        #     wrong_contexts_ids = trainer.datamodule.tokenizer(
-        #         hard_negatives_dict[sample["sample_idx"]],
-        #         max_length=trainer.datamodule.train_dataset.max_context_length,
+        # def _add_hard_negatives_to_sample(
+        #     sample, hard_negatives, tokenizer, max_context_length
+        # ):
+        #     wrong_contexts = hard_negatives[sample["sample_idx"]]
+        #     wrong_contexts_ids = tokenizer(
+        #         wrong_contexts,
+        #         max_length=max_context_length,
         #         truncation=True,
         #     )
+        #     hard_negatives_per_sample = []
         #     for c_index in range(len(wrong_contexts)):
-        #         hard_negatives_dict = {
+        #         sample_hn = {
         #             "input_ids": wrong_contexts_ids["input_ids"][c_index],
         #             "attention_mask": wrong_contexts_ids["attention_mask"][c_index],
         #         }
         #         if "token_type_ids" in wrong_contexts_ids:
-        #             hard_negatives_dict["token_type_ids"] = wrong_contexts_ids[
+        #             sample_hn["token_type_ids"] = wrong_contexts_ids[
         #                 "token_type_ids"
         #             ][c_index]
-        #     sample["retrieved_hard_negatives"] = hard_negatives_dict
+        #         hard_negatives_per_sample.append(sample_hn)
+        #     sample["retrieved_hard_negatives"] = hard_negatives_per_sample
         #     return sample
 
         # if isinstance(trainer.datamodule.train_dataset.data, IterableDataset):
         #     map_kwargs = {
         #         "function": _add_hard_negatives_to_sample,
-        #         "fn_kwargs": {"hard_negatives_dict": hard_negatives_dict},
+        #         "fn_kwargs": {"hard_negatives": hard_negatives_dict},
         #     }
         # else:
         #     map_kwargs = {
         #         "function": _add_hard_negatives_to_sample,
-        #         "fn_kwargs": {"hard_negatives_dict": hard_negatives_dict},
+        #         "fn_kwargs": {
+        #             "hard_negatives": hard_negatives_dict,
+        #             "tokenizer": trainer.datamodule.tokenizer,
+        #             "max_context_length": trainer.datamodule.train_dataset.max_context_length,
+        #         },
         #         # "num_proc": psutil.cpu_count(),
         #         "desc": "Adding hard negatives to train dataset",
         #     }
-        # trainer.datamodule.train_dataset.data.map(**map_kwargs)
+        # trainer.datamodule.train_dataset.data = (
+        #     trainer.datamodule.train_dataset.data.map(**map_kwargs)
+        # )
 
         # if train_dataset.data is a IterableDataset, we should "activate" the map function
         # by iterating over the dataset
@@ -473,16 +506,14 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
         predictions = {0: predictions}
         return predictions
 
-
-class SampleNegativesDatasetCallback(pl.Callback):
-    def __init__(self, seed: int = 42, verbose: bool = True) -> None:
-        super().__init__()
-        self.seed = seed
-        self.verbose = verbose
-
-    def on_validation_epoch_end(self, trainer: pl.Trainer, *args, **kwargs):
-        if self.verbose:
-            f"Sampling negatives for train dataset at epoch {trainer.current_epoch}"
-        trainer.datamodule.train_dataset.sample_dataset_negatives(
-            seed=self.seed + trainer.current_epoch
+    def tokenize(texts, tokenizer, max_length):
+        wrong_contexts = [
+            context_id
+            for context_id in top_k_contexts
+            if context_id not in gold_contexts
+        ][: self.max_negatives]
+        wrong_contexts_ids = trainer.datamodule.tokenizer(
+            wrong_contexts,
+            max_length=trainer.datamodule.train_dataset.max_context_length,
+            truncation=True,
         )

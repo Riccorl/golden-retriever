@@ -509,11 +509,6 @@ class DPRIterableDataset(GenerativeDataset, DPRMixin):
         batch = []
         contexts_in_batch = set()
         for sample in self.data:
-            # fuck my life
-            # if sample["sample_idx"] in self.hard_negatives_dict:
-            #     sample["retrieved_hard_negatives"] = self.hard_negatives_dict[
-            #         sample["sample_idx"]
-            #     ]
 
             if len(contexts_in_batch) >= self.max_contexts_per_batch:
                 yield batch
@@ -545,6 +540,7 @@ class DPRIterableDataset(GenerativeDataset, DPRMixin):
                     if sample["sample_idx"] in self.hard_negatives_dict
                     for s in self.hard_negatives_dict[sample["sample_idx"]]
                 )
+
         if not self.drop_last_batch and len(batch) > 0:
             yield batch
 

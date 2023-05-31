@@ -108,27 +108,37 @@ class ShuffleTrainDatasetCallback(pl.Callback):
         super().__init__()
         self.seed = seed
         self.verbose = verbose
+        self.previous_epoch = -1
 
     def on_validation_epoch_end(self, trainer: pl.Trainer, *args, **kwargs):
         if self.verbose:
-            logger.info(f"Shuffling train dataset at epoch {trainer.current_epoch}")
-        trainer.datamodule.train_dataset.shuffle_data(
-            seed=self.seed + trainer.current_epoch
-        )
+            if trainer.current_epoch != self.previous_epoch:
+                logger.info(f"Shuffling train dataset at epoch {trainer.current_epoch}")
+
+            # logger.info(f"Shuffling train dataset at epoch {trainer.current_epoch}")
+        if trainer.current_epoch != self.previous_epoch:
+            trainer.datamodule.train_dataset.shuffle_data(
+                seed=self.seed + trainer.current_epoch
+            )
+            self.previous_epoch = trainer.current_epoch
 
 
 class PrefetchTrainDatasetCallback(pl.Callback):
     def __init__(self, verbose: bool = True) -> None:
         super().__init__()
         self.verbose = verbose
+        self.previous_epoch = -1
 
     def on_validation_epoch_end(self, trainer: pl.Trainer, *args, **kwargs):
         if trainer.datamodule.train_dataset.prefetch_batches:
             if self.verbose:
-                logger.info(
-                    f"Prefetching train dataset at epoch {trainer.current_epoch}"
-                )
-            trainer.datamodule.train_dataset.prefetch()
+                if trainer.current_epoch != self.previous_epoch:
+                    logger.info(
+                        f"Prefetching train dataset at epoch {trainer.current_epoch}"
+                    )
+            if trainer.current_epoch != self.previous_epoch:
+                trainer.datamodule.train_dataset.prefetch()
+                self.previous_epoch = trainer.current_epoch
 
 
 class SaveRetrieverCallback(pl.Callback):
@@ -182,3 +192,17 @@ class SaveRetrieverCallback(pl.Callback):
     ):
         self(trainer, pl_module)
         self.free_up_indexer_callback(pl_module)
+
+
+class SampleNegativesDatasetCallback(pl.Callback):
+    def __init__(self, seed: int = 42, verbose: bool = True) -> None:
+        super().__init__()
+        self.seed = seed
+        self.verbose = verbose
+
+    def on_validation_epoch_end(self, trainer: pl.Trainer, *args, **kwargs):
+        if self.verbose:
+            f"Sampling negatives for train dataset at epoch {trainer.current_epoch}"
+        trainer.datamodule.train_dataset.sample_dataset_negatives(
+            seed=self.seed + trainer.current_epoch
+        )
