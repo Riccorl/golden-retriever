@@ -17,6 +17,7 @@ datamodule:
       prefetch_batches: ${data.prefetch_batches}
       from_generator: ${data.from_generator}
       max_contexts_per_batch: ${data.max_contexts_per_batch}
+      #subsample: 0.1
       shuffle: True
       use_topics: ${data.use_topics}
       path: ${data_overrides.train_path}

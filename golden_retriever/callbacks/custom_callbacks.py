@@ -355,7 +355,7 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
         predictions = list(predictions.values())[0]
         # store the predictions in a dictionary for faster access based on the sample index
         hard_negatives_dict = {}
-        for prediction in tqdm(predictions, desc="Tokenizing hard negatives"):
+        for prediction in tqdm(predictions, desc="Collecting hard negatives"):
             top_k_contexts = prediction["predictions"]
             gold_contexts = prediction["gold"]
             # get the ids of the max_negatives wrong contexts with the highest similarity
@@ -364,25 +364,26 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
                 for context_id in top_k_contexts
                 if context_id not in gold_contexts
             ][: self.max_negatives]
-            wrong_contexts_ids = trainer.datamodule.tokenizer(
-                wrong_contexts,
-                max_length=trainer.datamodule.train_dataset.max_context_length,
-                truncation=True,
-            )
-            hard_negatives_per_sample = []
-            for idx, input_ids in enumerate(wrong_contexts_ids["input_ids"]):
-                if "token_type_ids" in wrong_contexts_ids:
-                    hn_sample_dict = {
-                        "input_ids": input_ids,
-                        "attention_mask": wrong_contexts_ids["attention_mask"][idx],
-                        "token_type_ids": wrong_contexts_ids["token_type_ids"][idx],
-                    }
-                else:
-                    hn_sample_dict = {
-                        "input_ids": input_ids,
-                        "attention_mask": wrong_contexts_ids["attention_mask"][idx],
-                    }
-                hard_negatives_per_sample.append(hn_sample_dict)
+            hard_negatives_dict[prediction["sample_idx"]] = wrong_contexts
+            # wrong_contexts_ids = trainer.datamodule.tokenizer(
+            #     wrong_contexts,
+            #     max_length=trainer.datamodule.train_dataset.max_context_length,
+            #     truncation=True,
+            # )
+            # hard_negatives_per_sample = []
+            # for idx, input_ids in enumerate(wrong_contexts_ids["input_ids"]):
+            #     if "token_type_ids" in wrong_contexts_ids:
+            #         hn_sample_dict = {
+            #             "input_ids": input_ids,
+            #             "attention_mask": wrong_contexts_ids["attention_mask"][idx],
+            #             "token_type_ids": wrong_contexts_ids["token_type_ids"][idx],
+            #         }
+            #     else:
+            #         hn_sample_dict = {
+            #             "input_ids": input_ids,
+            #             "attention_mask": wrong_contexts_ids["attention_mask"][idx],
+            #         }
+            #     hard_negatives_per_sample.append(hn_sample_dict)
 
             # for context_index in range(len(wrong_contexts)):
             #     p_dict = {
@@ -394,33 +395,34 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
             #             context_index
             #         ]
             #     hard_negs.append(p_dict)
-            hard_negatives_dict[prediction["sample_idx"]] = hard_negatives_per_sample
+            # hard_negatives_dict[prediction["sample_idx"]] = hard_negatives_per_sample
 
         # tokenization for the hard negatives
-        # tokenized_hard_negatives = {}
-        # for sample_idx, wrong_contexts in tqdm(
-        #     hard_negatives_dict.items(), desc="Tokenizing hard negatives"
-        # ):
-        #     wrong_contexts_ids = trainer.datamodule.tokenizer(
-        #         wrong_contexts,
-        #         max_length=trainer.datamodule.train_dataset.max_context_length,
-        #         truncation=True,
-        #     )
-        #     hard_negs = []
-        #     for c_index in range(len(wrong_contexts)):
-        #         p_dict = {
-        #             "input_ids": wrong_contexts_ids["input_ids"][c_index],
-        #             "attention_mask": wrong_contexts_ids["attention_mask"][c_index],
-        #         }
-        #         if "token_type_ids" in wrong_contexts_ids:
-        #             p_dict["token_type_ids"] = wrong_contexts_ids["token_type_ids"][
-        #                 c_index
-        #             ]
-        #         hard_negs.append(p_dict)
-        #     tokenized_hard_negatives[sample_idx] = hard_negs
+        tokenized_hard_negatives = {}
+        for sample_idx, wrong_contexts in tqdm(
+            hard_negatives_dict.items(), desc="Tokenizing hard negatives"
+        ):
+            wrong_contexts_ids = trainer.datamodule.tokenizer(
+                wrong_contexts,
+                max_length=trainer.datamodule.train_dataset.max_context_length,
+                truncation=True,
+            )
+            hard_negs = []
+            for c_index in range(len(wrong_contexts)):
+                p_dict = {
+                    "input_ids": wrong_contexts_ids["input_ids"][c_index],
+                    "attention_mask": wrong_contexts_ids["attention_mask"][c_index],
+                }
+                if "token_type_ids" in wrong_contexts_ids:
+                    p_dict["token_type_ids"] = wrong_contexts_ids["token_type_ids"][
+                        c_index
+                    ]
+                hard_negs.append(p_dict)
+            tokenized_hard_negatives[sample_idx] = hard_negs
 
         # # update the dataset with the hard negatives
-        trainer.datamodule.train_dataset.hard_negatives_dict = hard_negatives_dict
+        # trainer.datamodule.train_dataset.hard_negatives_dict = hard_negatives_dict
+        trainer.datamodule.train_dataset.hard_negatives_dict = tokenized_hard_negatives
 
         # retrieved_hard_negatives.append(wrong_contexts)
         # wrong_contexts_ids = trainer.datamodule.tokenizer(

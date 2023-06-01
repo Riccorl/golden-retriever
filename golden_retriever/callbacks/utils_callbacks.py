@@ -118,7 +118,7 @@ class ShuffleTrainDatasetCallback(pl.Callback):
             # logger.info(f"Shuffling train dataset at epoch {trainer.current_epoch}")
         if trainer.current_epoch != self.previous_epoch:
             trainer.datamodule.train_dataset.shuffle_data(
-                seed=self.seed + trainer.current_epoch
+                seed=self.seed + trainer.current_epoch + 1
             )
             self.previous_epoch = trainer.current_epoch
 
@@ -127,18 +127,30 @@ class PrefetchTrainDatasetCallback(pl.Callback):
     def __init__(self, verbose: bool = True) -> None:
         super().__init__()
         self.verbose = verbose
-        self.previous_epoch = -1
+        # self.previous_epoch = -1
 
     def on_validation_epoch_end(self, trainer: pl.Trainer, *args, **kwargs):
         if trainer.datamodule.train_dataset.prefetch_batches:
             if self.verbose:
-                if trainer.current_epoch != self.previous_epoch:
-                    logger.info(
-                        f"Prefetching train dataset at epoch {trainer.current_epoch}"
-                    )
-            if trainer.current_epoch != self.previous_epoch:
-                trainer.datamodule.train_dataset.prefetch()
-                self.previous_epoch = trainer.current_epoch
+                # if trainer.current_epoch != self.previous_epoch:
+                logger.info(
+                    f"Prefetching train dataset at epoch {trainer.current_epoch}"
+                )
+            # if trainer.current_epoch != self.previous_epoch:
+            trainer.datamodule.train_dataset.prefetch()
+            self.previous_epoch = trainer.current_epoch
+
+
+class SubsampleTrainDatasetCallback(pl.Callback):
+    def __init__(self, seed: int = 43, verbose: bool = True) -> None:
+        super().__init__()
+        self.seed = seed
+        self.verbose = verbose
+
+    def on_validation_epoch_end(self, trainer: pl.Trainer, *args, **kwargs):
+        if self.verbose:
+            logger.info(f"Subsampling train dataset at epoch {trainer.current_epoch}")
+            trainer.datamodule.train_dataset.random_subsample(seed=self.seed + trainer.current_epoch + 1)
 
 
 class SaveRetrieverCallback(pl.Callback):

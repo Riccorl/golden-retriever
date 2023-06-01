@@ -62,6 +62,8 @@ def add_candidates(
     with open(input_path) as f:
         samples = [json.loads(line) for line in f.readlines()]
 
+    topics = topics and "doc_topic" in samples[0]
+
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w") as f_out:
@@ -70,9 +72,7 @@ def add_candidates(
         collate_fn = lambda batch: ModelInputs(
             tokenizer(
                 [b["text"] for b in batch],
-                text_pair=[b["doc_topic"] for b in batch]
-                if topics and "doc_topic" in batch[0]
-                else None,
+                text_pair=[b["doc_topic"] for b in batch] if topics else None,
                 padding=True,
                 return_tensors="pt",
                 truncation=True,

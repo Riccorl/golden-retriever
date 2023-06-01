@@ -19,7 +19,7 @@ pl_trainer:
   strategy: auto
   accumulate_grad_batches: 1
   gradient_clip_val: 1.0
-  val_check_interval: 4_000 # you can specify an int "n" here => validation every "n" steps
+  val_check_interval: 1.0 # you can specify an int "n" here => validation every "n" steps
   check_val_every_n_epoch: 1
   max_epochs: 0
   max_steps: 5_000_000

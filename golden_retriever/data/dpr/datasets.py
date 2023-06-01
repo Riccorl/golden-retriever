@@ -1,4 +1,5 @@
 from collections import defaultdict
+from copy import deepcopy
 import json
 import os
 import time
@@ -43,7 +44,7 @@ class DPRIterableDataset(GenerativeDataset, DPRMixin):
         use_topics: bool = False,
         keep_in_memory: bool = False,
         from_generator: bool = False,
-        validaval_check_interval: Optional[int] = None,
+        subsample: Optional[float] = None,
         **kwargs,
     ):
         super().__init__(
@@ -66,9 +67,9 @@ class DPRIterableDataset(GenerativeDataset, DPRMixin):
         self.prefetch_batches = prefetch_batches
         self.use_topics = use_topics
 
-        self.validaval_check_interval = validaval_check_interval or -1
+        self.subsample = subsample
 
-        self.current_data_idx = 0
+        self.current_iteration = 0
 
         if type(self) == DPRDataset and max_positives != 1:
             raise ValueError(
@@ -111,27 +112,50 @@ class DPRIterableDataset(GenerativeDataset, DPRMixin):
             keep_in_memory=keep_in_memory,
             from_generator=from_generator,
         )
+        # create a copy
+        # self.copy_of_data = deepcopy(self.data)
+        # # self.copy_of_data = self.data
+        # self.random_subsample()
+        # self.original_data = self.data
+        # # select random subset of data self.subsample% of the data
+        # number_of_samples = int(len(self.data) * self.subsample / 100)
+        # self.data = self.data.shuffle(seed=43).select(range(0, number_of_samples))
         # self.data_iterator = iter(self.data)
         self.prefatched_data = []
         if self.prefetch_batches:
             self.prefetch()
 
+    # def random_subsample(self, seed: int = 43):
+    #     # select random subset of data self.subsample% of the data
+    #     if self.subsample:
+    #         number_of_samples = int(len(self.data) * self.subsample)
+    #         logger.info(f"Subsampling {number_of_samples} samples from {len(self.data)}")
+    #         self.data = self.copy_of_data.shuffle(seed=seed).select(
+    #             range(0, number_of_samples)
+    #         )
+
     def batch_generator(self) -> List:
         batch = []
-        served_batches = 0
         contexts_in_batch = set()
-        current_data_idx = self.current_data_idx
-        data_subset = self.data.select(range(current_data_idx, len(self.data)))
-        for row_idx, sample in enumerate(data_subset):
-            print(f"Row idx: {row_idx}, sample idx: {sample['sample_idx']}")
+        if self.subsample:
+            number_of_samples = int(len(self.data) * self.subsample)
+            logger.info(
+                f"Subsampling {number_of_samples} samples from {len(self.data)}"
+            )
+            data = (
+                deepcopy(self.data)
+                .shuffle(seed=43 + self.current_iteration)
+                .select(range(0, number_of_samples))
+            )
+        else:
+            data = self.data
+        for sample in data:
             if len(contexts_in_batch) >= self.max_contexts_per_batch:
                 yield batch
-                served_batches += 1
+                # reset batch
                 batch = []
                 contexts_in_batch = set()
-                if served_batches >= self.validaval_check_interval:
-                    self.current_data_idx = row_idx
-                    break
+
             batch.append(sample)
             for context_type in {
                 "positive_ctxs",
@@ -161,6 +185,8 @@ class DPRIterableDataset(GenerativeDataset, DPRMixin):
 
         if not self.drop_last_batch and len(batch) > 0:
             yield batch
+        
+        self.current_iteration += 1
 
     def collate_generator(
         self, batch: List[Dict[str, torch.Tensor]]
@@ -456,6 +482,7 @@ class InBatchNegativesDPRIterableDataset(DPRIterableDataset, DPRMixin):
         prefetch_batches: bool = False,
         use_topics: bool = False,
         keep_in_memory: bool = False,
+        from_generator: bool = False,
         **kwargs,
     ):
         super().__init__(
@@ -477,6 +504,7 @@ class InBatchNegativesDPRIterableDataset(DPRIterableDataset, DPRMixin):
             prefetch_batches,
             use_topics,
             keep_in_memory,
+            from_generator,
             **kwargs,
         )
 
