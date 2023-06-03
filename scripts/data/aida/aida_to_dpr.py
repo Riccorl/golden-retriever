@@ -2,6 +2,9 @@ import json
 import os
 from pathlib import Path
 from typing import Union, Dict, List, Optional, Any
+
+from tqdm import tqdm
+
 # from transformers import AutoTokenizer, BertTokenizer
 
 
@@ -11,13 +14,6 @@ def aida_to_dpr(
     definitions_path: Optional[Union[str, os.PathLike]] = None,
     title_map: Optional[Union[str, os.PathLike]] = None,
 ) -> List[Dict[str, Any]]:
-    # Read AIDA file
-    aida_data = []
-    with open(conll_path, "r") as f:
-        # aida_data = json.load(f)
-        for line in f:
-            aida_data.append(json.loads(line))
-
     definitions = {}
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -41,30 +37,36 @@ def aida_to_dpr(
 
     dpr = []
 
-    for sentence in aida_data:
-        question = sentence["text"]
-        positive_ctxs = []
-        for idx, entity in enumerate(sentence["window_labels"]):
-            entity = entity[2]
-            if title_map and entity in title_map:
-                entity = title_map[entity]
-            if entity in definitions:
-                def_text = definitions[entity]
-                # def_text = tokenizer.decode(definitions[entity])
-                # def_text = def_text.replace("[unused2]", ": ").replace("[CLS]", "").replace("[SEP]", "")
-                positive_ctxs.append(
-                    {
-                        "title": entity,
-                        "text": f"{entity} <def> {def_text}",
-                        "passage_id": f"{sentence['doc_id']}_{sentence['offset']}_{idx}",
-                    }
-                )
+    # Read AIDA file
+    aida_data = []
+    with open(conll_path, "r") as f, open(output_path, "w") as f_out:
+        # aida_data = json.load(f)
+        for sentence in tqdm(f):
+            #     aida_data.append(json.loads(line))
 
-        if len(positive_ctxs) == 0:
-            continue
+            # for sentence in aida_data:
+            question = sentence["text"]
+            positive_ctxs = []
+            for idx, entity in enumerate(sentence["window_labels"]):
+                entity = entity[2]
+                if title_map and entity in title_map:
+                    entity = title_map[entity]
+                if entity in definitions:
+                    def_text = definitions[entity]
+                    # def_text = tokenizer.decode(definitions[entity])
+                    # def_text = def_text.replace("[unused2]", ": ").replace("[CLS]", "").replace("[SEP]", "")
+                    positive_ctxs.append(
+                        {
+                            "title": entity,
+                            "text": f"{entity} <def> {def_text}",
+                            "passage_id": f"{sentence['doc_id']}_{sentence['offset']}_{idx}",
+                        }
+                    )
 
-        dpr.append(
-            {
+            if len(positive_ctxs) == 0:
+                continue
+
+            dpr_sentence = {
                 "id": f"{sentence['doc_id']}_{sentence['offset']}",
                 "doc_topic": sentence["doc_topic"],
                 "question": question,
@@ -73,12 +75,25 @@ def aida_to_dpr(
                 "negative_ctxs": "",
                 "hard_negative_ctxs": "",
             }
-        )
+            f.write(json.dumps(dpr_sentence) + "\n")
+            # dpr.append(
+            #     {
+            #         "id": f"{sentence['doc_id']}_{sentence['offset']}",
+            #         "doc_topic": sentence["doc_topic"],
+            #         "question": question,
+            #         "answers": "",
+            #         "positive_ctxs": positive_ctxs,
+            #         "negative_ctxs": "",
+            #         "hard_negative_ctxs": "",
+            #     }
+            # )
 
     # Write DPR file
 
-    with open(output_path, "w") as f:
-        json.dump(dpr, f, indent=2)
+    # with open(output_path, "w") as f:
+    #     for sample in dpr:
+    #         # json.dump(dpr, f, indent=2)
+    #         f.write(json.dumps(sample) + "\n")
 
     return dpr
 
