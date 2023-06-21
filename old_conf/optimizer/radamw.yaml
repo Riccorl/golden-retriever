@@ -1,3 +1,0 @@
-_target_: goldenretriever.models.optim.RAdamW
-lr: 1e-5
-weight_decay: 0.01
