@@ -17,6 +17,7 @@ from datasets import Dataset
 from goldenretriever.common.log import get_console_logger, get_logger
 from goldenretriever.common.model_inputs import ModelInputs
 from goldenretriever.data.datasets import GenerativeDataset, BaseDataset
+from goldenretriever.data.dpr.hard_negatives_manager import HardNegativeManager
 from goldenretriever.data.labels import Labels
 from goldenretriever.data.dpr.mixin import DPRMixin
 
@@ -114,7 +115,7 @@ class DPRIterableDataset(GenerativeDataset, DPRMixin):
                 ),
             }
 
-        self.hard_negatives_dict: Optional[Dataset] = None
+        self.hn_manager: Optional[HardNegativeManager] = None
 
         self.data = self.load(
             path,
@@ -123,15 +124,6 @@ class DPRIterableDataset(GenerativeDataset, DPRMixin):
             keep_in_memory=keep_in_memory,
             from_generator=from_generator,
         )
-        # create a copy
-        # self.copy_of_data = deepcopy(self.data)
-        # # self.copy_of_data = self.data
-        # self.random_subsample()
-        # self.original_data = self.data
-        # # select random subset of data self.subsample% of the data
-        # number_of_samples = int(len(self.data) * self.subsample / 100)
-        # self.data = self.data.shuffle(seed=43).select(range(0, number_of_samples))
-        # self.data_iterator = iter(self.data)
         self.prefatched_data = []
         if self.prefetch_batches:
             self.prefetch()
@@ -152,12 +144,6 @@ class DPRIterableDataset(GenerativeDataset, DPRMixin):
         else:
             data = self.data
 
-        # ids_in_data = set(self.data["sample_idx"])
-        # ids_in_hard_negatives = (
-        #     set(self.hard_negatives_dict["sample_idx"])
-        #     if self.hard_negatives_dict
-        #     else set()
-        # )
         for sample in data:
             if len(contexts_in_batch) >= self.max_contexts_per_batch:
                 yield batch
@@ -185,12 +171,14 @@ class DPRIterableDataset(GenerativeDataset, DPRMixin):
                     for s in sample[context_type]
                 )
                 # also add the contexts from the hard negatives dict
-                if self.hard_negatives_dict is not None:
+                if self.hn_manager is not None:
                     contexts_in_batch |= set(
                         tuple(s["input_ids"])
                         for sample in batch
-                        # if sample["sample_idx"] in ids_in_hard_negatives
-                        for s in self.hard_negatives_dict[sample["sample_idx"]]
+                        # if sample["sample_idx"] in self.hn_manager
+                        for s in self.hn_manager.get_hard_negatives(
+                            sample["sample_idx"]
+                        )
                     )
 
         if not self.drop_last_batch and len(batch) > 0:
@@ -229,7 +217,10 @@ class DPRIterableDataset(GenerativeDataset, DPRMixin):
     def prefetch(self):
         if self.prefetch_batches:
             self.prefatched_data = list(
-                tqdm(self.batch_generator(), desc="Prefetching batches")
+                tqdm(
+                    self.batch_generator(),
+                    desc=f"Prefetching batches for dataset {self.name}",
+                )
             )
             if self.max_negatives_to_sample > 0:
                 # sample negatives for each batch
@@ -241,11 +232,11 @@ class DPRIterableDataset(GenerativeDataset, DPRMixin):
                         self.max_negatives_to_sample,
                         self.max_context_length,
                     )
-                    for batch in tqdm(self.prefatched_data, desc="Sampling negatives")
+                    for batch in tqdm(self.prefatched_data, desc=f"Sampling negatives for dataset {self.name}")
                 ]
             # collate batches
             collated_data = []
-            for batch in tqdm(self.prefatched_data, desc="Collating batches"):
+            for batch in tqdm(self.prefatched_data, desc=f"Collating batches for dataset {self.name}"):
                 collated_data.extend(self.collate_generator(batch))
             self.prefatched_data = collated_data
 
@@ -532,20 +523,11 @@ class InBatchNegativesDPRIterableDataset(DPRIterableDataset, DPRMixin):
 
         hard_negatives_ctxs = [sample["hard_negative_ctxs"] for sample in batch]
 
-        # use negatives from predictions if available
-        # if "retrieved_hard_negatives" in batch[0]:
-        #     # add augmented negative contexts to contexts
-        #     hard_negatives_ctxs += [
-        #         sample["retrieved_hard_negatives"] for sample in batch
-        #     ]
-        # ids_in_hard_negatives = (
-        #     set(self.hard_negatives_dict["sample_idx"])
-        #     if self.hard_negatives_dict
-        #     else set()
-        # )
-        if self.hard_negatives_dict is not None:
+        if self.hn_manager is not None:
             for sample_idx in sample_idxs:
-                hard_negatives_ctxs.append(self.hard_negatives_dict[sample_idx])
+                hard_negatives_ctxs.append(
+                    self.hn_manager.get_hard_negatives(sample_idx)
+                )
 
         # convert the questions to a batch
         questions = self.convert_to_batch(questions)
@@ -659,7 +641,7 @@ class DPRDataset(BaseDataset, DPRMixin):
                 ),
             }
 
-        self.hard_negatives_dict: Optional[Dataset] = None
+        self.hn_manager: Optional[HardNegativeManager] = None
 
         self.data = self.load(
             path,

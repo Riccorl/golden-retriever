@@ -270,6 +270,7 @@ class NYTTopKEvaluationCallback(TopKEvaluationCallback):
             metrics[f"recall@{self.k}_{dataloader_idx}"] = recall_at_k
         metrics[f"recall@{self.k}"] = sum(metrics.values()) / len(metrics)
 
-        metrics = {f"{stage.value}_{k}": v for k, v in metrics.items()}
+        # convert to torch.float32 to avoid pl warnings
+        metrics = {f"{stage.value}_{k}": torch.float32(v) for k, v in metrics.items()}
         pl_module.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
         return metrics
