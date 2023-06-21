@@ -5,8 +5,8 @@ from typing import Union
 
 import torch
 
-from golden_retriever import GoldenRetriever
-from golden_retriever.lightning_modules.pl_modules import GoldenRetrieverPLModule
+from goldenretriever import GoldenRetriever
+from goldenretriever.lightning_modules.pl_modules import GoldenRetrieverPLModule
 
 
 @torch.no_grad()

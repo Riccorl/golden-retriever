@@ -6,7 +6,7 @@ CHECK_MARK="\033[0;32m\xE2\x9C\x94\033[0m"
 # usage text
 USAGE="$(basename "$0") [-h --help] [-l --language-model LANG_MODEL_NAME] [-d --debug] [-p --precision PRECISION]
 [-c --cpu] [-g --devices DEVICES] [-n --nodes NODES] [-m --gpu-mem GPU_MEM] [-s --strategy STRATEGY]
-[-o --offline] [-t --test] [--config-path CONFIG_PATH] [--checkpoint CHECKPOINT_PATH] OVERRIDES
+[-o --offline] [-t --test] [--config-path CONFIG_PATH] [--checkpoint CHECKPOINT_PATH] [-w --wand WANDB_NAME] OVERRIDES
 
 where:
     -h --help             Show this help text
@@ -22,14 +22,13 @@ where:
     -o --offline          Run the experiment offline
     -v --print            Print the config
     -t --test             Run only the test phase
+    -w --wandb            The wandb project name
     --config-path         Run a specific config file
     --checkpoint          Run a specific checkpoint
     OVERRIDES             Overrides for the experiment, in the form of key=value.
                           For example, 'model_name=bert-base-uncased'.
 Example:
-  ./script/train.sh
-  ./script/train.sh -l bert-base-cased
-  ./script/train.sh -l bert-base-cased -m 10000
+  bash scripts/train.sh --config-path conf/finetune_iterable_in_batch.yaml -l intfloat/e5-base-v2
 "
 
 # Transform long options to short ones
@@ -50,13 +49,14 @@ for arg in "$@"; do
   '--test') set -- "$@" '-t' ;;
   '--config-path') set -- "$@" '-a' ;;
   '--checkpoint') set -- "$@" '-k' ;;
+  '--wandb') set -- "$@" '-w' ;;
   *) set -- "$@" "$arg" ;;
   esac
 done
 
 # check for named params
 #while [ $OPTIND -le "$#" ]; do
-while getopts ":hl:dp:cg:n:m:s:ovta:k:" opt; do
+while getopts ":hl:dp:cg:n:m:s:ovta:k:w:" opt; do
   case $opt in
   h)
     printf "%s$USAGE" && exit 0
@@ -99,6 +99,9 @@ while getopts ":hl:dp:cg:n:m:s:ovta:k:" opt; do
     ;;
   k)
     CHECKPOINT_PATH="$OPTARG"
+    ;;
+  w)
+    WANDB_PROJECT="$OPTARG"
     ;;
   \?)
     echo "Invalid option -$OPTARG" >&2 && echo "$USAGE" && exit 0
@@ -190,6 +193,12 @@ else
   OVERRIDES="$OVERRIDES +evaluation.checkpoint_path=$CHECKPOINT_PATH"
 fi
 
+if [ -z "$WANDB_PROJECT" ]; then
+  WANDB_PROJECT=""
+else
+  WANDB_PROJECT="project_name=$WANDB_PROJECT"
+fi
+
 # if -t is not specified, ONLY_TEST is False
 if [ -z "$ONLY_TEST" ]; then
   ONLY_TEST="False"
@@ -270,7 +279,6 @@ cat <<EOF
 Configuration:
 -------------------------------------------------------------------
 python:                           $(which python)
-Language model name:              $LANG_MODEL_NAME
 Config name:                      $CONFIG_NAME
 LM name:                          $LANG_MODEL_NAME
 Run in debug mode:                $DEV_RUN
@@ -318,9 +326,8 @@ export PYTHONPATH="$DIRPATH"
 
 export HYDRA_FULL_ERROR=1
 
-
 if [ "$DEV_RUN" = "True" ]; then
-  python golden_retriever/trainer/train.py \
+  python goldenretriever/trainer/train.py \
     $CONFIG_PATH \
     "train.pl_trainer.fast_dev_run=$DEV_RUN" \
     "train.pl_trainer.devices=$DEVICES" \
@@ -334,7 +341,7 @@ if [ "$DEV_RUN" = "True" ]; then
     "hydra/hydra_logging=disabled" \
     $OVERRIDES
 else
-  python golden_retriever/trainer/train.py \
+  python goldenretriever/trainer/train.py \
     $CONFIG_PATH \
     "train.pl_trainer.fast_dev_run=$DEV_RUN" \
     "train.pl_trainer.devices=$DEVICES" \

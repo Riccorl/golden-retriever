@@ -1,47 +1,46 @@
-max_contexts_per_batch: 400
-max_questions_per_batch: 64
-prefetch_batches: True
-from_generator: False
-use_topics: True
+shared_params:
+  contexts_path: null
+  max_context_length: 64
+  max_contexts_per_batch: 64
+  max_questions_per_batch: 64
+  prefetch_batches: True
+  use_topics: False
 
 datamodule:
-  _target_: golden_retriever.lightning_modules.pl_data_modules.PLDataModule
+  _target_: goldenretriever.lightning_modules.pl_data_modules.PLDataModule
   tokenizer: ${model.language_model}
   datasets:
     train:
-      _target_: golden_retriever.data.dpr.datasets.InBatchNegativesDPRIterableDataset
+      _target_: goldenretriever.data.dpr.datasets.InBatchNegativesDPRIterableDataset
       name: 'train'
-      contexts_path: ${data_overrides.contexts_path}
-      max_context_length: 64
-      max_questions_per_batch: ${data.max_questions_per_batch}
-      prefetch_batches: ${data.prefetch_batches}
-      from_generator: ${data.from_generator}
-      max_contexts_per_batch: ${data.max_contexts_per_batch}
-      # subsample: 0.1
+      path: null
+      contexts_path: ${data.shared_params.contexts_path}
+      max_context_length: ${data.shared_params.max_context_length}
+      max_questions_per_batch: ${data.shared_params.max_questions_per_batch}
+      max_contexts_per_batch: ${data.shared_params.max_contexts_per_batch}
+      prefetch_batches: ${data.shared_params.prefetch_batches}
+      subsample: null
       shuffle: True
-      use_topics: ${data.use_topics}
-      path: ${data_overrides.train_path}
+      use_topics: ${data.shared_params.use_topics}
 
     val:
-      - _target_: golden_retriever.data.dpr.datasets.InBatchNegativesDPRIterableDataset
+      - _target_: goldenretriever.data.dpr.datasets.InBatchNegativesDPRIterableDataset
         name: 'val'
-        contexts_path: ${data_overrides.contexts_path}
-        max_context_length: 64
-        max_questions_per_batch: ${data.max_questions_per_batch}
-        prefetch_batches: ${data.prefetch_batches}
-        from_generator: ${data.from_generator}
-        max_contexts_per_batch: ${data.max_contexts_per_batch}
-        use_topics: ${data.use_topics}
-        path: ${data_overrides.val_path}
+        path: null
+        contexts_path: ${data.shared_params.contexts_path}
+        max_context_length: ${data.shared_params.max_context_length}
+        max_questions_per_batch: ${data.shared_params.max_questions_per_batch}
+        max_contexts_per_batch: ${data.shared_params.max_contexts_per_batch}
+        prefetch_batches: ${data.shared_params.prefetch_batches}
+        use_topics: ${data.shared_params.use_topics}
 
     test:
-      - _target_: golden_retriever.data.dpr.datasets.InBatchNegativesDPRIterableDataset
+      - _target_: goldenretriever.data.dpr.datasets.InBatchNegativesDPRIterableDataset
         name: 'test'
-        contexts_path: ${data_overrides.contexts_path}
-        max_context_length: 64
-        max_questions_per_batch: ${data.max_questions_per_batch}
-        prefetch_batches: ${data.prefetch_batches}
-        from_generator: ${data.from_generator}
-        max_contexts_per_batch: ${data.max_contexts_per_batch}
-        use_topics: ${data.use_topics}
-        path: ${data_overrides.test_path}
+        path: null
+        contexts_path: ${data.shared_params.contexts_path}
+        max_context_length: ${data.shared_params.max_context_length}
+        max_questions_per_batch: ${data.shared_params.max_questions_per_batch}
+        max_contexts_per_batch: ${data.shared_params.max_contexts_per_batch}
+        prefetch_batches: ${data.shared_params.prefetch_batches}
+        use_topics: ${data.shared_params.use_topics}

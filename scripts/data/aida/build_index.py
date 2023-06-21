@@ -5,7 +5,7 @@ from typing import Union
 
 import torch
 
-from golden_retriever import GoldenRetriever
+from goldenretriever import GoldenRetriever
 
 
 @torch.no_grad()

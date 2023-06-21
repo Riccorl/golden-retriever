@@ -293,7 +293,7 @@ export HYDRA_FULL_ERROR=1
 
 
 if [ "$DEV_RUN" = "True" ]; then
-  python golden_retriever/trainer/train.py \
+  python goldenretriever/trainer/train.py \
     $CONFIG_PATH \
     "train.pl_trainer.fast_dev_run=$DEV_RUN" \
     "train.pl_trainer.devices=$DEVICES" \
@@ -307,7 +307,7 @@ if [ "$DEV_RUN" = "True" ]; then
     "hydra/hydra_logging=disabled" \
     $OVERRIDES
 else
-  python golden_retriever/trainer/train.py \
+  python goldenretriever/trainer/train.py \
     $CONFIG_PATH \
     "train.pl_trainer.fast_dev_run=$DEV_RUN" \
     "train.pl_trainer.devices=$DEVICES" \

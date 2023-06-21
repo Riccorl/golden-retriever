@@ -10,10 +10,10 @@ import requests
 import tqdm
 
 
-def compute_retriever_stats(dataset) -> None:
+def compute_retriever_stats(dataset, recall_at: int = 100) -> None:
     correct, total = 0, 0
     for sample in dataset:
-        window_candidates = sample["window_candidates"]
+        window_candidates = sample["window_candidates"][:recall_at]
         window_candidates = [c.replace("_", " ").lower() for c in window_candidates]
 
         for ss, se, label in sample["window_labels"]:
@@ -24,7 +24,7 @@ def compute_retriever_stats(dataset) -> None:
             total += 1
 
     recall = correct / total
-    print("Recall:", recall)
+    print(f"Recall@{recall_at}:", recall)
 
 
 def batch_generation(samples, batch_size):
@@ -75,7 +75,8 @@ def add_candidates(
             f.write(json.dumps(sample) + "\n")
 
     # measure some metrics
-    compute_retriever_stats(output_data)
+    compute_retriever_stats(output_data, recall_at=100)
+    compute_retriever_stats(output_data, recall_at=50)
 
 
 if __name__ == "__main__":

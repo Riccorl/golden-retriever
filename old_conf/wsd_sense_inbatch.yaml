@@ -1,0 +1,58 @@
+# Required to make the "experiments" dir the default one for the output of the models
+hydra:
+  run:
+    dir: ./experiments/${model_name}/${now:%Y-%m-%d}/${now:%H-%M-%S}
+
+model_name: ${model.language_model}-inbatch # used to name the model in wandb
+project_name: golden-retriever-wsd # used to name the project in wandb
+
+data_overrides:
+  contexts_path: "data/dpr-like/wsd/sense_level/wordnet_definitions.txt"
+  train_path:
+    - "data/dpr-like/wsd/sense_level/train.jsonl"
+  val_path:
+    - "data/dpr-like/wsd/sense_level/validation.jsonl"
+  test_path:
+    - "data/dpr-like/wsd/sense_level/test.jsonl"
+
+defaults:
+  - _self_
+  - train: wsd
+  - model: golden_retriever
+  - loss: nce_loss
+  - optimizer: adamw
+  - scheduler: linear_scheduler_with_warmup
+  - data: in_batch_negatives
+  - evaluation: default_evaluation
+  - logging: wandb_logging
+  - override hydra/job_logging: colorlog
+  - override hydra/hydra_logging: colorlog
+
+data:
+  datamodule:
+    datasets:
+      train:
+        _target_: goldenretriever.data.datasetsInBatchNegativesDPRDataset
+        name: "train"
+        contexts_path: ${data_overrides.contexts_path}
+        sample_by_frequency: True
+        path: ${data_overrides.train_path}
+
+      val:
+        - _target_: goldenretriever.data.datasetsInBatchNegativesDPRDataset
+          name: "val"
+          contexts_path: ${data_overrides.contexts_path}
+          max_question_length: 256
+          max_context_length: 256
+          path: ${data_overrides.val_path}
+
+      test:
+        - _target_: goldenretriever.data.datasetsInBatchNegativesDPRDataset
+          name: "test"
+          contexts_path: ${data_overrides.contexts_path}
+          max_question_length: 256
+          max_context_length: 256
+          path: ${data_overrides.test_path}
+
+    batch_sizes:
+      train: 64

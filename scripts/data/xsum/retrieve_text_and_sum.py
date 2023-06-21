@@ -12,10 +12,10 @@ import requests
 import torch
 import tqdm
 
-from golden_retriever import GoldenRetriever
-from golden_retriever.common.log import get_logger
-from golden_retriever.common.model_inputs import ModelInputs
-from golden_retriever.data.datasets import BaseDataset
+from goldenretriever import GoldenRetriever
+from goldenretriever.common.log import get_logger
+from goldenretriever.common.model_inputs import ModelInputs
+from goldenretriever.data.datasets import BaseDataset
 
 logger = get_logger(level=logging.INFO)
 

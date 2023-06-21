@@ -1,21 +1,19 @@
-language_model: "sentence-transformers/all-MiniLM-L12-v2"
+language_model: "intfloat/e5-small-v2"
+
+encoder:
+  _target_: goldenretriever.models.model.SentenceEncoder
+  language_model: ${model.language_model}
+  pooling_strategy: "mean"
+  projection_size: null
+  layer_norm: True
+  layer_norm_eps: 1e-12
 
 pl_module:
-  _target_: golden_retriever.lightning_modules.pl_modules.GoldenRetrieverPLModule
+  _target_: goldenretriever.lightning_modules.pl_modules.GoldenRetrieverPLModule
   model:
-    _target_: golden_retriever.models.model.GoldenRetriever
-    question_encoder:
-      _target_: golden_retriever.models.model.SentenceEncoder
-      language_model: ${model.language_model}
-      pooling_strategy: "mean"
-      # projection_size: 512
-      layer_norm: True
-      layer_norm_eps: 1e-12
+    _target_: goldenretriever.models.model.GoldenRetriever
+    question_encoder: ${model.encoder}
     context_encoder: null
-      # _target_: golden_retriever.models.model.SentenceEncoder
-      # language_model: ${model.language_model}
-      # pooling_strategy: "mean"
-      # layer_norm: True
     loss_type: ${loss}
   optimizer: ${optimizer}
   lr_scheduler: ${scheduler}

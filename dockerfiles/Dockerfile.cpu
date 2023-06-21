@@ -3,7 +3,7 @@ FROM python:3.10.11-slim-bullseye
 
 # Copy and install requirements.txt
 COPY ./requirements.txt ./requirements.txt
-COPY ./golden_retriever /golden_retriever
+COPY ./goldenretriever /goldenretriever
 COPY ./scripts/serve /serve
 COPY ./README.md /README.md
 COPY ./setup.py /setup.py
@@ -16,12 +16,12 @@ RUN mkdir -p /retriever \
 ARG MODEL_NAME_OR_PATH
 COPY ${MODEL_NAME_OR_PATH}/* /retriever
 
-WORKDIR /golden_retriever
+WORKDIR /goldenretriever
 
-ENV PYTHONPATH=/golden_retriever
+ENV PYTHONPATH=/goldenretriever
 
 EXPOSE 80
 
-# Run the start script, it will check for an /golden_retriever/prestart.sh script (e.g. for migrations)
+# Run the start script, it will check for an /goldenretriever/prestart.sh script (e.g. for migrations)
 # And then will start Gunicorn with Uvicorn
 CMD ["/serve/start.sh"]

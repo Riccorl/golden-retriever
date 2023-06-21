@@ -6,8 +6,8 @@ from typing import List, Tuple, Union
 
 # from ipa.preprocessing.tokenizers.stanza_tokenizer import StanzaTokenizer
 # from ipa.preprocessing.tokenizers.spacy_tokenizer import SpacyTokenizer
-from golden_retriever.serve.tokenizers import WhitespaceTokenizer, SpacyTokenizer, RegexTokenizer
-from golden_retriever.serve.tokenizers.base_tokenizer import BaseTokenizer
+from goldenretriever.serve.tokenizers import WhitespaceTokenizer, SpacyTokenizer, RegexTokenizer
+from goldenretriever.serve.tokenizers.base_tokenizer import BaseTokenizer
 
 from tqdm import tqdm
 

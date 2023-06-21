@@ -88,7 +88,7 @@ install_requirements, extras, find_links = parse_requirements_file(
 # version.py defines the VERSION and VERSION_SHORT variables.
 # We use exec here, so we don't import allennlp whilst setting up.
 VERSION = {}  # type: ignore
-with open("golden_retriever/version.py", "r") as version_file:
+with open("goldenretriever/version.py", "r") as version_file:
     exec(version_file.read(), VERSION)
 
 with open("README.md", "r") as fh:
@@ -115,5 +115,5 @@ setuptools.setup(
     ],
     install_requires=install_requirements,
     extras_require=extras,
-    python_requires=">=3.8",
+    python_requires=">=3.9",
 )

@@ -1,24 +1,41 @@
+shared_params:
+  contexts_path: null
+  max_context_length: 64
+  prefetch_batches: True
+  use_topics: False
+
 datamodule:
-  _target_: golden_retriever.lightning_modules.pl_data_modules.PLDataModule
+  _target_: goldenretriever.lightning_modules.pl_data_modules.PLDataModule
   tokenizer: ${model.language_model}
   datasets:
     train:
-      _target_: golden_retriever.data.dpr_datasets.InBatchNegativesDPRDataset
-      name: 'train'
-      contexts_path: ${data_overrides.contexts_path}
-      path: ${data_overrides.train_path}
+      _target_: goldenretriever.data.dpr.datasets.InBatchNegativesDPRDataset
+      name: "train"
+      path: null
+      contexts_path: ${data.shared_params.contexts_path}
+      max_context_length: ${data.shared_params.max_context_length}
+      prefetch_batches: ${data.shared_params.prefetch_batches}
+      subsample: null
+      shuffle: True
+      use_topics: ${data.shared_params.use_topics}
 
     val:
-      - _target_: golden_retriever.data.dpr_datasets.InBatchNegativesDPRDataset
-        name: 'val'
-        contexts_path: ${data_overrides.contexts_path}
-        path: ${data_overrides.val_path}
+      - _target_: goldenretriever.data.dpr.datasets.InBatchNegativesDPRDataset
+        name: "val"
+        path: null
+        contexts_path: ${data.shared_params.contexts_path}
+        max_context_length: ${data.shared_params.max_context_length}
+        prefetch_batches: ${data.shared_params.prefetch_batches}
+        use_topics: ${data.shared_params.use_topics}
 
     test:
-      - _target_: golden_retriever.data.dpr_datasets.InBatchNegativesDPRDataset
-        name: 'test'
-        contexts_path: ${data_overrides.contexts_path}
-        path: ${data_overrides.test_path}
+      - _target_: goldenretriever.data.dpr.datasets.InBatchNegativesDPRDataset
+        name: "test"
+        path: null
+        contexts_path: ${data.shared_params.contexts_path}
+        max_context_length: ${data.shared_params.max_context_length}
+        prefetch_batches: ${data.shared_params.prefetch_batches}
+        use_topics: ${data.shared_params.use_topics}
 
   batch_sizes:
     train: 64
@@ -29,4 +46,3 @@ datamodule:
     train: 4
     val: 4
     test: 4
- 

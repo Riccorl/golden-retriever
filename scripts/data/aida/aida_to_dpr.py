@@ -18,8 +18,6 @@ def aida_to_dpr(
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     # read entities definitions
-    # with open("data/aida_dpr/definitions.txt", "w") as f:
-    # with open(output_path.parent / "definitions_from_dataset.txt", "w") as f_def:
     with open(definitions_path, "r") as f:
         for line in f:
             # line_data = json.loads(line)
@@ -27,9 +25,6 @@ def aida_to_dpr(
             title = title.strip()
             definition = definition.strip()
             definitions[title] = definition
-            # f_def.write(line_data["title"] + " <def> " + line_data["text"] + "\n")
-            # tokenizer.decode(line_data["text_ids"])
-            # definitions[line_data["title"]].replace("[unused2]", ": ")
 
     if title_map is not None:
         with open(title_map, "r") as f:
@@ -37,28 +32,28 @@ def aida_to_dpr(
 
     dpr = []
 
-    # Read AIDA file
-    aida_data = []
-    with open(conll_path, "r") as f, open(output_path, "w") as f_out:
-        # aida_data = json.load(f)
-        for sentence in tqdm(f):
-            #     aida_data.append(json.loads(line))
+    title_to_lower_map = {title.lower(): title for title in definitions.keys()}
 
+    # Read AIDA file
+    with open(conll_path, "r") as f, open(output_path, "w") as f_out:
+        for line in tqdm(f):
+            sentence = json.loads(line)
             # for sentence in aida_data:
             question = sentence["text"]
             positive_ctxs = []
             for idx, entity in enumerate(sentence["window_labels"]):
                 entity = entity[2]
-                if title_map and entity in title_map:
-                    entity = title_map[entity]
+                if not entity:
+                    continue
+                entity = entity.strip().lower().replace("_", " ")
+                if title_map and entity in title_to_lower_map:
+                    entity = title_to_lower_map[entity]
                 if entity in definitions:
                     def_text = definitions[entity]
-                    # def_text = tokenizer.decode(definitions[entity])
-                    # def_text = def_text.replace("[unused2]", ": ").replace("[CLS]", "").replace("[SEP]", "")
                     positive_ctxs.append(
                         {
-                            "title": entity,
-                            "text": f"{entity} <def> {def_text}",
+                            "title": title_to_lower_map[entity.lower()],
+                            "text": f"{title_to_lower_map[entity.lower()]} <def> {def_text}",
                             "passage_id": f"{sentence['doc_id']}_{sentence['offset']}_{idx}",
                         }
                     )
@@ -75,25 +70,7 @@ def aida_to_dpr(
                 "negative_ctxs": "",
                 "hard_negative_ctxs": "",
             }
-            f.write(json.dumps(dpr_sentence) + "\n")
-            # dpr.append(
-            #     {
-            #         "id": f"{sentence['doc_id']}_{sentence['offset']}",
-            #         "doc_topic": sentence["doc_topic"],
-            #         "question": question,
-            #         "answers": "",
-            #         "positive_ctxs": positive_ctxs,
-            #         "negative_ctxs": "",
-            #         "hard_negative_ctxs": "",
-            #     }
-            # )
-
-    # Write DPR file
-
-    # with open(output_path, "w") as f:
-    #     for sample in dpr:
-    #         # json.dump(dpr, f, indent=2)
-    #         f.write(json.dumps(sample) + "\n")
+            f_out.write(json.dumps(dpr_sentence) + "\n")
 
     return dpr
 

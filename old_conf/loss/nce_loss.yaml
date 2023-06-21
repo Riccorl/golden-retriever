@@ -1,0 +1,2 @@
+_target_: goldenretriever.models.losses.MultiLabelNCELoss
+reduction: "sum"

@@ -1,0 +1,32 @@
+datamodule:
+  _target_: goldenretriever.lightning_modules.pl_data_modules.PLDataModule
+  tokenizer: ${model.language_model}
+  datasets:
+    train:
+      _target_: goldenretriever.data.dpr.datasets.InBatchNegativesDPRDataset
+      name: 'train'
+      contexts_path: ${data_overrides.contexts_path}
+      path: ${data_overrides.train_path}
+
+    val:
+      - _target_: goldenretriever.data.dpr.datasets.InBatchNegativesDPRDataset
+        name: 'val'
+        contexts_path: ${data_overrides.contexts_path}
+        path: ${data_overrides.val_path}
+
+    test:
+      - _target_: goldenretriever.data.dpr.datasets.InBatchNegativesDPRDataset
+        name: 'test'
+        contexts_path: ${data_overrides.contexts_path}
+        path: ${data_overrides.test_path}
+
+  batch_sizes:
+    train: 64
+    val: 64
+    test: 64
+
+  num_workers:
+    train: 4
+    val: 4
+    test: 4
+ 

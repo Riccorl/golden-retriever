@@ -1,0 +1,29 @@
+# Required to make the "experiments" dir the default one for the output of the models
+hydra:
+  run:
+    dir: ./experiments/${model_name}/${now:%Y-%m-%d}/${now:%H-%M-%S}
+
+model_name: ${model.language_model} # used to name the model in wandb
+project_name: golden-retriever-srl # used to name the project in wandb
+
+data_overrides:
+  contexts_path: "data/dpr-like/srl/propbank_definitions.pairs.noargm.txt"
+  train_path:
+    - "data/dpr-like/srl/ontonotes/ontonotes.train.pairs.noargm.json"
+  val_path:
+    - "data/dpr-like/srl/ontonotes/ontonotes.dev.pairs.noargm.json"
+  test_path:
+    - "data/dpr-like/srl/ontonotes/ontonotes.test.pairs.noargm.json"
+
+defaults:
+  - _self_
+  - train: ontonotes_pairs
+  - model: golden_retriever
+  - loss: nce_loss
+  - optimizer: radamw
+  - scheduler: linear_scheduler
+  - data: iterable_in_batch_negatives
+  - evaluation: default_evaluation
+  - logging: wandb_logging
+  - override hydra/job_logging: colorlog
+  - override hydra/hydra_logging: colorlog
