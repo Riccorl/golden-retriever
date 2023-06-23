@@ -267,7 +267,7 @@ cat <<EOF
 |  ██   ██ ███████    ██    ██   ██ ██ ███████   ████   ███████ ██   ██   |
 |                                                                         |       
 '-------------------------------------------------------------------------'    
-                                                         
+
              ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⣤⣴⣶⣾⠿⠶⢶⣶⣤⣤⣀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀                  
              ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣠⣴⡿⠟⠋⠉⠀⠀⠀⠀⠀⠀⠈⠉⠉⠻⣧⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀                  
              ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣠⣾⠟⠉⠀⠀⣠⣤⣶⣷⢀⡀⠀⠀⠀⠀⠀⠀⠈⠻⣦⡀⠀⠀⠀⠀⠀⠀⠀                  
@@ -291,26 +291,10 @@ cat <<EOF
              ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠙⠾⠋⠁⢈⣿⣿⣿⡇⠀⣾⡟⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀                  
              ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣼⡿⠋⠉⢿⣾⡿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀                  
              ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠋⠀⠀⠀⠈⠿⡇⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀                  
-                                                                      
-.---------------------------------------------------------------------------.
-| Configuration:                                                            |
-|---------------------------------------------------------------------------|
-| python:                           $(which python)                         |   
-| Config name:                      $CONFIG_NAME                            |
-| LM name:                          $LANG_MODEL_NAME                        |
-| Run in debug mode:                $DEV_RUN                                |
-| Requested VRAM:                   $GPU_MEM MB                             |
-| Available VRAM:                   $FREE_MEM MB                            |
-| Precision:                        $PRECISION bit                          |
-| Number of GPUs:                   $DEVICES                                |
-| Number of nodes:                  $NODES                                  |
-| Use CPU:                          $USE_CPU                                |
-| W&B Mode:                         $WANDB                                  |
-'---------------------------------------------------------------------------'
-                                                                   
+
+                Golden Retriever Training Script
 EOF
 
-# | $(echo Hydra Configuration Overrides: "$OVERRIDES" | fold -w 70)
 
 # WAITING FOR VRAM STUFF
 chars="/-\|"

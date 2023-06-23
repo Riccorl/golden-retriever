@@ -27,6 +27,8 @@ train:
   only_test: False
   # if provided, initialize the model with the weights from the checkpoint
   pretrain_ckpt_path: null
+  # if provided, start training from the checkpoint
+  checkpoint_path: null
 
   # task specific parameter
   top_k: 100

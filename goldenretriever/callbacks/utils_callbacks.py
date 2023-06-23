@@ -207,7 +207,7 @@ class SaveRetrieverCallback(pl.Callback):
         checkpoint: Dict[str, Any],
     ):
         self(trainer, pl_module)
-        self.free_up_indexer_callback(pl_module)
+        # self.free_up_indexer_callback(pl_module)
 
 
 class SampleNegativesDatasetCallback(pl.Callback):

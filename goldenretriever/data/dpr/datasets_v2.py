@@ -24,7 +24,7 @@ from goldenretriever.data.labels import Labels
 
 console_logger = get_console_logger()
 
-logger = get_logger()
+logger = get_logger(__name__)
 
 
 class SubsampleStrategyEnum(Enum):
@@ -86,6 +86,7 @@ class InBatchNegativesDataset(Dataset):
         self.context_manager = Labels()
         # read contexts from file if provided
         if contexts_path:
+            logger.info(f"Reading contexts from {contexts_path}")
             with open(self.project_folder / contexts_path, "r") as f:
                 self.context_manager.add_labels(
                     [line.strip() for line in f.readlines()]
@@ -136,7 +137,6 @@ class InBatchNegativesDataset(Dataset):
                     f"Subsample strategy {subsample_strategy} is not valid. "
                     f"Valid strategies are: {SubsampleStrategyEnum.__members__}"
                 )
-
         self.subsample_strategy = subsample_strategy
         self.subsample_portion = subsample_portion
 
@@ -215,7 +215,7 @@ class InBatchNegativesDataset(Dataset):
                     self.number_of_complete_iterations = 0
             else:
                 raise ValueError(
-                    f"Subsample strategy {self.subsample_strategy} is not valid. "
+                    f"Subsample strategy `{self.subsample_strategy}` is not valid. "
                     f"Valid strategies are: {SubsampleStrategyEnum.__members__}"
                 )
 
@@ -224,6 +224,7 @@ class InBatchNegativesDataset(Dataset):
 
         # do we need to shuffle the data?
         if self.shuffle and shuffle_this_time:
+            logger.info("Shuffling the data")
             self.shuffle_data(seed=42 + self.number_of_complete_iterations)
 
         batched_data = self.create_batches(
@@ -350,30 +351,105 @@ class InBatchNegativesDataset(Dataset):
         context_batch_size,
         question_batch_size,
     ) -> Dict[str, List[Dict[str, Any]]]:
+        def split_batch(
+            batch: Union[Dict[str, Any], ModelInputs], question_batch_size: int
+        ) -> List[ModelInputs]:
+            """
+            Split a batch into multiple batches of size `question_batch_size` while keeping
+            the same number of contexts.
+            """
+            # reset the sample_idx
+            sample_idx = batch["sample_idx"]
+            sample_idx = [
+                sample_idx[i : i + question_batch_size]
+                for i in range(0, len(sample_idx), question_batch_size)
+            ]
+            # split the questions
+            questions = batch["questions"]
+            questions = [
+                questions[i : i + question_batch_size]
+                for i in range(0, len(questions), question_batch_size)
+            ]
+            # chunk the positives
+            positives = batch["positives"]
+            positives = [
+                positives[i : i + question_batch_size]
+                for i in range(0, len(positives), question_batch_size)
+            ]
+            # chunk the positives_ctxs
+            positives_ctxs = batch["positives_ctxs"]
+            positives_ctxs = [
+                positives_ctxs[i : i + question_batch_size]
+                for i in range(0, len(positives_ctxs), question_batch_size)
+            ]
+            # create the new batches
+            new_batches = []
+            for q, s, p, pc in zip(questions, sample_idx, positives, positives_ctxs):
+                new_batch = {
+                    "sample_idx": s,
+                    "questions": q,
+                    "contexts": batch["contexts"],
+                    "positives": p,
+                    "positives_ctxs": pc,
+                }
+                new_batches.append(new_batch)
+            return new_batches
+
         batch = []
         contexts_in_batch = set()
         output_batches = {"batches": []}
-        batched_samples_list = []
-        for i in range(len(batched_samples["question"])):
-            batched_samples_list.append(
-                {k: batched_samples[k][i] for k in batched_samples.keys()}
-            )
-        for sample in batched_samples_list:
+
+        context_types = {
+            "positive_ctxs",
+            "negative_ctxs",
+            "sampled_negative_ctxs",
+            "hard_negative_ctxs",
+            "retrieved_hard_negatives",
+            "sampled_hard_negatives",
+        }
+
+        for sample_index in range(len(batched_samples["question"])):
+            sample = {
+                k: batched_samples[k][sample_index] for k in batched_samples.keys()
+            }
             if len(contexts_in_batch) >= context_batch_size:
-                output_batches["batches"].append(batch)
+                # collect all the contexts in the batch
+                # use input_ids as a unique identifier for the context
+                # the dictionary goes from input_ids to {input_ids, attention_mask, token_type_ids}
+                # we then take the values to get a list of {input_ids, attention_mask, token_type_ids}
+                contexts = []
+                for context_type in context_types:
+                    contexts += list(
+                        {
+                            tuple(s["input_ids"]): s
+                            for sample in batch
+                            if context_type in sample
+                            for s in sample[context_type]
+                        }.values()
+                    )
+                # create the batch dict
+                batch_dict = dict(
+                    sample_idx=[s["sample_idx"] for s in batch],
+                    questions=[s["question"] for s in batch],
+                    contexts=contexts,
+                    positives_ctxs=[s["positive_ctxs"] for s in batch],
+                    positives=[s["positives"] for s in batch],
+                )
+
+                # split the batch if needed
+                if len(batch) > question_batch_size:
+                    output_batches["batches"].extend(
+                        split_batch(batch_dict, question_batch_size)
+                    )
+                else:
+                    output_batches["batches"].append(batch_dict)
 
                 # reset batch
                 batch = []
                 contexts_in_batch = set()
 
             batch.append(sample)
-            for context_type in {
-                "positive_ctxs",
-                "negative_ctxs",
-                "sampled_negative_ctxs",
-                "hard_negative_ctxs",
-                "retrieved_hard_negatives",
-            }:
+            for context_type in context_types:
                 # yes it's a bit ugly but it works :)
                 # count the number of contexts in the batch and stop if we reach the limit
                 # we use a set to avoid counting the same context twice
@@ -386,62 +462,53 @@ class InBatchNegativesDataset(Dataset):
                     for s in sample[context_type]
                 )
                 # also add the contexts from the hard negatives dict
-                # if hard_negatives_manager is not None:
-                #     contexts_in_batch |= set(
-                #         tuple(s["input_ids"])
-                #         for sample in batch
-                #         if sample["sample_idx"] in hard_negatives_manager
-                #         for s in hard_negatives_manager.get(sample["sample_idx"])
-                #     )
+                if hard_negatives_manager is not None:
+                    contexts_in_batch |= set(
+                        tuple(s["input_ids"])
+                        for sample in batch
+                        if sample["sample_idx"] in hard_negatives_manager
+                        for s in hard_negatives_manager.get(sample["sample_idx"])
+                    )
         if len(batch) > 0:
-            output_batches["batches"].append(batch)
+            contexts = []
+            for context_type in context_types:
+                contexts += list(
+                    {
+                        tuple(s["input_ids"]): s
+                        for sample in batch
+                        if context_type in sample
+                        for s in sample[context_type]
+                    }.values()
+                )
+            # create the batch dict
+            batch_dict = dict(
+                sample_idx=[s["sample_idx"] for s in batch],
+                questions=[s["question"] for s in batch],
+                contexts=contexts,
+                positives_ctxs=[s["positive_ctxs"] for s in batch],
+                positives=[s["positives"] for s in batch],
+            )
+            # split the batch if needed
+            if len(batch) > question_batch_size:
+                output_batches["batches"].extend(
+                    split_batch(batch_dict, question_batch_size)
+                )
+            else:
+                output_batches["batches"].append(batch_dict)
 
         return output_batches
 
     def collate_fn(self, batch: Any, *args, **kwargs) -> Any:
+        # cleanup some keys
         batch = batch["batches"]
-        # get data from batch
-        questions = [sample["question"] for sample in batch]
-        positives = [sample["positives"] for sample in batch]
-        sample_idxs = [sample["sample_idx"] for sample in batch]
 
-        # this is needed to get the correct labels for each question
-        positives_ctxs = [sample["positive_ctxs"] for sample in batch]
-        negatives_ctxs = [sample["negative_ctxs"] for sample in batch]
-        if "sampled_negative_ctxs" in batch[0]:
-            negatives_ctxs += [sample["sampled_negative_ctxs"] for sample in batch]
+        # convert questions and contexts to a batch
+        questions = self.convert_to_batch(batch["questions"])
+        contexts = self.convert_to_batch(batch["contexts"])
 
-        hard_negatives_ctxs = [sample["hard_negative_ctxs"] for sample in batch]
-
-        if self.hard_negatives_manager is not None:
-            for sample_idx in sample_idxs:
-                hard_negatives_ctxs.append(self.hard_negatives_manager.get(sample_idx))
-
-        # convert the questions to a batch
-        questions = self.convert_to_batch(questions)
-
-        # now we need to make the batch of contexts
-        # it can happen that there are duplicate contexts from different questions
-        # so we need to remove them
-        flat_positives = [p for ps in positives_ctxs for p in ps]
-        flat_negatives = [n for ns in negatives_ctxs for n in ns]
-        flat_hard_negatives = [hn for hns in hard_negatives_ctxs for hn in hns]
-
-        # remove duplicates based on input_ids (input_ids is a list of int)
-        flat_positives = list(
-            {tuple(p["input_ids"]): p for p in flat_positives}.values()
-        )
-        flat_negatives = list(
-            {tuple(n["input_ids"]): n for n in flat_negatives}.values()
-        )
-        flat_hard_negatives = list(
-            {tuple(hn["input_ids"]): hn for hn in flat_hard_negatives}.values()
-        )
-        unique_contexts = flat_positives + flat_negatives + flat_hard_negatives
-        contexts = self.convert_to_batch(unique_contexts)
         # build an index to map the position of the context in the batch
         context_index = {
-            tuple(c["input_ids"]): i for i, c in enumerate(unique_contexts)
+            tuple(c["input_ids"]): i for i, c in enumerate(batch["contexts"])
         }
 
         # now we can create the labels
@@ -450,7 +517,7 @@ class InBatchNegativesDataset(Dataset):
         )
         # iterate over the questions and set the labels to 1 if the context is positive
         for sample_idx in range(len(questions["input_ids"])):
-            for ctx in positives_ctxs[sample_idx]:
+            for ctx in batch["positives_ctxs"][sample_idx]:
                 # get the index of the positive context
                 index = context_index[tuple(ctx["input_ids"])]
                 # set the label to 1
@@ -460,8 +527,8 @@ class InBatchNegativesDataset(Dataset):
             "questions": questions,
             "contexts": contexts,
             "labels": labels,
-            "positives": positives,
-            "sample_idx": [sample["sample_idx"] for sample in batch],
+            "positives": batch["positives"],
+            "sample_idx": batch["sample_idx"],
         }
         return model_inputs
 
@@ -599,6 +666,7 @@ class InBatchNegativesDataset(Dataset):
         """
         # invert questions from list of dict to dict of list
         samples = {k: [d[k] for d in samples] for k in samples[0]}
+        # print(samples)
         # get max length of questions
         max_len = max(len(x) for x in samples["input_ids"])
         # pad the questions
@@ -615,3 +683,6 @@ class InBatchNegativesDataset(Dataset):
     @property
     def contexts(self):
         return list(self.context_manager.get_labels().keys())
+
+class AidaInBatchNegativesDataset(InBatchNegativesDataset):
+    pass
