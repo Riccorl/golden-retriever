@@ -87,12 +87,24 @@ class DPRMixin:
 
         return data
 
+    # def update_epoch(self, epoch: int):
+    #     if not hasattr(self, "current_epoch"):
+    #         self.current_epoch = 0
+    #     self.current_epoch = epoch
+
+    # @property
+    # def current_epoch(self):
+    #     if not hasattr(self, "current_epoch"):
+    #         self.current_epoch = 0
+    #     return self.current_epoch
+
     @property
     def contexts(self):
         return list(self.context_manager.get_labels().keys())
 
     def shuffle_data(self, seed: int = 42):
-        self.data = self.data.shuffle(seed=seed)
+        if self.shuffle:
+            self.data = self.data.shuffle(seed=seed)
 
     @staticmethod
     def _process_dataset_sample(

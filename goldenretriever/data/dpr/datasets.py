@@ -22,7 +22,7 @@ from goldenretriever.data.labels import Labels
 from goldenretriever.data.dpr.mixin import DPRMixin
 
 console_logger = get_console_logger()
-logger = get_logger()
+logger = get_logger(__name__)
 
 
 class DPRIterableDataset(GenerativeDataset, DPRMixin):
@@ -48,6 +48,7 @@ class DPRIterableDataset(GenerativeDataset, DPRMixin):
         keep_in_memory: bool = False,
         from_generator: bool = False,
         subsample: Optional[float] = None,
+        random_subsample: bool = False,
         **kwargs,
     ):
         super().__init__(
@@ -71,6 +72,10 @@ class DPRIterableDataset(GenerativeDataset, DPRMixin):
         self.use_topics = use_topics
 
         self.subsample = subsample
+
+        self.random_subsample = random_subsample
+
+        self.stage = None
 
         self.current_iteration = 0
 
@@ -131,21 +136,44 @@ class DPRIterableDataset(GenerativeDataset, DPRMixin):
     def batch_generator(self) -> List:
         batch = []
         contexts_in_batch = set()
+
+        # if self.stage is None or self.stage == "train":
+        #     self.current_iteration += 1
         if self.subsample:
             number_of_samples = int(len(self.data) * self.subsample)
-            logger.info(
-                f"Subsampling {number_of_samples} samples from {len(self.data)}"
-            )
-            data = (
-                deepcopy(self.data)
-                .shuffle(seed=43 + self.current_iteration)
-                .select(range(0, number_of_samples))
-            )
+            if self.random_subsample:
+                logger.info(
+                    f"Random subsampling {number_of_samples} samples from {len(self.data)}"
+                )
+                data = (
+                    deepcopy(self.data)
+                    .shuffle(seed=43 + self.current_iteration)
+                    .select(range(0, number_of_samples))
+                )
+            else:
+                already_selected = number_of_samples * self.current_iteration
+                logger.info(
+                    f"Subsampling {number_of_samples} samples from {len(self.data)}"
+                )
+                to_select = (
+                    min(already_selected + number_of_samples, len(self.data))
+                )
+                logger.info(
+                    f"Portion of data selected: {already_selected} to {already_selected + number_of_samples}"
+                )
+                data = deepcopy(self.data).select(range(already_selected, to_select))
+                if to_select >= len(self.data):
+                    self.current_iteration = 0
+                    self.shuffle_data(seed=42)
+                    # self.data = self.data.shuffle(seed=42)
         else:
             data = self.data
 
         for sample in data:
             if len(contexts_in_batch) >= self.max_contexts_per_batch:
+                print("batch size", len(batch))
+                print("questions in batch", len([s["question"] for s in batch]))
+                print("contexts in batch", len(contexts_in_batch))
                 yield batch
                 # reset batch
                 batch = []
@@ -175,16 +203,14 @@ class DPRIterableDataset(GenerativeDataset, DPRMixin):
                     contexts_in_batch |= set(
                         tuple(s["input_ids"])
                         for sample in batch
-                        # if sample["sample_idx"] in self.hn_manager
-                        for s in self.hn_manager.get_hard_negatives(
-                            sample["sample_idx"]
-                        )
+                        if sample["sample_idx"] in self.hn_manager
+                        for s in self.hn_manager.get(sample["sample_idx"])
                     )
 
         if not self.drop_last_batch and len(batch) > 0:
             yield batch
 
-        self.current_iteration += 1
+        # self.current_iteration += 1
 
     def collate_generator(
         self, batch: List[Dict[str, torch.Tensor]]
@@ -206,13 +232,14 @@ class DPRIterableDataset(GenerativeDataset, DPRMixin):
         if self.prefatched_data:
             for sample in self.prefatched_data:
                 yield sample
-            self.prefatched_data = []
-            return
+            # self.prefatched_data = []
+            self.shuffle_data()
+            self.prefetch()
         else:
             for batch in self.batch_generator():
                 for collated_batch in self.collate_generator(batch):
                     yield collated_batch
-            return
+        return
 
     def prefetch(self):
         if self.prefetch_batches:
@@ -232,11 +259,16 @@ class DPRIterableDataset(GenerativeDataset, DPRMixin):
                         self.max_negatives_to_sample,
                         self.max_context_length,
                     )
-                    for batch in tqdm(self.prefatched_data, desc=f"Sampling negatives for dataset {self.name}")
+                    for batch in tqdm(
+                        self.prefatched_data,
+                        desc=f"Sampling negatives for dataset {self.name}",
+                    )
                 ]
             # collate batches
             collated_data = []
-            for batch in tqdm(self.prefatched_data, desc=f"Collating batches for dataset {self.name}"):
+            for batch in tqdm(
+                self.prefatched_data, desc=f"Collating batches for dataset {self.name}"
+            ):
                 collated_data.extend(self.collate_generator(batch))
             self.prefatched_data = collated_data
 
@@ -251,18 +283,6 @@ class DPRIterableDataset(GenerativeDataset, DPRMixin):
         """
         Sample negatives for each batch.
         """
-        # sample negatives for each batch
-        # batch["sampled_negative_ctxs"] = [
-        #     self._sample_negatives(
-        #         sample,
-        #         tokenizer,
-        #         context_manager,
-        #         sample_by_frequency,
-        #         max_negatives_to_sample,
-        #         max_context_length,
-        #     )
-        #     for sample in batch["negative_ctxs"]
-        # ]
 
         positives = set(
             [positive for sample in batch for positive in sample["positives"]]
@@ -278,11 +298,7 @@ class DPRIterableDataset(GenerativeDataset, DPRMixin):
         sampled = choice(
             population, max_negatives_to_sample, p=context_frequencies, replace=False
         )
-        # sampled = choices(
-        #     population,
-        #     weights=context_frequencies,
-        #     k=remaining_contexts,
-        # )
+
         sampled_negative_contexts = [
             context_manager.get_label_from_index(s) for s in sampled
         ]
@@ -525,9 +541,7 @@ class InBatchNegativesDPRIterableDataset(DPRIterableDataset, DPRMixin):
 
         if self.hn_manager is not None:
             for sample_idx in sample_idxs:
-                hard_negatives_ctxs.append(
-                    self.hn_manager.get_hard_negatives(sample_idx)
-                )
+                hard_negatives_ctxs.append(self.hn_manager.get(sample_idx))
 
         # convert the questions to a batch
         questions = self.convert_to_batch(questions)

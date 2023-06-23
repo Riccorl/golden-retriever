@@ -348,6 +348,10 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
             f"{self.threshold}. Computing hard negatives."
         )
 
+        trainer.datamodule.train_dataset.current_iteration += 1
+        # reset hn_manager
+        trainer.datamodule.train_dataset.hn_manager = None
+
         predictions = super().__call__(
             trainer,
             pl_module,
@@ -361,7 +365,7 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
         # since we only have one dataloader, we can get the predictions directly
         predictions = list(predictions.values())[0]
         # store the predictions in a dictionary for faster access based on the sample index
-        hard_negatives_list = []
+        hard_negatives_list = {}
         for prediction in tqdm(predictions, desc="Collecting hard negatives"):
             top_k_contexts = prediction["predictions"]
             gold_contexts = prediction["gold"]
@@ -371,13 +375,12 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
                 for context_id in top_k_contexts
                 if context_id not in gold_contexts
             ][: self.max_negatives]
-            hard_negatives_list.append(
-                dict(sample_idx=prediction["sample_idx"], contexts=wrong_contexts)
-            )
+            hard_negatives_list[prediction["sample_idx"]] = wrong_contexts
+
         hn_manager = HardNegativeManager(
-            hard_negatives_list,
             tokenizer=trainer.datamodule.tokenizer,
             max_length=trainer.datamodule.train_dataset.max_context_length,
+            data=hard_negatives_list,
         )
         trainer.datamodule.train_dataset.hn_manager = hn_manager
 

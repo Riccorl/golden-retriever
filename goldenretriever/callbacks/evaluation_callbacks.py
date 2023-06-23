@@ -125,10 +125,8 @@ class LRAPEvaluationCallback(NLPTemplateCallback):
             metrics[f"lrap@{self.k}_{dataloader_idx}"] = lrap
         metrics[f"lrap@{self.k}"] = sum(metrics.values()) / len(metrics)
 
-        if self.prefix is not None:
-            metrics = {f"{self.prefix}_{k}": v for k, v in metrics.items()}
-        else:
-            metrics = {f"{stage.value}_{k}": v for k, v in metrics.items()}
+        prefix = self.prefix or stage.value
+        metrics = {f"{prefix}_{k}": torch.as_tensor(v, dtype=torch.float32) for k, v in metrics.items()}
         pl_module.log_dict(
             metrics, on_step=False, on_epoch=True, prog_bar=self.prog_bar
         )
@@ -193,7 +191,7 @@ class AvgRankingEvaluationCallback(NLPTemplateCallback):
             metrics[f"avg_ranking@{self.k}"] = sum(metrics.values()) / len(metrics)
 
         prefix = self.prefix or stage.value
-        metrics = {f"{prefix}_{k}": v for k, v in metrics.items()}
+        metrics = {f"{prefix}_{k}": torch.as_tensor(v, dtype=torch.float32) for k, v in metrics.items()}
         pl_module.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=False)
 
         if self.verbose:

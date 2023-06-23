@@ -10,6 +10,9 @@ import torch
 from goldenretriever.callbacks.base import NLPTemplateCallback, PredictionCallback
 from goldenretriever.common.log import get_console_logger, get_logger
 
+from pytorch_lightning.trainer.states import RunningStage
+
+
 console_logger = get_console_logger()
 logger = get_logger(__name__, level=logging.INFO)
 
@@ -150,7 +153,9 @@ class SubsampleTrainDatasetCallback(pl.Callback):
     def on_validation_epoch_end(self, trainer: pl.Trainer, *args, **kwargs):
         if self.verbose:
             logger.info(f"Subsampling train dataset at epoch {trainer.current_epoch}")
-            trainer.datamodule.train_dataset.random_subsample(seed=self.seed + trainer.current_epoch + 1)
+            trainer.datamodule.train_dataset.random_subsample(
+                seed=self.seed + trainer.current_epoch + 1
+            )
 
 
 class SaveRetrieverCallback(pl.Callback):
@@ -216,5 +221,28 @@ class SampleNegativesDatasetCallback(pl.Callback):
         if self.verbose:
             f"Sampling negatives for train dataset at epoch {trainer.current_epoch}"
         trainer.datamodule.train_dataset.sample_dataset_negatives(
+            seed=self.seed + trainer.current_epoch
+        )
+
+
+class SubsampleDataCallback(pl.Callback):
+    def __init__(self, seed: int = 42, verbose: bool = True) -> None:
+        super().__init__()
+        self.seed = seed
+        self.verbose = verbose
+
+    def on_validation_epoch_start(self, trainer: pl.Trainer, *args, **kwargs):
+        if self.verbose:
+            f"Subsampling data for train dataset at epoch {trainer.current_epoch}"
+        if trainer.state.stage == RunningStage.SANITY_CHECKING:
+            return
+        trainer.datamodule.train_dataset.subsample_data(
+            seed=self.seed + trainer.current_epoch
+        )
+
+    def on_fit_start(self, trainer: pl.Trainer, *args, **kwargs):
+        if self.verbose:
+            f"Subsampling data for train dataset at epoch {trainer.current_epoch}"
+        trainer.datamodule.train_dataset.subsample_data(
             seed=self.seed + trainer.current_epoch
         )

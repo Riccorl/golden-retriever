@@ -1,62 +1,60 @@
+from collections import defaultdict
+from functools import partial
 import json
 import os
 from pathlib import Path
 import tempfile
+import time
 from typing import Dict, List, Union
 from datasets import Dataset, load_dataset
 import psutil
 import transformers as tr
 
+import concurrent.futures
+
 
 class HardNegativeManager:
     def __init__(
         self,
-        data: Union[Dataset, List[Dict], os.PathLike],
         tokenizer: tr.PreTrainedTokenizer,
+        data: Union[List[Dict], os.PathLike, Dict[int, List]] = None,
         max_length: int = 64,
+        lazy: bool = False,
     ) -> None:
-        self._db: Dataset = None
+        self._db: dict = None
         self.tokenizer = tokenizer
 
-        if isinstance(data, Dataset):
-            self._db = data
-        elif isinstance(data, list):
-            # convert the dictionary to a dataset for easy multiprocessing
-            # dump in a temporary file and load it again into a dataset
-            # this is necessary because the dataset cannot load in-memory data
-            with tempfile.TemporaryDirectory() as tmp_dir:
-                tmp_file = Path(tmp_dir) / "hard_negatives.jsonl"
-                with open(tmp_file, "w") as f:
-                    for sample in data:
-                        f.write(json.dumps(sample) + "\n")
-                # clean hard_negatives_dict
-                data = None
-                # load the dataset from the temporary file
-                self._db = load_dataset(
-                    "json", data_files=[str(tmp_file)], split="train"
-                )
-        elif isinstance(data, os.PathLike):
-            self._db = load_dataset("json", data_files=[str(data)], split="train")
+        if data is None:
+            self._db = {}
         else:
-            raise ValueError(
-                f"Data type {type(data)} not supported, only Dataset, List[Dict] and os.PathLike are supported."
+            if isinstance(data, Dict):
+                self._db = data
+            elif isinstance(data, os.PathLike):
+                with open(data) as f:
+                    self._db = json.load(f)
+            else:
+                raise ValueError(
+                    f"Data type {type(data)} not supported, only Dict and os.PathLike are supported."
+                )
+        # add the tokenizer to the class for future use
+        self.tokenizer = tokenizer
+
+        # invert the db to have a context -> sample_idx mapping
+        self._context_db = defaultdict(set)
+        for sample_idx, contexts in self._db.items():
+            for context in contexts:
+                self._context_db[context].add(sample_idx)
+
+        self._context_hard_negatives = {}
+        if not lazy:
+            # create a dictionary of context -> hard_negative mapping
+            tokenized_contexts = self.tokenizer(
+                list(self._context_db.keys()), max_length=max_length, truncation=True
             )
-
-        # map the hard negatives
-        self._db = self._db.map(
-            self._map,
-            fn_kwargs=dict(
-                tokenizer=tokenizer,
-                max_length=max_length,
-            ),
-            num_proc=psutil.cpu_count(),
-            desc="Tokenizing hard negatives",
-        )
-
-        self._db_ids = set(self._db["sample_idx"])
-
-        # for easy indexing
-        self._db = self._db.to_dict()
+            for i, context in enumerate(self._context_db):
+                self._context_hard_negatives[context] = {
+                    k: tokenized_contexts[k][i] for k in tokenized_contexts.keys()
+                }
 
     def __len__(self) -> int:
         return len(self._db)
@@ -69,20 +67,22 @@ class HardNegativeManager:
             yield sample
 
     def __contains__(self, idx: int) -> bool:
-        return idx in self._db_ids
+        return idx in self._db
 
-    def get_hard_negatives(self, idx: int) -> List[Dict]:
-        if idx not in self:
-            raise ValueError(f"Index {idx} not found in the db.")
-        
-        return self._db["hard_negatives"][idx]
+    def get(self, idx: int) -> List[str]:
+        """Get the hard negatives for a given sample index."""
+        if idx not in self._db:
+            raise ValueError(f"Sample index {idx} not in the database.")
 
-    @staticmethod
-    def _map(sample, tokenizer: tr.PreTrainedTokenizer, max_length: int):
-        contexts = sample["contexts"]
-        context_ids = tokenizer(contexts, max_length=max_length, truncation=True)
-        sample["hard_negatives"] = [
-            {k: v[index] for k, v in context_ids.items()}
-            for index in range(len(contexts))
-        ]
-        return sample
+        contexts = self._db[idx]
+
+        output = []
+        for context in contexts:
+            if context not in self._context_hard_negatives:
+                self._context_hard_negatives[context] = self._tokenize(context)
+            output.append(self._context_hard_negatives[context])
+
+        return output
+
+    def _tokenize(self, context: str) -> Dict:
+        return self.tokenizer(context, max_length=self.max_length, truncation=True)
