@@ -348,8 +348,7 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
             f"{self.threshold}. Computing hard negatives."
         )
 
-        trainer.datamodule.train_dataset.current_iteration += 1
-        # reset hn_manager
+        # reset hn_manager to avoid memory leaks
         trainer.datamodule.train_dataset.hn_manager = None
 
         predictions = super().__call__(
@@ -387,3 +386,25 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
         # normalize predictions as in the original GoldenRetrieverPredictionCallback
         predictions = {0: predictions}
         return predictions
+
+    def on_train_epoch_start(
+        self, trainer: pl.Trainer, pl_module: pl.LightningModule
+    ) -> None:
+        predictions = self(trainer, pl_module)
+        for callback in self.other_callbacks:
+            callback(
+                trainer=trainer,
+                pl_module=pl_module,
+                callback=self,
+                predictions=predictions,
+            )
+
+    def on_validation_epoch_end(
+        self, trainer: pl.Trainer, pl_module: pl.LightningModule
+    ) -> None:
+        """Called when the val epoch begins."""
+
+    def on_test_epoch_end(
+        self, trainer: pl.Trainer, pl_module: pl.LightningModule
+    ) -> None:
+        """Called when the val epoch begins."""
