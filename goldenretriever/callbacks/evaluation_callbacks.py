@@ -4,7 +4,7 @@ from typing import Dict, List, Optional
 import pytorch_lightning as pl
 import torch
 from sklearn.metrics import label_ranking_average_precision_score
-
+from pytorch_lightning.trainer.states import RunningStage
 from goldenretriever.callbacks.base import DEFAULT_STAGES, NLPTemplateCallback
 from goldenretriever.common.log import get_console_logger, get_logger
 
@@ -126,7 +126,10 @@ class LRAPEvaluationCallback(NLPTemplateCallback):
         metrics[f"lrap@{self.k}"] = sum(metrics.values()) / len(metrics)
 
         prefix = self.prefix or stage.value
-        metrics = {f"{prefix}_{k}": torch.as_tensor(v, dtype=torch.float32) for k, v in metrics.items()}
+        metrics = {
+            f"{prefix}_{k}": torch.as_tensor(v, dtype=torch.float32)
+            for k, v in metrics.items()
+        }
         pl_module.log_dict(
             metrics, on_step=False, on_epoch=True, prog_bar=self.prog_bar
         )
@@ -144,6 +147,7 @@ class AvgRankingEvaluationCallback(NLPTemplateCallback):
         self,
         k: int,
         prefix: Optional[str] = None,
+        stages: Optional[List[str]] = None,
         verbose: bool = True,
         *args,
         **kwargs,
@@ -152,6 +156,9 @@ class AvgRankingEvaluationCallback(NLPTemplateCallback):
         self.k = k
         self.prefix = prefix
         self.verbose = verbose
+        self.stages = (
+            [RunningStage(stage) for stage in stages] if stages else DEFAULT_STAGES
+        )
 
     @torch.no_grad()
     def __call__(
@@ -162,6 +169,10 @@ class AvgRankingEvaluationCallback(NLPTemplateCallback):
         *args,
         **kwargs,
     ) -> dict:
+        if not predictions:
+            logger.warning("No predictions to compute the AVG Ranking metrics.")
+            return {}
+
         if self.verbose:
             logger.info(f"Computing AVG Ranking@{self.k}")
 
@@ -169,9 +180,9 @@ class AvgRankingEvaluationCallback(NLPTemplateCallback):
         metrics = {}
 
         stage = trainer.state.stage
-        if stage not in DEFAULT_STAGES:
+        if stage not in self.stages:
             raise ValueError(
-                f"Stage {stage} not supported, only `validate` and `test` are supported."
+                f"Stage `{stage}` not supported, only `validate` and `test` are supported."
             )
 
         for dataloader_idx, samples in predictions.items():
@@ -191,7 +202,10 @@ class AvgRankingEvaluationCallback(NLPTemplateCallback):
             metrics[f"avg_ranking@{self.k}"] = sum(metrics.values()) / len(metrics)
 
         prefix = self.prefix or stage.value
-        metrics = {f"{prefix}_{k}": torch.as_tensor(v, dtype=torch.float32) for k, v in metrics.items()}
+        metrics = {
+            f"{prefix}_{k}": torch.as_tensor(v, dtype=torch.float32)
+            for k, v in metrics.items()
+        }
         pl_module.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=False)
 
         if self.verbose:

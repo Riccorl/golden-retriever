@@ -171,9 +171,6 @@ class DPRIterableDataset(GenerativeDataset, DPRMixin):
 
         for sample in data:
             if len(contexts_in_batch) >= self.max_contexts_per_batch:
-                print("batch size", len(batch))
-                print("questions in batch", len([s["question"] for s in batch]))
-                print("contexts in batch", len(contexts_in_batch))
                 yield batch
                 # reset batch
                 batch = []

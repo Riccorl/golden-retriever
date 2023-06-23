@@ -73,7 +73,6 @@ class SavePredictionsCallback(NLPTemplateCallback):
                 for prediction in dataloader_predictions:
                     for k, v in prediction.items():
                         if isinstance(v, set):
-                            # print(f"Warning: converting set to list for key `{k}`")
                             prediction[k] = list(v)
                     f.write(json.dumps(prediction) + "\n")
 

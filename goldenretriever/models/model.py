@@ -309,6 +309,7 @@ class GoldenRetriever(torch.nn.Module):
             )
 
         if question_encodings is None:
+            # print(questions)
             question_encodings = self.question_encoder(**questions)
         if contexts_encodings is None:
             contexts_encodings = self.context_encoder(**contexts)

@@ -71,7 +71,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         logger.info(f"Computing predictions for stage {stage.value}")
         if stage not in self.stages:
             raise ValueError(
-                f"Stage {stage} not supported, only {self.stages} are supported"
+                f"Stage `{stage}` not supported, only {self.stages} are supported"
             )
 
         # get the tokenizer
@@ -167,7 +167,8 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                 dataloader,
                 desc=f"Computing predictions for dataset {current_dataset.name}",
             ):
-                batch = batch.to(pl_module.device)
+                # batch = batch
+                batch = ModelInputs(**batch).to(pl_module.device)
                 # get the top-k indices
                 retriever_output = retriever.retrieve(
                     **batch.questions, k=self.k, precision=self.precision
@@ -175,7 +176,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                 # compute recall at k
                 for batch_idx, retrieved_samples in enumerate(retriever_output):
                     # get the positive contexts
-                    gold_contexts = batch.positives[batch_idx]
+                    gold_contexts = batch["positives"][batch_idx]
                     # get the index of the gold contexts in the retrieved contexts
                     gold_context_indices = [
                         retriever.get_index_from_context(context)
@@ -190,7 +191,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                     wrong_indices = set(retrieved_indices) - set(gold_context_indices)
                     # add the predictions to the list
                     prediction_output = dict(
-                        sample_idx=batch.sample_idx[batch_idx],
+                        sample_idx=batch.sample_idx[batch_idx].item(),
                         gold=gold_contexts,
                         predictions=retrieved_contexts,
                         scores=retrieved_scores,
@@ -201,8 +202,6 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                             retriever.get_context_from_index(i) for i in wrong_indices
                         ],
                     )
-                    # if "id" in batch:
-                    #     prediction_output["id"] = batch.id[batch_idx]
                     predictions.append(prediction_output)
             end = time.time()
             logger.info(f"Time to retrieve: {str(end - start)}")
@@ -227,7 +226,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                 contexts.update(
                     [
                         " ".join(map(str, [c for c in context_ids.tolist() if c != 0]))
-                        for context_ids in batch.contexts.input_ids
+                        for context_ids in batch["contexts"]["input_ids"]
                     ]
                 )
             for d in trainer.val_dataloaders:
@@ -237,7 +236,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                             " ".join(
                                 map(str, [c for c in context_ids.tolist() if c != 0])
                             )
-                            for context_ids in batch.contexts.input_ids
+                            for context_ids in batch["contexts"]["input_ids"]
                         ]
                     )
             for d in trainer.test_dataloaders:
@@ -247,7 +246,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                             " ".join(
                                 map(str, [c for c in context_ids.tolist() if c != 0])
                             )
-                            for context_ids in batch.contexts.input_ids
+                            for context_ids in batch["contexts"]["input_ids"]
                         ]
                     )
             contexts = list(contexts)
@@ -305,13 +304,17 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
         *args,
         **kwargs,
     ) -> dict:
+        
+        if trainer.current_epoch == 0:
+            return {}
+
         stage = trainer.state.stage
         if stage not in self.stages:
             return {}
 
         if self.metrics_to_monitor not in trainer.logged_metrics:
             raise ValueError(
-                f"Metric {self.metric_to_monitor} not found in trainer.logged_metrics"
+                f"Metric `{self.metrics_to_monitor}` not found in trainer.logged_metrics"
                 f"Available metrics: {trainer.logged_metrics.keys()}"
             )
         if trainer.logged_metrics[self.metrics_to_monitor] < self.threshold:
