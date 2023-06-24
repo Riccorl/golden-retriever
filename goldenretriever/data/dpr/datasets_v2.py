@@ -120,6 +120,7 @@ class InBatchNegativesDataset(Dataset):
 
         # initialize the Hard Negatives manager
         self.hard_negatives_manager: Optional[HardNegativeManager] = None
+        # self.hard_negatives_manager: Optional[Dict] = None
 
         # check if subsample strategy is valid
         if subsample_strategy is not None:
@@ -227,6 +228,7 @@ class InBatchNegativesDataset(Dataset):
             logger.info("Shuffling the data")
             self.shuffle_data(seed=42 + self.number_of_complete_iterations)
 
+        logger.info("Creating batches")
         batched_data = self.create_batches(
             data,
             batch_fn=self.batch_fn,
@@ -236,6 +238,7 @@ class InBatchNegativesDataset(Dataset):
             hard_negatives_manager=self.hard_negatives_manager,
         )
 
+        logger.info("Collating batches")
         batched_data = self.collate_batches(batched_data, self.collate_fn)
 
         # increment the number of complete iterations
@@ -314,9 +317,20 @@ class InBatchNegativesDataset(Dataset):
         if max_hard_negatives != -1:
             hard_negative_ctxs = hard_negative_ctxs[:max_hard_negatives]
 
-        question = tokenizer(
-            sample["question"], max_length=max_question_length, truncation=True
-        )
+        # question = tokenizer(
+        #     sample["question"], max_length=max_question_length, truncation=True
+        # )
+        if "doc_topic" in sample:
+            question = tokenizer(
+                sample["question"],
+                sample["doc_topic"],
+                max_length=max_question_length,
+                truncation=True,
+            )
+        else:
+            question = tokenizer(
+                sample["question"], max_length=max_question_length, truncation=True
+            )
         positive_ctxs = [
             tokenizer(p, max_length=max_context_length, truncation=True)
             for p in positive_ctxs
@@ -427,6 +441,16 @@ class InBatchNegativesDataset(Dataset):
                             for s in sample[context_type]
                         }.values()
                     )
+                # now add the hard negatives
+                if hard_negatives_manager is not None:
+                    contexts += list(
+                        {
+                            tuple(s["input_ids"]): s
+                            for sample in batch
+                            # if sample["sample_idx"] in hard_negatives_manager
+                            for s in hard_negatives_manager.get(sample["sample_idx"])
+                        }.values()
+                    )
                 # create the batch dict
                 batch_dict = dict(
                     sample_idx=[s["sample_idx"] for s in batch],
@@ -466,7 +490,7 @@ class InBatchNegativesDataset(Dataset):
                     contexts_in_batch |= set(
                         tuple(s["input_ids"])
                         for sample in batch
-                        if sample["sample_idx"] in hard_negatives_manager
+                        # if sample["sample_idx"] in hard_negatives_manager
                         for s in hard_negatives_manager.get(sample["sample_idx"])
                     )
         if len(batch) > 0:
@@ -478,6 +502,16 @@ class InBatchNegativesDataset(Dataset):
                         for sample in batch
                         if context_type in sample
                         for s in sample[context_type]
+                    }.values()
+                )
+            # now add the hard negatives
+            if hard_negatives_manager is not None:
+                contexts += list(
+                    {
+                        tuple(s["input_ids"]): s
+                        for sample in batch
+                        # if sample["sample_idx"] in hard_negatives_manager
+                        for s in hard_negatives_manager.get(sample["sample_idx"])
                     }.values()
                 )
             # create the batch dict
@@ -683,6 +717,7 @@ class InBatchNegativesDataset(Dataset):
     @property
     def contexts(self):
         return list(self.context_manager.get_labels().keys())
+
 
 class AidaInBatchNegativesDataset(InBatchNegativesDataset):
     pass

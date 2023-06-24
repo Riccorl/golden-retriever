@@ -97,7 +97,7 @@ train:
       move_index_to_cpu: False
       precision: 16
       index_precision: 16
-      stages: [train] #[validate, sanity_check]
+      stages: [validate] #[validate, sanity_check]
       metrics_to_monitor:
         validate_recall@${train.top_k}
         # - sanity_check_recall@${train.top_k}
@@ -109,7 +109,7 @@ train:
           k: ${train.top_k}
           verbose: True
           prefix: "train"
-          stages: ["train"]
+          # stages: ["validate"]
 
     utils_callbacks:
       - _target_: goldenretriever.callbacks.utils_callbacks.SaveRetrieverCallback

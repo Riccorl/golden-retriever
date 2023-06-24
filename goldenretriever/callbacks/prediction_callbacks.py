@@ -1,3 +1,4 @@
+from copy import deepcopy
 import json
 import logging
 import tempfile
@@ -304,9 +305,6 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
         *args,
         **kwargs,
     ) -> dict:
-        
-        if trainer.current_epoch == 0:
-            return {}
 
         stage = trainer.state.stage
         if stage not in self.stages:
@@ -351,14 +349,22 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
             f"{self.threshold}. Computing hard negatives."
         )
 
-        # reset hn_manager to avoid memory leaks
-        trainer.datamodule.train_dataset.hn_manager = None
-
+        # reset hard_negatives_manager to avoid memory leaks
+        trainer.datamodule.train_dataset.hard_negatives_manager = None
+        # make a copy of the dataset to avoid modifying the original one
+        dataset_copy = deepcopy(trainer.datamodule.train_dataset)
         predictions = super().__call__(
             trainer,
             pl_module,
-            datasets=trainer.datamodule.train_dataset,
-            dataloaders=trainer.datamodule.train_dataloader(),
+            datasets=dataset_copy,
+            dataloaders=DataLoader(
+                dataset_copy.to_torch_dataset(),
+                shuffle=False,
+                batch_size=None,
+                num_workers=self.num_workers,
+                pin_memory=True,
+                collate_fn=lambda x: x,
+            ),
             *args,
             **kwargs,
         )
@@ -384,30 +390,8 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
             max_length=trainer.datamodule.train_dataset.max_context_length,
             data=hard_negatives_list,
         )
-        trainer.datamodule.train_dataset.hn_manager = hn_manager
+        trainer.datamodule.train_dataset.hard_negatives_manager = hn_manager
 
         # normalize predictions as in the original GoldenRetrieverPredictionCallback
         predictions = {0: predictions}
         return predictions
-
-    def on_train_epoch_start(
-        self, trainer: pl.Trainer, pl_module: pl.LightningModule
-    ) -> None:
-        predictions = self(trainer, pl_module)
-        for callback in self.other_callbacks:
-            callback(
-                trainer=trainer,
-                pl_module=pl_module,
-                callback=self,
-                predictions=predictions,
-            )
-
-    def on_validation_epoch_end(
-        self, trainer: pl.Trainer, pl_module: pl.LightningModule
-    ) -> None:
-        """Called when the val epoch begins."""
-
-    def on_test_epoch_end(
-        self, trainer: pl.Trainer, pl_module: pl.LightningModule
-    ) -> None:
-        """Called when the val epoch begins."""
