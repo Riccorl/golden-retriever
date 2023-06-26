@@ -5,8 +5,6 @@ bash scripts/train.sh \
     -l intfloat/e5-small-v2 \
     --print \
     --wandb golden-retriever-aida \
-    -o \
-    "model_name=debug-e5-small-aida-inbatch" \
     "model_name=e5-small-aida-inbatch-topics" \
     "data.shared_params.use_topics=True" \
     "data.shared_params.context_batch_size=400" \

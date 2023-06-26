@@ -99,24 +99,8 @@ class InBatchNegativesDataset(Dataset):
             ),
         }
 
-        # create a manager for the contexts
-        self.context_manager = ContextManager(self.tokenizer)
-        # read contexts from file if provided
-        if contexts_path:
-            logger.info(f"Reading contexts from {contexts_path}")
-            with open(self.project_folder / contexts_path, "r") as f:
-                self.context_manager.add_contexts(
-                    [line.strip() for line in f.readlines()]
-                )
-
-        # context_batch_size cannot be greater than the number of contexts
-        if self.context_batch_size > len(self.context_manager):
-            logger.info(
-                f"Your context_batch_size ({context_batch_size}) "
-                f"is greater than the number of contexts ({len(self.context_manager)}). "
-                f"Setting context_batch_size to {len(self.context_manager)}."
-            )
-            self.context_batch_size = len(self.context_manager)
+        # initialize the Hard Negatives manager
+        self.hard_negatives_manager: Optional[HardNegativeManager] = None
 
         # check if subsample strategy is valid
         if subsample_strategy is not None:
@@ -698,6 +682,7 @@ class InBatchNegativesDataset(Dataset):
     @property
     def contexts(self):
         return list(self.context_manager.get_contexts().keys())
+
 
 
 class AidaInBatchNegativesDataset(InBatchNegativesDataset):

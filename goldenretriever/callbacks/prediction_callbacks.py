@@ -348,22 +348,14 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
             f"{self.threshold}. Computing hard negatives."
         )
 
-        # reset hard_negatives_manager to avoid memory leaks
-        trainer.datamodule.train_dataset.hard_negatives_manager = None
-        # make a copy of the dataset to avoid modifying the original one
-        dataset_copy = deepcopy(trainer.datamodule.train_dataset)
+        # reset hn_manager to avoid memory leaks
+        trainer.datamodule.train_dataset.hn_manager = None
+
         predictions = super().__call__(
             trainer,
             pl_module,
-            datasets=dataset_copy,
-            dataloaders=DataLoader(
-                dataset_copy.to_torch_dataset(),
-                shuffle=False,
-                batch_size=None,
-                num_workers=self.num_workers,
-                pin_memory=True,
-                collate_fn=lambda x: x,
-            ),
+            datasets=trainer.datamodule.train_dataset,
+            dataloaders=trainer.datamodule.train_dataloader(),
             *args,
             **kwargs,
         )
