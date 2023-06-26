@@ -110,8 +110,6 @@ train:
           k: ${train.top_k}
           verbose: True
           prefix: "train"
-          # stages: ["train"]
-          # stages: ["validate"]
 
     utils_callbacks:
       - _target_: goldenretriever.callbacks.utils_callbacks.SaveRetrieverCallback

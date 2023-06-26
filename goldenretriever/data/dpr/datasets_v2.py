@@ -1,25 +1,20 @@
-from enum import Enum
-import json
 import os
 from copy import deepcopy
+from enum import Enum
 from functools import partial
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
-import numpy as np
+import datasets
 import psutil
 import torch
 import transformers as tr
-import datasets
 from datasets import IterableDataset, load_dataset
-from numpy.random import choice
-from torch.utils.data import Dataset, IterableDataset
-from torch.utils.data.dataset import T_co
-from tqdm import tqdm
+from torch.utils.data import Dataset
 
 from goldenretriever.common.log import get_console_logger, get_logger
 from goldenretriever.common.model_inputs import ModelInputs
-from goldenretriever.data.labels import Labels, ContextManager
+from goldenretriever.data.labels import ContextManager
 
 console_logger = get_console_logger()
 
@@ -98,6 +93,25 @@ class InBatchNegativesDataset(Dataset):
                 value=self.tokenizer.pad_token_type_id,
             ),
         }
+
+        # create a manager for the contexts
+        self.context_manager = ContextManager(self.tokenizer)
+        # read contexts from file if provided
+        if contexts_path:
+            logger.info(f"Reading contexts from {contexts_path}")
+            with open(self.project_folder / contexts_path, "r") as f:
+                self.context_manager.add_contexts(
+                    [line.strip() for line in f.readlines()]
+                )
+
+        # context_batch_size cannot be greater than the number of contexts
+        if self.context_batch_size > len(self.context_manager):
+            logger.info(
+                f"Your context_batch_size ({context_batch_size}) "
+                f"is greater than the number of contexts ({len(self.context_manager)}). "
+                f"Setting context_batch_size to {len(self.context_manager)}."
+            )
+            self.context_batch_size = len(self.context_manager)
 
         # check if subsample strategy is valid
         if subsample_strategy is not None:
@@ -679,7 +693,6 @@ class InBatchNegativesDataset(Dataset):
     @property
     def contexts(self):
         return list(self.context_manager.get_contexts().keys())
-
 
 
 class AidaInBatchNegativesDataset(InBatchNegativesDataset):

@@ -1,15 +1,11 @@
 from copy import deepcopy
-import json
 import logging
-import tempfile
 import time
 from pathlib import Path
 from typing import List, Optional, Set, Union
 
-import psutil
 import pytorch_lightning as pl
 import torch
-from datasets import load_dataset
 from omegaconf import DictConfig
 from pytorch_lightning.trainer.states import RunningStage
 from torch.utils.data import DataLoader
@@ -20,7 +16,6 @@ from goldenretriever.callbacks.base import PredictionCallback
 from goldenretriever.common.log import get_console_logger, get_logger
 from goldenretriever.common.model_inputs import ModelInputs
 from goldenretriever.data.datasets import BaseDataset
-from goldenretriever.data.dpr.hard_negatives_manager import HardNegativeManager
 from goldenretriever.models.model import GoldenRetriever
 
 console_logger = get_console_logger()
@@ -348,14 +343,20 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
             f"{self.threshold}. Computing hard negatives."
         )
 
-        # reset hn_manager to avoid memory leaks
-        trainer.datamodule.train_dataset.hn_manager = None
-
+        # make a copy of the dataset to avoid modifying the original one
+        dataset_copy = deepcopy(trainer.datamodule.train_dataset)
         predictions = super().__call__(
             trainer,
             pl_module,
-            datasets=trainer.datamodule.train_dataset,
-            dataloaders=trainer.datamodule.train_dataloader(),
+            datasets=dataset_copy,
+            dataloaders=DataLoader(
+                dataset_copy.to_torch_dataset(),
+                shuffle=False,
+                batch_size=None,
+                num_workers=self.num_workers,
+                pin_memory=True,
+                collate_fn=lambda x: x,
+            ),
             *args,
             **kwargs,
         )
