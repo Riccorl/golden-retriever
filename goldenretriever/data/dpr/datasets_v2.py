@@ -4,12 +4,13 @@ import os
 from copy import deepcopy
 from functools import partial
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import psutil
 import torch
 import transformers as tr
+import datasets
 from datasets import IterableDataset, load_dataset
 from numpy.random import choice
 from torch.utils.data import Dataset, IterableDataset
@@ -18,9 +19,7 @@ from tqdm import tqdm
 
 from goldenretriever.common.log import get_console_logger, get_logger
 from goldenretriever.common.model_inputs import ModelInputs
-from goldenretriever.data.dpr.hard_negatives_manager import HardNegativeManager
-from goldenretriever.data.dpr.negatives import InBatchNegativesStrategy
-from goldenretriever.data.labels import Labels
+from goldenretriever.data.labels import Labels, ContextManager
 
 console_logger = get_console_logger()
 
@@ -81,25 +80,7 @@ class InBatchNegativesDataset(Dataset):
         self.max_context_length = max_context_length
         self.shuffle = shuffle
         self.datasets_batch_size = datasets_batch_size
-
-        # create a manager for the contexts
-        self.context_manager = Labels()
-        # read contexts from file if provided
-        if contexts_path:
-            logger.info(f"Reading contexts from {contexts_path}")
-            with open(self.project_folder / contexts_path, "r") as f:
-                self.context_manager.add_labels(
-                    [line.strip() for line in f.readlines()]
-                )
-
-        # context_batch_size cannot be greater than the number of contexts
-        if self.context_batch_size > self.context_manager.get_label_size():
-            logger.info(
-                f"Your context_batch_size ({context_batch_size}) "
-                f"is greater than the number of contexts ({self.context_manager.get_label_size()}). "
-                f"Setting context_batch_size to {self.context_manager.get_label_size()}."
-            )
-            self.context_batch_size = self.context_manager.get_label_size()
+        self.num_proc = num_proc
 
         self.tokenizer = tokenizer
         if isinstance(self.tokenizer, str):
@@ -118,8 +99,24 @@ class InBatchNegativesDataset(Dataset):
             ),
         }
 
-        # initialize the Hard Negatives manager
-        self.hard_negatives_manager: Optional[HardNegativeManager] = None
+        # create a manager for the contexts
+        self.context_manager = ContextManager(self.tokenizer)
+        # read contexts from file if provided
+        if contexts_path:
+            logger.info(f"Reading contexts from {contexts_path}")
+            with open(self.project_folder / contexts_path, "r") as f:
+                self.context_manager.add_contexts(
+                    [line.strip() for line in f.readlines()]
+                )
+
+        # context_batch_size cannot be greater than the number of contexts
+        if self.context_batch_size > len(self.context_manager):
+            logger.info(
+                f"Your context_batch_size ({context_batch_size}) "
+                f"is greater than the number of contexts ({len(self.context_manager)}). "
+                f"Setting context_batch_size to {len(self.context_manager)}."
+            )
+            self.context_batch_size = len(self.context_manager)
 
         # check if subsample strategy is valid
         if subsample_strategy is not None:
@@ -227,15 +224,18 @@ class InBatchNegativesDataset(Dataset):
             logger.info("Shuffling the data")
             self.shuffle_data(seed=42 + self.number_of_complete_iterations)
 
+        logger.info("Creating batches")
         batched_data = self.create_batches(
             data,
             batch_fn=self.batch_fn,
+            tokenizer=self.tokenizer,
             datasets_batch_size=self.datasets_batch_size,
             context_batch_size=self.context_batch_size,
             question_batch_size=self.question_batch_size,
-            hard_negatives_manager=self.hard_negatives_manager,
+            max_context_length=self.max_context_length,
         )
 
+        logger.info("Collating batches")
         batched_data = self.collate_batches(batched_data, self.collate_fn)
 
         # increment the number of complete iterations
@@ -247,10 +247,11 @@ class InBatchNegativesDataset(Dataset):
     def create_batches(
         data: Dataset,
         batch_fn: Callable,
+        tokenizer: tr.PreTrainedTokenizer,
         datasets_batch_size: int,
         context_batch_size: int,
         question_batch_size: int,
-        hard_negatives_manager: Optional[HardNegativeManager] = None,
+        max_context_length: int,
         num_proc: Optional[int] = None,
     ) -> Dataset:
         if num_proc is None:
@@ -259,9 +260,10 @@ class InBatchNegativesDataset(Dataset):
         batched_data = data.map(
             batch_fn,
             fn_kwargs=dict(
-                hard_negatives_manager=hard_negatives_manager,
+                tokenizer=tokenizer,
                 context_batch_size=context_batch_size,
                 question_batch_size=question_batch_size,
+                max_context_length=max_context_length,
             ),
             batched=True,
             batch_size=datasets_batch_size,
@@ -291,7 +293,7 @@ class InBatchNegativesDataset(Dataset):
         return collated_data
 
     @staticmethod
-    def _map_tokenize_sample(
+    def load_fn(
         sample: Dict,
         tokenizer: tr.PreTrainedTokenizer,
         max_positives: int,
@@ -302,54 +304,63 @@ class InBatchNegativesDataset(Dataset):
         max_context_length: int = 128,
     ) -> Dict:
         # remove duplicates and limit the number of contexts
-        positive_ctxs = list(set([p["text"].strip() for p in sample["positive_ctxs"]]))
+        positives = list(set([p["text"].strip() for p in sample["positive_ctxs"]]))
         if max_positives != -1:
-            positive_ctxs = positive_ctxs[:max_positives]
-        negative_ctxs = list(set([n["text"].strip() for n in sample["negative_ctxs"]]))
+            positives = positives[:max_positives]
+        negatives = list(set([n["text"].strip() for n in sample["negative_ctxs"]]))
         if max_negatives != -1:
-            negative_ctxs = negative_ctxs[:max_negatives]
-        hard_negative_ctxs = list(
+            negatives = negatives[:max_negatives]
+        hard_negatives = list(
             set([h["text"].strip() for h in sample["hard_negative_ctxs"]])
         )
         if max_hard_negatives != -1:
-            hard_negative_ctxs = hard_negative_ctxs[:max_hard_negatives]
+            hard_negatives = hard_negatives[:max_hard_negatives]
 
         question = tokenizer(
             sample["question"], max_length=max_question_length, truncation=True
         )
-        positive_ctxs = [
-            tokenizer(p, max_length=max_context_length, truncation=True)
-            for p in positive_ctxs
-        ]
-        negative_ctxs = [
-            tokenizer(n, max_length=max_context_length, truncation=True)
-            for n in negative_ctxs
-        ]
-        hard_negative_ctxs = [
-            tokenizer(h, max_length=max_context_length, truncation=True)
-            for h in hard_negative_ctxs
-        ]
+        # if "doc_topic" in sample:
+        #     question = tokenizer(
+        #         sample["question"],
+        #         sample["doc_topic"],
+        #         max_length=max_question_length,
+        #         truncation=True,
+        #     )
+        # else:
+        #     question = tokenizer(
+        #         sample["question"], max_length=max_question_length, truncation=True
+        #     )
 
-        context = positive_ctxs + negative_ctxs + hard_negative_ctxs
+        context = positives + negatives + hard_negatives
         if max_contexts != -1:
             context = context[:max_contexts]
+
+        context = tokenizer(
+            context,
+            max_length=max_context_length,
+            truncation=True,
+            padding="max_length",
+        )
+
+        # invert the context data structure from a dict of lists to a list of dicts
+        context = [dict(zip(context, t)) for t in zip(*context.values())]
+
         output = dict(
             question=question,
             context=context,
-            positives=set([p["text"].strip() for p in sample["positive_ctxs"]]),
-            positive_ctxs=positive_ctxs,
-            negative_ctxs=negative_ctxs,
-            hard_negative_ctxs=hard_negative_ctxs,
-            positive_index_end=len(positive_ctxs),
+            positives=positives,
+            positive_ctxs=context[: len(positives)],
+            retrieved_hard_negative_ctxs=None,
         )
         return output
 
     @staticmethod
     def batch_fn(
         batched_samples,
-        hard_negatives_manager: HardNegativeManager,
-        context_batch_size,
-        question_batch_size,
+        tokenizer: tr.PreTrainedTokenizer,
+        context_batch_size: int,
+        question_batch_size: int,
+        max_context_length: int = 128,
     ) -> Dict[str, List[Dict[str, Any]]]:
         def split_batch(
             batch: Union[Dict[str, Any], ModelInputs], question_batch_size: int
@@ -358,84 +369,67 @@ class InBatchNegativesDataset(Dataset):
             Split a batch into multiple batches of size `question_batch_size` while keeping
             the same number of contexts.
             """
-            # reset the sample_idx
-            sample_idx = batch["sample_idx"]
-            sample_idx = [
-                sample_idx[i : i + question_batch_size]
-                for i in range(0, len(sample_idx), question_batch_size)
+
+            split_fn = lambda x: [
+                x[i : i + question_batch_size]
+                for i in range(0, len(x), question_batch_size)
             ]
+            # split the sample_idx
+            sample_idx = split_fn(batch["sample_idx"])
             # split the questions
-            questions = batch["questions"]
-            questions = [
-                questions[i : i + question_batch_size]
-                for i in range(0, len(questions), question_batch_size)
-            ]
-            # chunk the positives
-            positives = batch["positives"]
-            positives = [
-                positives[i : i + question_batch_size]
-                for i in range(0, len(positives), question_batch_size)
-            ]
-            # chunk the positives_ctxs
-            positives_ctxs = batch["positives_ctxs"]
-            positives_ctxs = [
-                positives_ctxs[i : i + question_batch_size]
-                for i in range(0, len(positives_ctxs), question_batch_size)
-            ]
-            # create the new batches
+            questions = split_fn(batch["questions"])
+            # split the positives
+            positives = split_fn(batch["positives"])
+            # split the positives_ctxs
+            positives_ctxs = split_fn(batch["positives_ctxs"])
+
+            # collect the new batches
             new_batches = []
-            for q, s, p, pc in zip(questions, sample_idx, positives, positives_ctxs):
-                new_batch = {
-                    "sample_idx": s,
-                    "questions": q,
-                    "contexts": batch["contexts"],
-                    "positives": p,
-                    "positives_ctxs": pc,
-                }
-                new_batches.append(new_batch)
+            for i in range(len(questions)):
+                new_batches.append(
+                    dict(
+                        sample_idx=sample_idx[i],
+                        questions=questions[i],
+                        contexts=batch["contexts"],
+                        positives=positives[i],
+                        positives_ctxs=positives_ctxs[i],
+                    )
+                )
             return new_batches
 
         batch = []
-        contexts_in_batch = set()
+        contexts_in_batch = {}
         output_batches = {"batches": []}
 
         context_types = {
+            "context",
             "positive_ctxs",
-            "negative_ctxs",
-            "sampled_negative_ctxs",
-            "hard_negative_ctxs",
-            "retrieved_hard_negatives",
-            "sampled_hard_negatives",
+            "retrieved_hard_negative_ctxs",
         }
 
         for sample_index in range(len(batched_samples["question"])):
             sample = {
                 k: batched_samples[k][sample_index] for k in batched_samples.keys()
             }
+            # tokenize the retrieved hard negatives
+            if (
+                "retrieved_hard_negative_ctxs" in sample
+                and sample["retrieved_hard_negative_ctxs"] is not None
+            ):
+                sample["retrieved_hard_negative_ctxs"] = [
+                    dict(tokenizer(rhn, max_length=max_context_length, truncation=True))
+                    for rhn in sample["retrieved_hard_negative_ctxs"]
+                ]
+
             if len(contexts_in_batch) >= context_batch_size:
-                # collect all the contexts in the batch
-                # use input_ids as a unique identifier for the context
-                # the dictionary goes from input_ids to {input_ids, attention_mask, token_type_ids}
-                # we then take the values to get a list of {input_ids, attention_mask, token_type_ids}
-                contexts = []
-                for context_type in context_types:
-                    contexts += list(
-                        {
-                            tuple(s["input_ids"]): s
-                            for sample in batch
-                            if context_type in sample
-                            for s in sample[context_type]
-                        }.values()
-                    )
                 # create the batch dict
                 batch_dict = dict(
                     sample_idx=[s["sample_idx"] for s in batch],
                     questions=[s["question"] for s in batch],
-                    contexts=contexts,
+                    contexts=contexts_in_batch.values(),
                     positives_ctxs=[s["positive_ctxs"] for s in batch],
                     positives=[s["positives"] for s in batch],
                 )
-
                 # split the batch if needed
                 if len(batch) > question_batch_size:
                     output_batches["batches"].extend(
@@ -446,7 +440,7 @@ class InBatchNegativesDataset(Dataset):
 
                 # reset batch
                 batch = []
-                contexts_in_batch = set()
+                contexts_in_batch = {}
 
             batch.append(sample)
             for context_type in context_types:
@@ -455,36 +449,20 @@ class InBatchNegativesDataset(Dataset):
                 # we use a set to avoid counting the same context twice
                 # we use a tuple because set doesn't support lists
                 # we use input_ids as discriminator
-                contexts_in_batch |= set(
-                    tuple(s["input_ids"])
-                    for sample in batch
-                    if context_type in sample
-                    for s in sample[context_type]
-                )
-                # also add the contexts from the hard negatives dict
-                if hard_negatives_manager is not None:
-                    contexts_in_batch |= set(
-                        tuple(s["input_ids"])
-                        for sample in batch
-                        if sample["sample_idx"] in hard_negatives_manager
-                        for s in hard_negatives_manager.get(sample["sample_idx"])
-                    )
-        if len(batch) > 0:
-            contexts = []
-            for context_type in context_types:
-                contexts += list(
+                contexts_in_batch.update(
                     {
                         tuple(s["input_ids"]): s
                         for sample in batch
-                        if context_type in sample
+                        if context_type in sample and sample[context_type]
                         for s in sample[context_type]
-                    }.values()
+                    }
                 )
+        if len(batch) > 0:
             # create the batch dict
             batch_dict = dict(
                 sample_idx=[s["sample_idx"] for s in batch],
                 questions=[s["question"] for s in batch],
-                contexts=contexts,
+                contexts=contexts_in_batch.values(),
                 positives_ctxs=[s["positive_ctxs"] for s in batch],
                 positives=[s["positives"] for s in batch],
             )
@@ -576,14 +554,6 @@ class InBatchNegativesDataset(Dataset):
         if num_proc is None:
             num_proc = psutil.cpu_count(logical=False)
 
-        map_kwargs = dict(
-            function=self._map_tokenize_sample,
-            fn_kwargs=fn_kwargs,
-            keep_in_memory=keep_in_memory,
-            load_from_cache_file=load_from_cache_file,
-            num_proc=num_proc,
-        )
-
         # The data is a list of dictionaries, each dictionary is a sample
         # Each sample has the following keys:
         #   - "question": the question
@@ -603,6 +573,51 @@ class InBatchNegativesDataset(Dataset):
         # add id if not present
         data = data.add_column("sample_idx", range(len(data)))
 
+        map_kwargs = dict(
+            function=self.load_fn,
+            fn_kwargs=fn_kwargs,
+            keep_in_memory=keep_in_memory,
+            load_from_cache_file=load_from_cache_file,
+            num_proc=num_proc,
+            remove_columns=[n for n in data.column_names if n != "sample_idx"],
+            desc="Loading data",
+            features=datasets.Features(
+                {
+                    "sample_idx": datasets.Value("int64"),
+                    "question": {
+                        "attention_mask": datasets.Sequence(datasets.Value("int64")),
+                        "input_ids": datasets.Sequence(datasets.Value("int64")),
+                        "token_type_ids": datasets.Sequence(datasets.Value("int64")),
+                    },
+                    "positive_ctxs": [
+                        {
+                            "attention_mask": datasets.Sequence(
+                                datasets.Value("int64")
+                            ),
+                            "input_ids": datasets.Sequence(datasets.Value("int64")),
+                            "token_type_ids": datasets.Sequence(
+                                datasets.Value("int64")
+                            ),
+                        }
+                    ],
+                    "context": [
+                        {
+                            "attention_mask": datasets.Sequence(
+                                datasets.Value("int64")
+                            ),
+                            "input_ids": datasets.Sequence(datasets.Value("int64")),
+                            "token_type_ids": datasets.Sequence(
+                                datasets.Value("int64")
+                            ),
+                        }
+                    ],
+                    "positives": datasets.Sequence(datasets.Value("string")),
+                    "retrieved_hard_negative_ctxs": datasets.Sequence(
+                        datasets.Value("string")
+                    ),
+                }
+            ),
+        )
         # preprocess the data
         data = data.map(**map_kwargs)
 
@@ -682,7 +697,8 @@ class InBatchNegativesDataset(Dataset):
 
     @property
     def contexts(self):
-        return list(self.context_manager.get_labels().keys())
+        return list(self.context_manager.get_contexts().keys())
+
 
 class AidaInBatchNegativesDataset(InBatchNegativesDataset):
     pass

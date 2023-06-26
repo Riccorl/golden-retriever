@@ -196,7 +196,7 @@ fi
 if [ -z "$WANDB_PROJECT" ]; then
   WANDB_PROJECT=""
 else
-  WANDB_PROJECT="$OVERRIDES project_name=$WANDB_PROJECT"
+  OVERRIDES="$OVERRIDES project_name=$WANDB_PROJECT"
 fi
 
 # if -t is not specified, ONLY_TEST is False
