@@ -99,9 +99,6 @@ class InBatchNegativesDataset(Dataset):
             ),
         }
 
-        # initialize the Hard Negatives manager
-        self.hard_negatives_manager: Optional[HardNegativeManager] = None
-
         # check if subsample strategy is valid
         if subsample_strategy is not None:
             # subsample_strategy can be a string or a SubsampleStrategy
