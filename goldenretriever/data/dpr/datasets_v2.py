@@ -32,7 +32,7 @@ class SubsampleStrategyEnum(Enum):
     IN_ORDER = "in_order"
 
 
-class InBatchNegativesDataset(Dataset):
+class InBatchNegativesDataset:
     def __init__(
         self,
         name: str,
@@ -48,11 +48,10 @@ class InBatchNegativesDataset(Dataset):
         contexts_path: Union[str, os.PathLike] = None,
         tokenizer: Optional[Union[str, tr.PreTrainedTokenizer]] = None,
         shuffle: bool = False,
-        datasets_batch_size: int = 1000,
         subsample_strategy: Optional[str] = SubsampleStrategyEnum.NONE,
         subsample_portion: float = 0.1,
-        load_from_cache_file: bool = True,
         num_proc: Optional[int] = None,
+        load_from_cache_file: bool = True,
         keep_in_memory: bool = False,
         streaming: bool = False,
         **kwargs,
@@ -79,11 +78,29 @@ class InBatchNegativesDataset(Dataset):
         self.max_question_length = max_question_length
         self.max_context_length = max_context_length
         self.shuffle = shuffle
-        self.datasets_batch_size = datasets_batch_size
         self.num_proc = num_proc
-        self.streaming = streaming
+        self.load_from_cache_file = load_from_cache_file
         self.keep_in_memory = keep_in_memory
+        self.streaming = streaming
 
+        # check if subsample strategy is valid
+        if subsample_strategy is not None:
+            # subsample_strategy can be a string or a SubsampleStrategy
+            if isinstance(subsample_strategy, str):
+                try:
+                    subsample_strategy = SubsampleStrategyEnum(subsample_strategy)
+                except ValueError:
+                    raise ValueError(
+                        f"Subsample strategy {subsample_strategy} is not valid. "
+                        f"Valid strategies are: {SubsampleStrategyEnum.__members__}"
+                    )
+            if not isinstance(subsample_strategy, SubsampleStrategyEnum):
+                raise ValueError(
+                    f"Subsample strategy {subsample_strategy} is not valid. "
+                    f"Valid strategies are: {SubsampleStrategyEnum.__members__}"
+                )
+        self.subsample_strategy = subsample_strategy
+        self.subsample_portion = subsample_portion
 
         self.tokenizer = tokenizer
         if isinstance(self.tokenizer, str):
@@ -121,25 +138,6 @@ class InBatchNegativesDataset(Dataset):
             )
             self.context_batch_size = len(self.context_manager)
 
-        # check if subsample strategy is valid
-        if subsample_strategy is not None:
-            # subsample_strategy can be a string or a SubsampleStrategy
-            if isinstance(subsample_strategy, str):
-                try:
-                    subsample_strategy = SubsampleStrategyEnum(subsample_strategy)
-                except ValueError:
-                    raise ValueError(
-                        f"Subsample strategy {subsample_strategy} is not valid. "
-                        f"Valid strategies are: {SubsampleStrategyEnum.__members__}"
-                    )
-            if not isinstance(subsample_strategy, SubsampleStrategyEnum):
-                raise ValueError(
-                    f"Subsample strategy {subsample_strategy} is not valid. "
-                    f"Valid strategies are: {SubsampleStrategyEnum.__members__}"
-                )
-        self.subsample_strategy = subsample_strategy
-        self.subsample_portion = subsample_portion
-
         self.hn_manager = None
 
         # load the dataset
@@ -166,7 +164,8 @@ class InBatchNegativesDataset(Dataset):
         self.number_of_complete_iterations = 0
 
     def __len__(self) -> int:
-        return len(self.data)
+        if isinstance(self.data, datasets.Dataset):
+            return len(self.data)
 
     def __getitem__(
         self, index
