@@ -2,6 +2,7 @@ from dataclasses import dataclass
 import os
 from typing import Union
 
+
 @dataclass
 class ServerParameterManager:
     device: str = os.environ.get("DEVICE", "cpu")

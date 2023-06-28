@@ -10,7 +10,7 @@ import psutil
 import torch
 from tqdm import tqdm
 import transformers as tr
-from datasets import IterableDataset, load_dataset
+from datasets import load_dataset
 from torch.utils.data import Dataset
 
 from goldenretriever.common.log import get_console_logger, get_logger

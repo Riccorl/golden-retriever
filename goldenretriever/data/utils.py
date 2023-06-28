@@ -3,18 +3,10 @@ from typing import Any, Iterable, List, Optional, Union
 import numpy as np
 
 from collections import defaultdict
-from functools import partial
 import json
 import os
-from pathlib import Path
-import tempfile
-import time
 from typing import Dict, List, Union
-from datasets import Dataset, load_dataset
-import psutil
 import transformers as tr
-
-import concurrent.futures
 
 
 class HardNegativesManager:

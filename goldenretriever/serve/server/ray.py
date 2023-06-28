@@ -9,7 +9,11 @@ from ray import serve
 from goldenretriever import GoldenRetriever
 from goldenretriever.common.log import get_logger
 from goldenretriever.data.utils import batch_generator
-from goldenretriever.serve.tokenizers import RegexTokenizer, SpacyTokenizer, WhitespaceTokenizer
+from goldenretriever.serve.tokenizers import (
+    RegexTokenizer,
+    SpacyTokenizer,
+    WhitespaceTokenizer,
+)
 from goldenretriever.serve.utils import RayParameterManager, ServerParameterManager
 from goldenretriever.serve.window.manager import WindowManager
 
