@@ -19,6 +19,7 @@ class HardNegativeManager:
         tokenizer: tr.PreTrainedTokenizer,
         data: Union[List[Dict], os.PathLike, Dict[int, List]] = None,
         max_length: int = 64,
+        batch_size: int = 1000,
         lazy: bool = False,
     ) -> None:
         self._db: dict = None
@@ -48,13 +49,19 @@ class HardNegativeManager:
         self._context_hard_negatives = {}
         if not lazy:
             # create a dictionary of context -> hard_negative mapping
-            tokenized_contexts = self.tokenizer(
-                list(self._context_db.keys()), max_length=max_length, truncation=True
-            )
-            for i, context in enumerate(self._context_db):
-                self._context_hard_negatives[context] = {
-                    k: tokenized_contexts[k][i] for k in tokenized_contexts.keys()
-                }
+            batch_size = min(batch_size, len(self._context_db))
+            unique_contexts = list(self._context_db.keys())
+            for i in range(0, len(unique_contexts), batch_size):
+                batch = unique_contexts[i : i + batch_size]
+                tokenized_contexts = self.tokenizer(
+                    batch,
+                    max_length=max_length,
+                    truncation=True,
+                )
+                for i, context in enumerate(batch):
+                    self._context_hard_negatives[context] = {
+                        k: tokenized_contexts[k][i] for k in tokenized_contexts.keys()
+                    }
 
     def __len__(self) -> int:
         return len(self._db)

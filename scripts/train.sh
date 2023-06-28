@@ -138,7 +138,7 @@ fi
 # if -p is not specified, PRECISION is 16
 if [ -z "$PRECISION" ]; then
   # default value
-  PRECISION=16
+  PRECISION=16-mixed
 fi
 
 # if -c is not specified, USE_CPU is False

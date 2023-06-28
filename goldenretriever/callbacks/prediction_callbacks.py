@@ -16,6 +16,7 @@ from goldenretriever.callbacks.base import PredictionCallback
 from goldenretriever.common.log import get_console_logger, get_logger
 from goldenretriever.common.model_inputs import ModelInputs
 from goldenretriever.data.datasets import BaseDataset
+from goldenretriever.data.dpr.hard_negatives_manager import HardNegativeManager
 from goldenretriever.models.model import GoldenRetriever
 
 console_logger = get_console_logger()
@@ -187,7 +188,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                     wrong_indices = set(retrieved_indices) - set(gold_context_indices)
                     # add the predictions to the list
                     prediction_output = dict(
-                        sample_idx=batch.sample_idx[batch_idx].item(),
+                        sample_idx=batch.sample_idx[batch_idx],
                         gold=gold_contexts,
                         predictions=retrieved_contexts,
                         scores=retrieved_scores,
@@ -344,6 +345,7 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
         )
 
         # make a copy of the dataset to avoid modifying the original one
+        trainer.datamodule.train_dataset.hn_manager = None
         dataset_copy = deepcopy(trainer.datamodule.train_dataset)
         predictions = super().__call__(
             trainer,
@@ -377,19 +379,29 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
             ][: self.max_negatives]
             hard_negatives_list[prediction["sample_idx"]] = wrong_contexts
 
-        def map_hard_negatives(sample):
-            if sample["sample_idx"] in hard_negatives_list:
-                sample["retrieved_hard_negative_ctxs"] = hard_negatives_list.get(
-                    sample["sample_idx"]
-                )
-            return sample
-
-        # add the hard negatives to the dataset
-        trainer.datamodule.train_dataset.data = (
-            trainer.datamodule.train_dataset.data.map(
-                map_hard_negatives, desc="Updating hard negatives", num_proc=1
-            )
+        hn_manager = HardNegativeManager(
+            tokenizer=trainer.datamodule.tokenizer,
+            max_length=trainer.datamodule.train_dataset.max_context_length,
+            data=hard_negatives_list,
         )
+        trainer.datamodule.train_dataset.hn_manager = hn_manager
+
+        # def map_hard_negatives(sample):
+        #     if sample["sample_idx"] in hard_negatives_list:
+        #         sample["retrieved_hard_negative_ctxs"] = hard_negatives_list.get(
+        #             sample["sample_idx"]
+        #         )
+        #     return sample
+
+        # # add the hard negatives to the dataset
+        # trainer.datamodule.train_dataset.data = (
+        #     trainer.datamodule.train_dataset.data.map(
+        #         map_hard_negatives,
+        #         desc="Updating hard negatives",
+        #         num_proc=1,
+        #         keep_in_memory=False,
+        #     )
+        # )
 
         # normalize predictions as in the original GoldenRetrieverPredictionCallback
         predictions = {0: predictions}

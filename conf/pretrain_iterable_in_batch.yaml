@@ -14,8 +14,8 @@ defaults:
   - override hydra/job_logging: colorlog
   - override hydra/hydra_logging: colorlog
 
-model_name: ${model.language_model}-inbatch # used to name the model in wandb
-project_name: golden-retriever-mosaico # used to name the project in wandb
+model_name: ${model.language_model} # used to name the model in wandb
+project_name: golden-retriever # used to name the project in wandb
 
 train:
   # reproducibility

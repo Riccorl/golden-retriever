@@ -3,18 +3,23 @@ from copy import deepcopy
 from enum import Enum
 from functools import partial
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
 import datasets
 import psutil
 import torch
+from tqdm import tqdm
 import transformers as tr
 from datasets import IterableDataset, load_dataset
 from torch.utils.data import Dataset
 
 from goldenretriever.common.log import get_console_logger, get_logger
 from goldenretriever.common.model_inputs import ModelInputs
+from goldenretriever.data.datasets import BaseDataset, IterableBaseDataset
+from goldenretriever.data.dpr.hard_negatives_manager import HardNegativeManager
 from goldenretriever.data.labels import ContextManager
+
+from memory_profiler import profile
 
 console_logger = get_console_logger()
 
@@ -76,6 +81,9 @@ class InBatchNegativesDataset(Dataset):
         self.shuffle = shuffle
         self.datasets_batch_size = datasets_batch_size
         self.num_proc = num_proc
+        self.streaming = streaming
+        self.keep_in_memory = keep_in_memory
+
 
         self.tokenizer = tokenizer
         if isinstance(self.tokenizer, str):
@@ -131,6 +139,8 @@ class InBatchNegativesDataset(Dataset):
                 )
         self.subsample_strategy = subsample_strategy
         self.subsample_portion = subsample_portion
+
+        self.hn_manager = None
 
         # load the dataset
         if data is None:
@@ -188,12 +198,11 @@ class InBatchNegativesDataset(Dataset):
                     number_of_samples * self.number_of_complete_iterations
                 )
                 logger.info(
-                    f"Subsampling {number_of_samples} samples from {len(self.data)}"
+                    f"Subsampling {number_of_samples} samples out of {len(self.data)}"
                 )
                 to_select = min(already_selected + number_of_samples, len(self.data))
                 logger.info(
-                    f"Portion of data selected: {already_selected} "
-                    f"to {already_selected + number_of_samples}"
+                    f"Portion of data selected: {already_selected} " f"to {to_select}"
                 )
                 data = deepcopy(self.data).select(range(already_selected, to_select))
 
@@ -204,7 +213,10 @@ class InBatchNegativesDataset(Dataset):
 
                 # reset the number of complete iterations
                 if to_select >= len(self.data):
-                    self.number_of_complete_iterations = 0
+                    # reset the number of complete iterations,
+                    # we have completed one full iteration over the dataset
+                    # the value is -1 because we want to start from 0 at the next iteration
+                    self.number_of_complete_iterations = -1
             else:
                 raise ValueError(
                     f"Subsample strategy `{self.subsample_strategy}` is not valid. "
@@ -220,71 +232,74 @@ class InBatchNegativesDataset(Dataset):
             self.shuffle_data(seed=42 + self.number_of_complete_iterations)
 
         logger.info("Creating batches")
+        batch_fn_kwargs = {
+            "context_batch_size": self.context_batch_size,
+            "question_batch_size": self.question_batch_size,
+            "hard_negatives_manager": self.hn_manager,
+        }
         batched_data = self.create_batches(
             data,
             batch_fn=self.batch_fn,
-            tokenizer=self.tokenizer,
-            datasets_batch_size=self.datasets_batch_size,
-            context_batch_size=self.context_batch_size,
-            question_batch_size=self.question_batch_size,
-            max_context_length=self.max_context_length,
+            batch_fn_kwargs=batch_fn_kwargs,
+            streaming=self.streaming,
         )
 
         logger.info("Collating batches")
-        batched_data = self.collate_batches(batched_data, self.collate_fn)
+        batched_data = self.collate_batches(
+            batched_data, self.collate_fn, streaming=self.streaming
+        )
 
         # increment the number of complete iterations
         self.number_of_complete_iterations += 1
 
-        return batched_data.with_format("torch")
+        if self.streaming:
+            return IterableBaseDataset(name=self.name, data=batched_data)
+        else:
+            return BaseDataset(name=self.name, data=batched_data)
 
     @staticmethod
     def create_batches(
         data: Dataset,
         batch_fn: Callable,
-        tokenizer: tr.PreTrainedTokenizer,
-        datasets_batch_size: int,
-        context_batch_size: int,
-        question_batch_size: int,
-        max_context_length: int,
-        num_proc: Optional[int] = None,
-    ) -> Dataset:
-        if num_proc is None:
-            num_proc = psutil.cpu_count(logical=False)
+        batch_fn_kwargs: Optional[Dict[str, Any]] = None,
+        streaming: bool = False,
+    ) -> Union[Iterable, List]:
+        if streaming:
+            # if we are streaming, we don't need to create batches right now
+            # we will create them on the fly when we need them
+            batched_data = (
+                batch
+                for batch in batch_fn(
+                    data, **(batch_fn_kwargs if batch_fn_kwargs is not None else {})
+                )
+            )
+        else:
+            batched_data = [
+                batch
+                for batch in batch_fn(
+                    data, **(batch_fn_kwargs if batch_fn_kwargs is not None else {})
+                )
+            ]
 
-        batched_data = data.map(
-            batch_fn,
-            fn_kwargs=dict(
-                tokenizer=tokenizer,
-                context_batch_size=context_batch_size,
-                question_batch_size=question_batch_size,
-                max_context_length=max_context_length,
-            ),
-            batched=True,
-            batch_size=datasets_batch_size,
-            remove_columns=data.column_names,
-            num_proc=num_proc,
-            load_from_cache_file=False,
-            desc="Creating batches",
-        )
         return batched_data
 
     @staticmethod
     def collate_batches(
-        data: Dataset,
+        batched_data: Union[Iterable, List],
         collate_fn: Callable,
-        num_proc: Optional[int] = None,
-    ) -> Dataset:
-        if num_proc is None:
-            num_proc = psutil.cpu_count(logical=False)
-
-        collated_data = data.map(
-            collate_fn,
-            remove_columns=data.column_names,
-            num_proc=1,
-            load_from_cache_file=False,
-            desc="Collating batches",
-        )
+        collate_fn_kwargs: Optional[Dict[str, Any]] = None,
+        streaming: bool = False,
+    ) -> Union[Iterable, List]:
+        if streaming:
+            collated_data = (
+                collate_fn(batch, **(collate_fn_kwargs if collate_fn_kwargs else {}))
+                for batch in batched_data
+            )
+        else:
+            collated_data = [
+                collate_fn(batch, **(collate_fn_kwargs if collate_fn_kwargs else {}))
+                for batch in tqdm(batched_data)
+            ]
         return collated_data
 
     @staticmethod
@@ -311,31 +326,26 @@ class InBatchNegativesDataset(Dataset):
         if max_hard_negatives != -1:
             hard_negatives = hard_negatives[:max_hard_negatives]
 
-        question = tokenizer(
-            sample["question"], max_length=max_question_length, truncation=True
-        )
-        # if "doc_topic" in sample:
-        #     question = tokenizer(
-        #         sample["question"],
-        #         sample["doc_topic"],
-        #         max_length=max_question_length,
-        #         truncation=True,
-        #     )
-        # else:
-        #     question = tokenizer(
-        #         sample["question"], max_length=max_question_length, truncation=True
-        #     )
+        # question = tokenizer(
+        #     sample["question"], max_length=max_question_length, truncation=True
+        # )
+        if "doc_topic" in sample:
+            question = tokenizer(
+                sample["question"],
+                sample["doc_topic"],
+                max_length=max_question_length,
+                truncation=True,
+            )
+        else:
+            question = tokenizer(
+                sample["question"], max_length=max_question_length, truncation=True
+            )
 
         context = positives + negatives + hard_negatives
         if max_contexts != -1:
             context = context[:max_contexts]
 
-        context = tokenizer(
-            context,
-            max_length=max_context_length,
-            truncation=True,
-            padding="max_length",
-        )
+        context = tokenizer(context, max_length=max_context_length, truncation=True)
 
         # invert the context data structure from a dict of lists to a list of dicts
         context = [dict(zip(context, t)) for t in zip(*context.values())]
@@ -351,11 +361,10 @@ class InBatchNegativesDataset(Dataset):
 
     @staticmethod
     def batch_fn(
-        batched_samples,
-        tokenizer: tr.PreTrainedTokenizer,
+        data: Dataset,
         context_batch_size: int,
         question_batch_size: int,
-        max_context_length: int = 128,
+        hard_negatives_manager: Optional[HardNegativeManager] = None,
     ) -> Dict[str, List[Dict[str, Any]]]:
         def split_batch(
             batch: Union[Dict[str, Any], ModelInputs], question_batch_size: int
@@ -394,7 +403,7 @@ class InBatchNegativesDataset(Dataset):
 
         batch = []
         contexts_in_batch = {}
-        output_batches = {"batches": []}
+        # output_batches = {"batches": []}
 
         context_types = {
             "context",
@@ -402,36 +411,22 @@ class InBatchNegativesDataset(Dataset):
             "retrieved_hard_negative_ctxs",
         }
 
-        for sample_index in range(len(batched_samples["question"])):
-            sample = {
-                k: batched_samples[k][sample_index] for k in batched_samples.keys()
-            }
-            # tokenize the retrieved hard negatives
-            if (
-                "retrieved_hard_negative_ctxs" in sample
-                and sample["retrieved_hard_negative_ctxs"] is not None
-            ):
-                sample["retrieved_hard_negative_ctxs"] = [
-                    dict(tokenizer(rhn, max_length=max_context_length, truncation=True))
-                    for rhn in sample["retrieved_hard_negative_ctxs"]
-                ]
-
+        for sample in data:
             if len(contexts_in_batch) >= context_batch_size:
                 # create the batch dict
                 batch_dict = dict(
                     sample_idx=[s["sample_idx"] for s in batch],
                     questions=[s["question"] for s in batch],
-                    contexts=contexts_in_batch.values(),
+                    contexts=list(contexts_in_batch.values()),
                     positives_ctxs=[s["positive_ctxs"] for s in batch],
                     positives=[s["positives"] for s in batch],
                 )
                 # split the batch if needed
                 if len(batch) > question_batch_size:
-                    output_batches["batches"].extend(
-                        split_batch(batch_dict, question_batch_size)
-                    )
+                    for splited_batch in split_batch(batch_dict, question_batch_size):
+                        yield splited_batch
                 else:
-                    output_batches["batches"].append(batch_dict)
+                    yield batch_dict
 
                 # reset batch
                 batch = []
@@ -452,29 +447,35 @@ class InBatchNegativesDataset(Dataset):
                         for s in sample[context_type]
                     }
                 )
+                # check for hard negatives
+                if hard_negatives_manager is not None:
+                    contexts_in_batch.update(
+                        {
+                            tuple(s["input_ids"]): s
+                            for sample in batch
+                            for s in hard_negatives_manager.get(sample["sample_idx"])
+                            if sample["sample_idx"] in hard_negatives_manager
+                        }
+                    )
         if len(batch) > 0:
             # create the batch dict
             batch_dict = dict(
                 sample_idx=[s["sample_idx"] for s in batch],
                 questions=[s["question"] for s in batch],
-                contexts=contexts_in_batch.values(),
+                contexts=list(contexts_in_batch.values()),
                 positives_ctxs=[s["positive_ctxs"] for s in batch],
                 positives=[s["positives"] for s in batch],
             )
             # split the batch if needed
             if len(batch) > question_batch_size:
-                output_batches["batches"].extend(
-                    split_batch(batch_dict, question_batch_size)
-                )
+                for splited_batch in split_batch(batch_dict, question_batch_size):
+                    yield splited_batch
             else:
-                output_batches["batches"].append(batch_dict)
+                yield batch_dict
 
-        return output_batches
+        # return output_batches
 
     def collate_fn(self, batch: Any, *args, **kwargs) -> Any:
-        # cleanup some keys
-        batch = batch["batches"]
-
         # convert questions and contexts to a batch
         questions = self.convert_to_batch(batch["questions"])
         contexts = self.convert_to_batch(batch["contexts"])
@@ -564,55 +565,29 @@ class InBatchNegativesDataset(Dataset):
             data_files=[str(p) for p in paths],  # datasets needs str paths and not Path
             split="train",
             streaming=streaming,
+            keep_in_memory=keep_in_memory,
         )
         # add id if not present
-        data = data.add_column("sample_idx", range(len(data)))
+        if isinstance(data, datasets.Dataset):
+            data = data.add_column("sample_idx", range(len(data)))
+        else:
+            data = data.map(
+                lambda x, idx: x.update({"sample_idx": idx}), with_indices=True
+            )
 
         map_kwargs = dict(
             function=self.load_fn,
             fn_kwargs=fn_kwargs,
-            keep_in_memory=keep_in_memory,
-            load_from_cache_file=load_from_cache_file,
-            num_proc=num_proc,
-            remove_columns=[n for n in data.column_names if n != "sample_idx"],
-            desc="Loading data",
-            features=datasets.Features(
-                {
-                    "sample_idx": datasets.Value("int64"),
-                    "question": {
-                        "attention_mask": datasets.Sequence(datasets.Value("int64")),
-                        "input_ids": datasets.Sequence(datasets.Value("int64")),
-                        "token_type_ids": datasets.Sequence(datasets.Value("int64")),
-                    },
-                    "positive_ctxs": [
-                        {
-                            "attention_mask": datasets.Sequence(
-                                datasets.Value("int64")
-                            ),
-                            "input_ids": datasets.Sequence(datasets.Value("int64")),
-                            "token_type_ids": datasets.Sequence(
-                                datasets.Value("int64")
-                            ),
-                        }
-                    ],
-                    "context": [
-                        {
-                            "attention_mask": datasets.Sequence(
-                                datasets.Value("int64")
-                            ),
-                            "input_ids": datasets.Sequence(datasets.Value("int64")),
-                            "token_type_ids": datasets.Sequence(
-                                datasets.Value("int64")
-                            ),
-                        }
-                    ],
-                    "positives": datasets.Sequence(datasets.Value("string")),
-                    "retrieved_hard_negative_ctxs": datasets.Sequence(
-                        datasets.Value("string")
-                    ),
-                }
-            ),
         )
+        if isinstance(data, datasets.Dataset):
+            map_kwargs.update(
+                dict(
+                    load_from_cache_file=load_from_cache_file,
+                    keep_in_memory=keep_in_memory,
+                    num_proc=num_proc,
+                    desc="Loading data",
+                )
+            )
         # preprocess the data
         data = data.map(**map_kwargs)
 
@@ -676,7 +651,6 @@ class InBatchNegativesDataset(Dataset):
         """
         # invert questions from list of dict to dict of list
         samples = {k: [d[k] for d in samples] for k in samples[0]}
-        # print(samples)
         # get max length of questions
         max_len = max(len(x) for x in samples["input_ids"])
         # pad the questions

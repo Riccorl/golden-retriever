@@ -11,7 +11,6 @@ from pytorch_lightning.utilities.types import EVAL_DATALOADERS
 from torch.utils.data import DataLoader, Dataset
 
 from goldenretriever.common.log import get_logger
-from goldenretriever.data.datasets import GenerativeDataset
 from goldenretriever.data.labels import Labels
 
 logger = get_logger()
@@ -101,7 +100,7 @@ class PLDataModule(pl.LightningDataModule):
             shuffle=False,
             batch_size=None,
             num_workers=self.num_workers.train,
-            pin_memory=True,
+            pin_memory=False,
             collate_fn=lambda x: x,
         )
 
@@ -112,7 +111,7 @@ class PLDataModule(pl.LightningDataModule):
                 shuffle=False,
                 batch_size=None,
                 num_workers=self.num_workers.val,
-                pin_memory=True,
+                pin_memory=False,
                 collate_fn=lambda x: x,
             )
             for dataset in self.val_datasets
@@ -125,7 +124,7 @@ class PLDataModule(pl.LightningDataModule):
                 shuffle=False,
                 batch_size=None,
                 num_workers=self.num_workers.test,
-                pin_memory=True,
+                pin_memory=False,
                 collate_fn=lambda x: x,
             )
             for dataset in self.test_datasets

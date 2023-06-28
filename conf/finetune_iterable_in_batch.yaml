@@ -3,7 +3,7 @@ hydra:
   run:
     dir: ./experiments/${model_name}/${now:%Y-%m-%d}/${now:%H-%M-%S}
 
-model_name: ${model.language_model}-inbatch # used to name the model in wandb
+model_name: ${model.language_model} # used to name the model in wandb
 project_name: golden-retriever # used to name the project in wandb
 
 defaults:
@@ -110,7 +110,6 @@ train:
           k: ${train.top_k}
           verbose: True
           prefix: "train"
-          # stages: ["train"]
 
     utils_callbacks:
       - _target_: goldenretriever.callbacks.utils_callbacks.SaveRetrieverCallback
