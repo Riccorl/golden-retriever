@@ -379,29 +379,11 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
             ][: self.max_negatives]
             hard_negatives_list[prediction["sample_idx"]] = wrong_contexts
 
-        hn_manager = HardNegativesManager(
+        trainer.datamodule.train_dataset.hn_manager = HardNegativesManager(
             tokenizer=trainer.datamodule.tokenizer,
             max_length=trainer.datamodule.train_dataset.max_context_length,
             data=hard_negatives_list,
         )
-        trainer.datamodule.train_dataset.hn_manager = hn_manager
-
-        # def map_hard_negatives(sample):
-        #     if sample["sample_idx"] in hard_negatives_list:
-        #         sample["retrieved_hard_negative_ctxs"] = hard_negatives_list.get(
-        #             sample["sample_idx"]
-        #         )
-        #     return sample
-
-        # # add the hard negatives to the dataset
-        # trainer.datamodule.train_dataset.data = (
-        #     trainer.datamodule.train_dataset.data.map(
-        #         map_hard_negatives,
-        #         desc="Updating hard negatives",
-        #         num_proc=1,
-        #         keep_in_memory=False,
-        #     )
-        # )
 
         # normalize predictions as in the original GoldenRetrieverPredictionCallback
         predictions = {0: predictions}

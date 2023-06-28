@@ -503,13 +503,6 @@ class InBatchNegativesDataset(GoldenRetrieverDataset):
 
         batch = []
         contexts_in_batch = {}
-        # output_batches = {"batches": []}
-
-        context_types = {
-            "context",
-            "positive_ctxs",
-            "retrieved_hard_negative_ctxs",
-        }
 
         for sample in data:
             if len(contexts_in_batch) >= context_batch_size:
@@ -533,30 +526,30 @@ class InBatchNegativesDataset(GoldenRetrieverDataset):
                 contexts_in_batch = {}
 
             batch.append(sample)
-            for context_type in context_types:
-                # yes it's a bit ugly but it works :)
-                # count the number of contexts in the batch and stop if we reach the limit
-                # we use a set to avoid counting the same context twice
-                # we use a tuple because set doesn't support lists
-                # we use input_ids as discriminator
+            # yes it's a bit ugly but it works :)
+            # count the number of contexts in the batch and stop if we reach the limit
+            # we use a set to avoid counting the same context twice
+            # we use a tuple because set doesn't support lists
+            # we use input_ids as discriminator
+            contexts_in_batch.update(
+                {
+                    tuple(s["input_ids"]): s
+                    for sample in batch
+                    for s in sample["context"]
+                }
+            )
+            # check for hard negatives
+            if hard_negatives_manager is not None:
                 contexts_in_batch.update(
                     {
                         tuple(s["input_ids"]): s
                         for sample in batch
-                        if context_type in sample and sample[context_type]
-                        for s in sample[context_type]
+                        for s in hard_negatives_manager.get(sample["sample_idx"])
+                        # if sample["sample_idx"] in hard_negatives_manager
                     }
                 )
-                # check for hard negatives
-                if hard_negatives_manager is not None:
-                    contexts_in_batch.update(
-                        {
-                            tuple(s["input_ids"]): s
-                            for sample in batch
-                            for s in hard_negatives_manager.get(sample["sample_idx"])
-                            if sample["sample_idx"] in hard_negatives_manager
-                        }
-                    )
+
+        # left over
         if len(batch) > 0:
             # create the batch dict
             batch_dict = dict(
@@ -572,8 +565,6 @@ class InBatchNegativesDataset(GoldenRetrieverDataset):
                     yield splited_batch
             else:
                 yield batch_dict
-
-        # return output_batches
 
     def collate_fn(self, batch: Any, *args, **kwargs) -> Any:
         # convert questions and contexts to a batch
