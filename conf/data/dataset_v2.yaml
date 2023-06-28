@@ -3,7 +3,7 @@ shared_params:
   max_context_length: 64
   context_batch_size: 64
   question_batch_size: 64
-  use_topics: False
+  use_topics: Falsex
 
 datamodule:
   _target_: goldenretriever.lightning_modules.pl_data_modules.PLDataModule
@@ -43,7 +43,7 @@ datamodule:
         use_topics: ${data.shared_params.use_topics}
 
   num_workers:
-    train: 0
-    val: 0
-    test: 0
+    train: 4
+    val: 4
+    test: 4
  

@@ -275,10 +275,17 @@ class InBatchNegativesDataset:
         else:
             batched_data = [
                 batch
-                for batch in batch_fn(
-                    data, **(batch_fn_kwargs if batch_fn_kwargs is not None else {})
+                for batch in tqdm(
+                    batch_fn(
+                        data, **(batch_fn_kwargs if batch_fn_kwargs is not None else {})
+                    )
                 )
             ]
+            # batched_data = list(
+            #     batch_fn(
+            #         data, **(batch_fn_kwargs if batch_fn_kwargs is not None else {})
+            #     )
+            # )
 
         return batched_data
 

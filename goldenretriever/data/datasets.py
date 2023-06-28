@@ -15,7 +15,7 @@ class BaseDataset(Dataset):
     def __init__(
         self,
         name: str,
-        path: Union[str, os.PathLike, List[str], List[os.PathLike]] = None,
+        path: Optional[Union[str, os.PathLike, List[str], List[os.PathLike]]] = None,
         data: Any = None,
         **kwargs,
     ):
@@ -56,14 +56,16 @@ class IterableBaseDataset(IterableDataset):
     def __init__(
         self,
         name: str,
-        path: Union[str, Path, List[str], List[Path]],
+        path: Optional[Union[str, Path, List[str], List[Path]]] = None,
         data: Any = None,
         *args,
         **kwargs,
     ):
         super().__init__()
-        self.path = path
         self.name = name
+        if path is None and data is None:
+            raise ValueError("Either `path` or `data` must be provided")
+        self.path = path
         self.project_folder = Path(__file__).parent.parent.parent
         self.data = data
 
