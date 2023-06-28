@@ -15,8 +15,8 @@ import transformers as tr
 from goldenretriever.callbacks.base import PredictionCallback
 from goldenretriever.common.log import get_console_logger, get_logger
 from goldenretriever.common.model_inputs import ModelInputs
-from goldenretriever.data.datasets import BaseDataset
-from goldenretriever.data.dpr.hard_negatives_manager import HardNegativeManager
+from goldenretriever.data.base.datasets import BaseDataset
+from goldenretriever.data.utils import HardNegativesManager
 from goldenretriever.models.model import GoldenRetriever
 
 console_logger = get_console_logger()
@@ -379,7 +379,7 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
             ][: self.max_negatives]
             hard_negatives_list[prediction["sample_idx"]] = wrong_contexts
 
-        hn_manager = HardNegativeManager(
+        hn_manager = HardNegativesManager(
             tokenizer=trainer.datamodule.tokenizer,
             max_length=trainer.datamodule.train_dataset.max_context_length,
             data=hard_negatives_list,

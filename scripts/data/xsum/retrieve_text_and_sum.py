@@ -15,7 +15,7 @@ import tqdm
 from goldenretriever import GoldenRetriever
 from goldenretriever.common.log import get_logger
 from goldenretriever.common.model_inputs import ModelInputs
-from goldenretriever.data.datasets import BaseDataset
+from goldenretriever.data.base.datasets import BaseDataset
 
 logger = get_logger(level=logging.INFO)
 

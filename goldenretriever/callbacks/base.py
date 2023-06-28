@@ -9,7 +9,7 @@ from pytorch_lightning.trainer.states import RunningStage
 from torch.utils.data import DataLoader, Dataset
 
 from goldenretriever.common.log import get_logger
-from goldenretriever.data.datasets import BaseDataset
+from goldenretriever.data.base.datasets import BaseDataset
 
 logger = get_logger()
 
