@@ -129,7 +129,7 @@ class PredictionCallback(pl.Callback):
             # get dataset
             if isinstance(dataset, DictConfig):
                 dataset = hydra.utils.instantiate(dataset, _recursive_=False)
-            datasets = [dataset] if isinstance(dataset, Dataset) else dataset
+            datasets = [dataset] if not isinstance(dataset, list) else dataset
             if dataloader is not None:
                 dataloaders = (
                     [dataloader] if isinstance(dataloader, DataLoader) else dataloader

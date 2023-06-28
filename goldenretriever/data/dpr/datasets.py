@@ -16,7 +16,7 @@ from datasets import Dataset
 
 from goldenretriever.common.log import get_console_logger, get_logger
 from goldenretriever.common.model_inputs import ModelInputs
-from goldenretriever.data.datasets import GenerativeDataset, BaseDataset
+from goldenretriever.data.datasets import IterableBaseDataset, BaseDataset
 from goldenretriever.data.dpr.hard_negatives_manager import HardNegativeManager
 from goldenretriever.data.labels import Labels
 from goldenretriever.data.dpr.mixin import DPRMixin
@@ -25,7 +25,7 @@ console_logger = get_console_logger()
 logger = get_logger(__name__)
 
 
-class DPRIterableDataset(GenerativeDataset, DPRMixin):
+class DPRIterableDataset(IterableBaseDataset, DPRMixin):
     def __init__(
         self,
         name: str,
@@ -76,6 +76,8 @@ class DPRIterableDataset(GenerativeDataset, DPRMixin):
         self.random_subsample = random_subsample
 
         self.stage = None
+        self.shuffle = shuffle
+        self.drop_last_batch = False
 
         self.current_iteration = 0
 

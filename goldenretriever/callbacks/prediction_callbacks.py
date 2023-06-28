@@ -257,7 +257,7 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
         self,
         k: int = 100,
         batch_size: int = 32,
-        num_workers: int = 4,
+        num_workers: int = 0,
         use_faiss: bool = False,
         move_index_to_cpu: bool = False,
         force_reindex: bool = False,

@@ -45,3 +45,9 @@ datamodule:
         max_contexts_per_batch: ${data.shared_params.max_contexts_per_batch}
         prefetch_batches: ${data.shared_params.prefetch_batches}
         use_topics: ${data.shared_params.use_topics}
+
+  num_workers:
+    train: 0
+    val: 0
+    test: 0
+ 

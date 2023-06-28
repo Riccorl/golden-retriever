@@ -95,16 +95,15 @@ class PLDataModule(pl.LightningDataModule):
                 ]
 
     def train_dataloader(self, *args, **kwargs) -> DataLoader:
-        torch_dataset = self.train_dataset.to_torch_dataset(),
+        # torch_dataset = self.train_dataset.to_torch_dataset()
         return DataLoader(
-            torch_dataset,
-            # self.train_dataset,
+            # torch_dataset,
+            self.train_dataset.to_torch_dataset(),
             shuffle=False,
             batch_size=None,
             num_workers=self.num_workers.train,
-            pin_memory=False,
+            pin_memory=True,
             collate_fn=lambda x: x,
-            persistent_workers=True,
         )
 
     def val_dataloader(self, *args, **kwargs) -> Union[DataLoader, List[DataLoader]]:
@@ -115,9 +114,8 @@ class PLDataModule(pl.LightningDataModule):
                 shuffle=False,
                 batch_size=None,
                 num_workers=self.num_workers.val,
-                pin_memory=False,
+                pin_memory=True,
                 collate_fn=lambda x: x,
-                persistent_workers=True
             )
             for dataset in self.val_datasets
         ]
@@ -129,9 +127,8 @@ class PLDataModule(pl.LightningDataModule):
                 shuffle=False,
                 batch_size=None,
                 num_workers=self.num_workers.test,
-                pin_memory=False,
+                pin_memory=True,
                 collate_fn=lambda x: x,
-                persistent_workers=True
             )
             for dataset in self.test_datasets
         ]

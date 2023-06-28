@@ -19,7 +19,6 @@ from goldenretriever.data.datasets import BaseDataset, IterableBaseDataset
 from goldenretriever.data.dpr.hard_negatives_manager import HardNegativeManager
 from goldenretriever.data.labels import ContextManager
 
-from memory_profiler import profile
 
 console_logger = get_console_logger()
 
@@ -32,7 +31,175 @@ class SubsampleStrategyEnum(Enum):
     IN_ORDER = "in_order"
 
 
-class InBatchNegativesDataset:
+class GoldenRetrieverDataset:
+    def __init__(
+        self,
+        name: str,
+        path: Union[str, os.PathLike, List[str], List[os.PathLike]] = None,
+        data: Any = None,
+        load_fn_kwargs: Optional[Dict[str, Any]] = None,
+        batch_fn_kwargs: Optional[Dict[str, Any]] = None,
+        collate_fn_kwargs: Optional[Dict[str, Any]] = None,
+    ):
+        if path is None and data is None:
+            raise ValueError("Either `path` or `data` must be provided")
+
+        # dataset parameters
+        self.name = name
+        self.path = path
+        self.project_folder = Path(__file__).parent.parent.parent.parent
+        self.data = data
+
+    def __repr__(self) -> str:
+        return f"GoldenRetrieverDataset({self.name=}, {self.path=})"
+
+    def __len__(self) -> int:
+        raise NotImplementedError
+
+    def __getitem__(
+        self, index
+    ) -> Union[Dict[str, torch.Tensor], Tuple[torch.Tensor, torch.Tensor]]:
+        raise NotImplementedError
+
+    def to_torch_dataset(self, *args, **kwargs) -> torch.utils.data.Dataset:
+        raise NotImplementedError
+
+    @staticmethod
+    def create_batches(
+        data: Dataset,
+        batch_fn: Callable,
+        batch_fn_kwargs: Optional[Dict[str, Any]] = None,
+        prefetch: bool = True,
+        *args,
+        **kwargs,
+    ) -> Union[Iterable, List]:
+        if not prefetch:
+            # if we are streaming, we don't need to create batches right now
+            # we will create them on the fly when we need them
+            batched_data = (
+                batch
+                for batch in batch_fn(
+                    data, **(batch_fn_kwargs if batch_fn_kwargs is not None else {})
+                )
+            )
+        else:
+            batched_data = [
+                batch
+                for batch in tqdm(
+                    batch_fn(
+                        data, **(batch_fn_kwargs if batch_fn_kwargs is not None else {})
+                    ),
+                    desc="Creating batches",
+                )
+            ]
+        return batched_data
+
+    @staticmethod
+    def collate_batches(
+        batched_data: Union[Iterable, List],
+        collate_fn: Callable,
+        collate_fn_kwargs: Optional[Dict[str, Any]] = None,
+        prefetch: bool = True,
+        *args,
+        **kwargs,
+    ) -> Union[Iterable, List]:
+        if not prefetch:
+            collated_data = (
+                collate_fn(batch, **(collate_fn_kwargs if collate_fn_kwargs else {}))
+                for batch in batched_data
+            )
+        else:
+            collated_data = [
+                collate_fn(batch, **(collate_fn_kwargs if collate_fn_kwargs else {}))
+                for batch in tqdm(batched_data, desc="Collating batches")
+            ]
+        return collated_data
+
+    @staticmethod
+    def load_fn(sample: Dict, *args, **kwargs) -> Dict:
+        raise NotImplementedError
+
+    @staticmethod
+    def batch_fn(data: Dataset, *args, **kwargs) -> Any:
+        raise NotImplementedError
+
+    @staticmethod
+    def collate_fn(batch: Any, *args, **kwargs) -> Any:
+        raise NotImplementedError
+
+    @staticmethod
+    def pad_sequence(
+        sequence: Union[List, torch.Tensor],
+        length: int,
+        value: Any = None,
+        pad_to_left: bool = False,
+    ) -> Union[List, torch.Tensor]:
+        """
+        Pad the input to the specified length with the given value.
+
+        Args:
+            sequence (:obj:`List`, :obj:`torch.Tensor`):
+                Element to pad, it can be either a :obj:`List` or a :obj:`torch.Tensor`.
+            length (:obj:`int`, :obj:`str`, optional, defaults to :obj:`subtoken`):
+                Length after pad.
+            value (:obj:`Any`, optional):
+                Value to use as padding.
+            pad_to_left (:obj:`bool`, optional, defaults to :obj:`False`):
+                If :obj:`True`, pads to the left, right otherwise.
+
+        Returns:
+            :obj:`List`, :obj:`torch.Tensor`: The padded sequence.
+
+        """
+        padding = [value] * abs(length - len(sequence))
+        if isinstance(sequence, torch.Tensor):
+            if len(sequence.shape) > 1:
+                raise ValueError(
+                    f"Sequence tensor must be 1D. Current shape is `{len(sequence.shape)}`"
+                )
+            padding = torch.as_tensor(padding)
+        if pad_to_left:
+            if isinstance(sequence, torch.Tensor):
+                return torch.cat((padding, sequence), -1)
+            return padding + sequence
+        if isinstance(sequence, torch.Tensor):
+            return torch.cat((sequence, padding), -1)
+        return sequence + padding
+
+    def convert_to_batch(
+        self, samples: Any, *args, **kwargs
+    ) -> Dict[str, torch.Tensor]:
+        """
+        Convert the list of samples to a batch.
+
+        Args:
+            samples (:obj:`List`):
+                List of samples to convert to a batch.
+
+        Returns:
+            :obj:`Dict[str, torch.Tensor]`: The batch.
+        """
+        # invert questions from list of dict to dict of list
+        samples = {k: [d[k] for d in samples] for k in samples[0]}
+        # get max length of questions
+        max_len = max(len(x) for x in samples["input_ids"])
+        # pad the questions
+        for key in samples:
+            if key in self.padding_ops:
+                samples[key] = torch.as_tensor(
+                    [self.padding_ops[key](b, max_len) for b in samples[key]]
+                )
+        return samples
+
+    def shuffle_data(self, seed: int = 42):
+        self.data = self.data.shuffle(seed=seed)
+
+    @property
+    def contexts(self):
+        return list(self.context_manager.get_contexts().keys())
+
+
+class InBatchNegativesDataset(GoldenRetrieverDataset):
     def __init__(
         self,
         name: str,
@@ -53,21 +220,16 @@ class InBatchNegativesDataset:
         num_proc: Optional[int] = None,
         load_from_cache_file: bool = True,
         keep_in_memory: bool = False,
-        streaming: bool = False,
+        prefetch: bool = True,
+        load_fn_kwargs: Optional[Dict[str, Any]] = None,
+        batch_fn_kwargs: Optional[Dict[str, Any]] = None,
+        collate_fn_kwargs: Optional[Dict[str, Any]] = None,
         **kwargs,
     ):
-        super().__init__()
-
-        if path is None and data is None:
-            raise ValueError("Either `path` or `data` must be provided")
+        super().__init__(name=name, path=path, data=data)
 
         if tokenizer is None:
             raise ValueError("A tokenizer must be provided")
-
-        # dataset parameters
-        self.name = name
-        self.path = path
-        self.project_folder = Path(__file__).parent.parent.parent.parent
 
         # dataset hyperparameters
         self.context_batch_size = context_batch_size
@@ -81,7 +243,7 @@ class InBatchNegativesDataset:
         self.num_proc = num_proc
         self.load_from_cache_file = load_from_cache_file
         self.keep_in_memory = keep_in_memory
-        self.streaming = streaming
+        self.prefetch = prefetch
 
         # check if subsample strategy is valid
         if subsample_strategy is not None:
@@ -146,10 +308,10 @@ class InBatchNegativesDataset:
                 path,
                 tokenizer=self.tokenizer,
                 load_from_cache_file=load_from_cache_file,
+                load_fn_kwargs=load_fn_kwargs,
                 num_proc=num_proc,
                 shuffle=shuffle,
                 keep_in_memory=keep_in_memory,
-                streaming=streaming,
                 max_positives=max_positives,
                 max_negatives=max_negatives,
                 max_hard_negatives=max_hard_negatives,
@@ -171,9 +333,6 @@ class InBatchNegativesDataset:
         self, index
     ) -> Union[Dict[str, torch.Tensor], Tuple[torch.Tensor, torch.Tensor]]:
         return self.data[index]
-
-    def __repr__(self) -> str:
-        return f"Dataset({self.name=}, {self.path=})"
 
     def to_torch_dataset(self) -> torch.utils.data.Dataset:
         shuffle_this_time = self.shuffle
@@ -230,7 +389,6 @@ class InBatchNegativesDataset:
             logger.info("Shuffling the data")
             self.shuffle_data(seed=42 + self.number_of_complete_iterations)
 
-        logger.info("Creating batches")
         batch_fn_kwargs = {
             "context_batch_size": self.context_batch_size,
             "question_batch_size": self.question_batch_size,
@@ -240,73 +398,20 @@ class InBatchNegativesDataset:
             data,
             batch_fn=self.batch_fn,
             batch_fn_kwargs=batch_fn_kwargs,
-            streaming=self.streaming,
+            prefetch=self.prefetch,
         )
 
-        logger.info("Collating batches")
         batched_data = self.collate_batches(
-            batched_data, self.collate_fn, streaming=self.streaming
+            batched_data, self.collate_fn, prefetch=self.prefetch
         )
 
         # increment the number of complete iterations
         self.number_of_complete_iterations += 1
 
-        if self.streaming:
-            return IterableBaseDataset(name=self.name, data=batched_data)
-        else:
+        if self.prefetch:
             return BaseDataset(name=self.name, data=batched_data)
-
-    @staticmethod
-    def create_batches(
-        data: Dataset,
-        batch_fn: Callable,
-        batch_fn_kwargs: Optional[Dict[str, Any]] = None,
-        streaming: bool = False,
-    ) -> Union[Iterable, List]:
-        if streaming:
-            # if we are streaming, we don't need to create batches right now
-            # we will create them on the fly when we need them
-            batched_data = (
-                batch
-                for batch in batch_fn(
-                    data, **(batch_fn_kwargs if batch_fn_kwargs is not None else {})
-                )
-            )
         else:
-            batched_data = [
-                batch
-                for batch in tqdm(
-                    batch_fn(
-                        data, **(batch_fn_kwargs if batch_fn_kwargs is not None else {})
-                    )
-                )
-            ]
-            # batched_data = list(
-            #     batch_fn(
-            #         data, **(batch_fn_kwargs if batch_fn_kwargs is not None else {})
-            #     )
-            # )
-
-        return batched_data
-
-    @staticmethod
-    def collate_batches(
-        batched_data: Union[Iterable, List],
-        collate_fn: Callable,
-        collate_fn_kwargs: Optional[Dict[str, Any]] = None,
-        streaming: bool = False,
-    ) -> Union[Iterable, List]:
-        if streaming:
-            collated_data = (
-                collate_fn(batch, **(collate_fn_kwargs if collate_fn_kwargs else {}))
-                for batch in batched_data
-            )
-        else:
-            collated_data = [
-                collate_fn(batch, **(collate_fn_kwargs if collate_fn_kwargs else {}))
-                for batch in tqdm(batched_data)
-            ]
-        return collated_data
+            return IterableBaseDataset(name=self.name, data=batched_data)
 
     @staticmethod
     def load_fn(
@@ -332,20 +437,9 @@ class InBatchNegativesDataset:
         if max_hard_negatives != -1:
             hard_negatives = hard_negatives[:max_hard_negatives]
 
-        # question = tokenizer(
-        #     sample["question"], max_length=max_question_length, truncation=True
-        # )
-        if "doc_topic" in sample:
-            question = tokenizer(
-                sample["question"],
-                sample["doc_topic"],
-                max_length=max_question_length,
-                truncation=True,
-            )
-        else:
-            question = tokenizer(
-                sample["question"], max_length=max_question_length, truncation=True
-            )
+        question = tokenizer(
+            sample["question"], max_length=max_question_length, truncation=True
+        )
 
         context = positives + negatives + hard_negatives
         if max_contexts != -1:
@@ -521,7 +615,6 @@ class InBatchNegativesDataset:
         num_proc: Optional[int] = None,
         shuffle: bool = False,
         keep_in_memory: bool = True,
-        streaming: bool = False,
         max_positives: int = -1,
         max_negatives: int = -1,
         max_hard_negatives: int = -1,
@@ -570,7 +663,7 @@ class InBatchNegativesDataset:
             "json",
             data_files=[str(p) for p in paths],  # datasets needs str paths and not Path
             split="train",
-            streaming=streaming,
+            streaming=False,  # TODO maybe we can make streaming work
             keep_in_memory=keep_in_memory,
         )
         # add id if not present
@@ -603,77 +696,67 @@ class InBatchNegativesDataset:
 
         return data
 
-    @staticmethod
-    def pad_sequence(
-        sequence: Union[List, torch.Tensor],
-        length: int,
-        value: Any = None,
-        pad_to_left: bool = False,
-    ) -> Union[List, torch.Tensor]:
-        """
-        Pad the input to the specified length with the given value.
-
-        Args:
-            sequence (:obj:`List`, :obj:`torch.Tensor`):
-                Element to pad, it can be either a :obj:`List` or a :obj:`torch.Tensor`.
-            length (:obj:`int`, :obj:`str`, optional, defaults to :obj:`subtoken`):
-                Length after pad.
-            value (:obj:`Any`, optional):
-                Value to use as padding.
-            pad_to_left (:obj:`bool`, optional, defaults to :obj:`False`):
-                If :obj:`True`, pads to the left, right otherwise.
-
-        Returns:
-            :obj:`List`, :obj:`torch.Tensor`: The padded sequence.
-
-        """
-        padding = [value] * abs(length - len(sequence))
-        if isinstance(sequence, torch.Tensor):
-            if len(sequence.shape) > 1:
-                raise ValueError(
-                    f"Sequence tensor must be 1D. Current shape is `{len(sequence.shape)}`"
-                )
-            padding = torch.as_tensor(padding)
-        if pad_to_left:
-            if isinstance(sequence, torch.Tensor):
-                return torch.cat((padding, sequence), -1)
-            return padding + sequence
-        if isinstance(sequence, torch.Tensor):
-            return torch.cat((sequence, padding), -1)
-        return sequence + padding
-
-    def convert_to_batch(
-        self, samples: Any, *args, **kwargs
-    ) -> Dict[str, torch.Tensor]:
-        """
-        Convert the list of samples to a batch.
-
-        Args:
-            samples (:obj:`List`):
-                List of samples to convert to a batch.
-
-        Returns:
-            :obj:`Dict[str, torch.Tensor]`: The batch.
-        """
-        # invert questions from list of dict to dict of list
-        samples = {k: [d[k] for d in samples] for k in samples[0]}
-        # get max length of questions
-        max_len = max(len(x) for x in samples["input_ids"])
-        # pad the questions
-        for key in samples:
-            if key in self.padding_ops:
-                samples[key] = torch.as_tensor(
-                    [self.padding_ops[key](b, max_len) for b in samples[key]]
-                )
-        return samples
-
-    def shuffle_data(self, seed: int = 42):
-        self.data = self.data.shuffle(seed=seed)
-
-    @property
-    def contexts(self):
-        return list(self.context_manager.get_contexts().keys())
-
 
 class AidaInBatchNegativesDataset(InBatchNegativesDataset):
-    pass
+    def __init__(self, use_topics: bool = False, *args, **kwargs):
+        if "load_fn_kwargs" not in kwargs:
+            kwargs["load_fn_kwargs"] = {}
+        kwargs["load_fn_kwargs"]["use_topics"] = use_topics
+        super().__init__(*args, **kwargs)
+
+    @staticmethod
+    def load_fn(
+        sample: Dict,
+        tokenizer: tr.PreTrainedTokenizer,
+        max_positives: int,
+        max_negatives: int,
+        max_hard_negatives: int,
+        max_contexts: int = -1,
+        max_question_length: int = 256,
+        max_context_length: int = 128,
+        use_topics: bool = False,
+        *args,
+        **kwargs,
+    ) -> Dict:
+        # remove duplicates and limit the number of contexts
+        positives = list(set([p["text"].strip() for p in sample["positive_ctxs"]]))
+        if max_positives != -1:
+            positives = positives[:max_positives]
+        negatives = list(set([n["text"].strip() for n in sample["negative_ctxs"]]))
+        if max_negatives != -1:
+            negatives = negatives[:max_negatives]
+        hard_negatives = list(
+            set([h["text"].strip() for h in sample["hard_negative_ctxs"]])
+        )
+        if max_hard_negatives != -1:
+            hard_negatives = hard_negatives[:max_hard_negatives]
+
+        if "doc_topic" in sample and use_topics:
+            question = tokenizer(
+                sample["question"],
+                sample["doc_topic"],
+                max_length=max_question_length,
+                truncation=True,
+            )
+        else:
+            question = tokenizer(
+                sample["question"], max_length=max_question_length, truncation=True
+            )
+
+        context = positives + negatives + hard_negatives
+        if max_contexts != -1:
+            context = context[:max_contexts]
+
+        context = tokenizer(context, max_length=max_context_length, truncation=True)
+
+        # invert the context data structure from a dict of lists to a list of dicts
+        context = [dict(zip(context, t)) for t in zip(*context.values())]
+
+        output = dict(
+            question=question,
+            context=context,
+            positives=positives,
+            positive_ctxs=context[: len(positives)],
+            retrieved_hard_negative_ctxs=None,
+        )
+        return output
