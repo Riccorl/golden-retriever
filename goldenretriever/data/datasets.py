@@ -3,6 +3,7 @@ from copy import deepcopy
 from enum import Enum
 from functools import partial
 from pathlib import Path
+import random
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
 import datasets
@@ -47,7 +48,7 @@ class GoldenRetrieverDataset:
         # dataset parameters
         self.name = name
         self.path = path
-        self.project_folder = Path(__file__).parent.parent.parent.parent
+        self.project_folder = Path(__file__).parent.parent.parent
         self.data = data
 
     def __repr__(self) -> str:
@@ -224,6 +225,7 @@ class InBatchNegativesDataset(GoldenRetrieverDataset):
         load_fn_kwargs: Optional[Dict[str, Any]] = None,
         batch_fn_kwargs: Optional[Dict[str, Any]] = None,
         collate_fn_kwargs: Optional[Dict[str, Any]] = None,
+        hard_negatives_probability: float = 1.0,
         **kwargs,
     ):
         super().__init__(name=name, path=path, data=data)
@@ -301,6 +303,7 @@ class InBatchNegativesDataset(GoldenRetrieverDataset):
             self.context_batch_size = len(self.context_manager)
 
         self.hn_manager: Optional[HardNegativesManager] = None
+        self.hard_negatives_probability = hard_negatives_probability
 
         # load the dataset
         if data is None:
@@ -341,6 +344,7 @@ class InBatchNegativesDataset(GoldenRetrieverDataset):
             self.subsample_strategy
             and self.subsample_strategy != SubsampleStrategyEnum.NONE
         ):
+            number_of_samples = int(len(self.data) * self.subsample_portion)
             if self.subsample_strategy == SubsampleStrategyEnum.RANDOM:
                 logger.info(
                     f"Random subsampling {number_of_samples} samples from {len(self.data)}"
@@ -351,7 +355,7 @@ class InBatchNegativesDataset(GoldenRetrieverDataset):
                     .select(range(0, number_of_samples))
                 )
             elif self.subsample_strategy == SubsampleStrategyEnum.IN_ORDER:
-                number_of_samples = int(len(self.data) * self.subsample_portion)
+                # number_of_samples = int(len(self.data) * self.subsample_portion)
                 already_selected = (
                     number_of_samples * self.number_of_complete_iterations
                 )
@@ -387,12 +391,13 @@ class InBatchNegativesDataset(GoldenRetrieverDataset):
         # do we need to shuffle the data?
         if self.shuffle and shuffle_this_time:
             logger.info("Shuffling the data")
-            self.shuffle_data(seed=42 + self.number_of_complete_iterations)
+            data = data.shuffle(seed=42 + self.number_of_complete_iterations)
 
         batch_fn_kwargs = {
             "context_batch_size": self.context_batch_size,
             "question_batch_size": self.question_batch_size,
             "hard_negatives_manager": self.hn_manager,
+            "hard_negatives_probability": self.hard_negatives_probability,
         }
         batched_data = self.create_batches(
             data,
@@ -455,7 +460,6 @@ class InBatchNegativesDataset(GoldenRetrieverDataset):
             context=context,
             positives=positives,
             positive_ctxs=context[: len(positives)],
-            retrieved_hard_negative_ctxs=None,
         )
         return output
 
@@ -465,6 +469,7 @@ class InBatchNegativesDataset(GoldenRetrieverDataset):
         context_batch_size: int,
         question_batch_size: int,
         hard_negatives_manager: Optional[HardNegativesManager] = None,
+        hard_negatives_probability: float = 1.0,
     ) -> Dict[str, List[Dict[str, Any]]]:
         def split_batch(
             batch: Union[Dict[str, Any], ModelInputs], question_batch_size: int
@@ -488,9 +493,9 @@ class InBatchNegativesDataset(GoldenRetrieverDataset):
             positives_ctxs = split_fn(batch["positives_ctxs"])
 
             # collect the new batches
-            new_batches = []
+            batches = []
             for i in range(len(questions)):
-                new_batches.append(
+                batches.append(
                     dict(
                         sample_idx=sample_idx[i],
                         questions=questions[i],
@@ -499,7 +504,7 @@ class InBatchNegativesDataset(GoldenRetrieverDataset):
                         positives_ctxs=positives_ctxs[i],
                     )
                 )
-            return new_batches
+            return batches
 
         batch = []
         contexts_in_batch = {}
@@ -533,18 +538,16 @@ class InBatchNegativesDataset(GoldenRetrieverDataset):
             # we use input_ids as discriminator
             contexts_in_batch.update(
                 {
-                    tuple(s["input_ids"]): s
-                    for sample in batch
-                    for s in sample["context"]
+                    tuple(context["input_ids"]): context
+                    for context in sample["context"]
                 }
             )
-            # check for hard negatives
-            if hard_negatives_manager is not None:
+            # check for hard negatives and add with a probability of 0.1
+            if hard_negatives_manager is not None and random.random() < hard_negatives_probability:
                 contexts_in_batch.update(
                     {
-                        tuple(s["input_ids"]): s
-                        for sample in batch
-                        for s in hard_negatives_manager.get(sample["sample_idx"])
+                        tuple(context["input_ids"]): context
+                        for context in hard_negatives_manager.get(sample["sample_idx"])
                         # if sample["sample_idx"] in hard_negatives_manager
                     }
                 )
@@ -748,6 +751,5 @@ class AidaInBatchNegativesDataset(InBatchNegativesDataset):
             context=context,
             positives=positives,
             positive_ctxs=context[: len(positives)],
-            retrieved_hard_negative_ctxs=None,
         )
         return output

@@ -7,6 +7,7 @@ import json
 import os
 from typing import Dict, List, Union
 import transformers as tr
+from tqdm import tqdm
 
 
 class HardNegativesManager:
@@ -47,7 +48,10 @@ class HardNegativesManager:
             # create a dictionary of context -> hard_negative mapping
             batch_size = min(batch_size, len(self._context_db))
             unique_contexts = list(self._context_db.keys())
-            for i in range(0, len(unique_contexts), batch_size):
+            for i in tqdm(
+                range(0, len(unique_contexts), batch_size),
+                desc="Tokenizing Hard Negatives",
+            ):
                 batch = unique_contexts[i : i + batch_size]
                 tokenized_contexts = self.tokenizer(
                     batch,

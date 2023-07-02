@@ -16,7 +16,7 @@ from goldenretriever.data.labels import Labels
 logger = get_logger()
 
 
-class PLDataModule(pl.LightningDataModule):
+class GoldenRetrieverPLDataModule(pl.LightningDataModule):
     def __init__(
         self,
         datasets: DictConfig,

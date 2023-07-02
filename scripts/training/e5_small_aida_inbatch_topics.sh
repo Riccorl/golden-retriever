@@ -9,7 +9,7 @@ bash scripts/train.sh \
     "model_name=e5-small-aida-inbatch-topics" \
     "data.shared_params.use_topics=True" \
     "data.shared_params.context_batch_size=400" \
-    "++data.datamodule.datasets.train.prefetch=False" \
+    "++data.datamodule.datasets.train.prefetch=True" \
     "data.datamodule.datasets.train.subsample_strategy=random" \
     "data.shared_params.contexts_path=data/dpr-like/el/definitions_only_data.txt" \
     "data.datamodule.datasets.train.path=['data/dpr-like/el/aida_32_tokens_topic/train.jsonl']" \
