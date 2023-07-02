@@ -17,10 +17,144 @@ from pytorch_lightning.loggers import WandbLogger
 from rich.pretty import pprint
 
 from goldenretriever.common.log import get_console_logger
-from goldenretriever.lightning_modules.pl_data_modules import PLDataModule
+from goldenretriever.lightning_modules.pl_data_modules import (
+    GoldenRetrieverPLDataModule,
+)
 from goldenretriever.lightning_modules.pl_modules import GoldenRetrieverPLModule
 
 logger = get_console_logger()
+
+
+class Trainer:
+    def __init__(
+        self,
+        pl_datamodule: GoldenRetrieverPLDataModule,
+        pl_module: Optional[GoldenRetrieverPLModule] = None,
+        lr_scheduler: Optional[dict] = None,
+        callbacks: Optional[list] = None,
+        experiment_logger: Optional[WandbLogger] = None,
+        seed: int = 42,
+        float32_matmul_precision: str = "medium",
+    ):
+        # reproducibility
+        pl.seed_everything(seed)
+        torch.set_float32_matmul_precision(float32_matmul_precision)
+
+        # lightning module declaration
+        self.pl_datamodule = pl_datamodule
+        self.pl_module: Optional[GoldenRetrieverPLModule] = pl_module
+        self.lr_scheduler = lr_scheduler
+
+        # callbacks declaration
+        callbacks_store = [ModelSummary(max_depth=2)]
+
+        early_stopping_callback: Optional[EarlyStopping] = None
+        if conf.train.early_stopping_callback is not None:
+            early_stopping_callback = hydra.utils.instantiate(
+                conf.train.early_stopping_callback
+            )
+            callbacks_store.append(early_stopping_callback)
+
+        model_checkpoint_callback: Optional[ModelCheckpoint] = None
+        if conf.train.model_checkpoint_callback is not None:
+            model_checkpoint_callback = hydra.utils.instantiate(
+                conf.train.model_checkpoint_callback,
+                dirpath=experiment_path / "checkpoints" if experiment_path else None,
+            )
+            callbacks_store.append(model_checkpoint_callback)
+
+        if "callbacks" in conf.train and conf.train.callbacks is not None:
+            for _, callback in conf.train.callbacks.items():
+                # callback can be a list of callbacks or a single callback
+                if isinstance(callback, omegaconf.listconfig.ListConfig):
+                    for cb in callback:
+                        callbacks_store.append(hydra.utils.instantiate(cb))
+                else:
+                    callbacks_store.append(hydra.utils.instantiate(callback))
+
+
+        if callbacks is not None:
+            callbacks_store.extend(callbacks)
+        self.callbacks = callbacks_store
+
+    def train(
+        self,
+        max_epochs: Optional[int] = None,
+        max_steps: Optional[int] = None,
+        warmup_steps_ratio: Optional[float] = None,
+        pl_module: Optional[GoldenRetrieverPLModule] = None,
+        pretrain_ckpt_path: Optional[str] = None,
+        resume_ckpt_path: Optional[str] = None,
+        wandb_logger: Optional[WandbLogger] = None,
+        compile: bool = False,
+    ):
+        self.pl_datamodule.setup("fit")
+
+        # count the number of training steps
+        if max_epochs is not None and max_epochs > 0:
+            num_training_steps = len(self.pl_datamodule.train_dataloader()) * max_epochs
+            if max_steps is not None and max_steps > 0:
+                logger.log(
+                    f"Both `max_epochs` and `max_steps` are specified in the trainer configuration. "
+                    f"Will use `max_epochs` for the number of training steps"
+                )
+                max_steps = None
+        elif max_steps is not None and max_steps > 0:
+            num_training_steps = max_steps
+            max_epochs = None
+        else:
+            raise ValueError(
+                "Either `max_epochs` or `max_steps` should be specified in the trainer configuration"
+            )
+        logger.log(f"Expected number of training steps: {num_training_steps}")
+
+        if self.lr_scheduler:
+            # set the number of warmup steps as x% of the total number of training steps
+            if self.lr_scheduler.num_warmup_steps is None:
+                if warmup_steps_ratio is not None:
+                    self.lr_scheduler.num_warmup_steps = int(
+                        self.lr_scheduler.num_training_steps * warmup_steps_ratio
+                    )
+                else:
+                    self.lr_scheduler.num_warmup_steps = 0
+            logger.log(f"Number of warmup steps: {self.lr_scheduler.num_warmup_steps}")
+
+        logger.log(f"Instantiating the Model")
+        if pl_module is None and self.pl_module is None:
+            raise ValueError(
+                "Either `pl_module` or `self.pl_module` should be provided"
+            )
+        pl_module: GoldenRetrieverPLModule = pl_module or self.pl_module
+        if pretrain_ckpt_path is not None:
+            logger.log(f"Loading pretrained checkpoint from {pretrain_ckpt_path}")
+            pl_module.load_state_dict(torch.load(pretrain_ckpt_path)["state_dict"])
+
+        if compile:
+            try:
+                pl_module = torch.compile(pl_module, backend="inductor")
+            except Exception as e:
+                logger.log(
+                    f"Failed to compile the model, you may need to install PyTorch 2.0"
+                )
+        
+        experiment_logger: Optional[WandbLogger] = None
+        experiment_path: Optional[Path] = None
+        if conf.logging.log:
+            logger.log(f"Instantiating Wandb Logger")
+            experiment_logger = hydra.utils.instantiate(conf.logging.wandb_arg)
+            if pl_module is not None:
+                # it may happen that the model is not instantiated if we are only testing
+                # in that case, we don't need to watch the model
+                experiment_logger.watch(pl_module, **conf.logging.watch)
+            experiment_path = Path(experiment_logger.experiment.dir)
+            # Store the YaML config separately into the wandb dir
+            yaml_conf: str = OmegaConf.to_yaml(cfg=conf)
+            (experiment_path / "hparams.yaml").write_text(yaml_conf)
+            # Add a Learning Rate Monitor callback to log the learning rate
+            callbacks_store.append(LearningRateMonitor(logging_interval="step"))
+
+    def test():
+        pass
 
 
 def train(conf: omegaconf.DictConfig) -> None:
@@ -52,7 +186,7 @@ def train(conf: omegaconf.DictConfig) -> None:
 
     # data module declaration
     logger.log(f"Instantiating the Data Module")
-    pl_data_module: PLDataModule = hydra.utils.instantiate(
+    pl_data_module: GoldenRetrieverPLDataModule = hydra.utils.instantiate(
         conf.data.datamodule, _recursive_=False
     )
     # force setup to get labels initialized for the model
@@ -193,7 +327,7 @@ def train(conf: omegaconf.DictConfig) -> None:
         best_pl_module = pl_module
     else:
         # load best model for testing
-        if conf.evaluation.checkpoint_path:
+        if conf.train.checkpoint_path:
             best_model_path = conf.evaluation.checkpoint_path
         elif model_checkpoint_callback:
             best_model_path = model_checkpoint_callback.best_model_path

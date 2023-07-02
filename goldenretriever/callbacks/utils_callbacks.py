@@ -73,7 +73,6 @@ class SavePredictionsCallback(NLPTemplateCallback):
                 for prediction in dataloader_predictions:
                     for k, v in prediction.items():
                         if isinstance(v, set):
-                            # print(f"Warning: converting set to list for key `{k}`")
                             prediction[k] = list(v)
                     f.write(json.dumps(prediction) + "\n")
 
@@ -208,7 +207,7 @@ class SaveRetrieverCallback(pl.Callback):
         checkpoint: Dict[str, Any],
     ):
         self(trainer, pl_module)
-        self.free_up_indexer_callback(pl_module)
+        # self.free_up_indexer_callback(pl_module)
 
 
 class SampleNegativesDatasetCallback(pl.Callback):

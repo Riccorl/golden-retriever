@@ -1,6 +1,9 @@
 import json
 from pathlib import Path
-from typing import Union, List, Set, Dict
+import pickle
+import tempfile
+from typing import Optional, Union, List, Set, Dict
+import transformers as tr
 
 
 class Labels:
@@ -183,3 +186,301 @@ class Labels:
     def save(self, file_path: Union[str, Path, dict], **kwargs):
         with open(file_path, "w") as f:
             json.dump(self._labels_to_index, f, indent=2)
+
+
+class ContextManager:
+    def __init__(
+        self,
+        tokenizer: tr.PreTrainedTokenizer,
+        contexts: Optional[Union[Dict[str, Dict[str, int]], Labels, List[str]]] = None,
+        lazy: bool = True,
+        **kwargs,
+    ):
+        if contexts is None:
+            self.contexts = Labels()
+        elif isinstance(contexts, Labels):
+            self.contexts = contexts
+        elif isinstance(contexts, dict):
+            self.contexts = Labels(contexts)
+        elif isinstance(contexts, list):
+            self.contexts = Labels()
+            self.contexts.add_labels(contexts)
+        else:
+            raise ValueError(
+                "`contexts` should be either a Labels object or a dictionary."
+            )
+
+        self.tokenizer = tokenizer
+        self.lazy = lazy
+
+        self._tokenized_contexts = {}
+
+        if not self.lazy:
+            self._tokenize_contexts(self.contexts)
+
+    def __len__(self) -> int:
+        return self.contexts.get_label_size()
+
+    def get_index_from_context(self, context: str) -> int:
+        """
+        Returns the index of the context in input.
+
+        Args:
+            context (:obj:`str`):
+                The context to get the index from.
+
+        Returns:
+            :obj:`int`: The index of the context.
+        """
+        return self.contexts.get_index_from_label(context)
+
+    def get_context_from_index(self, index: int) -> str:
+        """ "
+        Returns the context from the index in input.
+
+        Args:
+            index (:obj:`int`):
+                The index to get the context from.
+
+        Returns:
+            :obj:`str`: The context.
+        """
+        return self.contexts.get_label_from_index(index)
+
+    def add_contexts(
+        self,
+        contexts: Union[str, List[str], Set[str], Dict[str, int]],
+        lazy: Optional[bool] = None,
+    ) -> List[int]:
+        """
+        Adds the contexts in input in the context dictionary.
+
+        Args:
+            contexts (:obj:`str`, :obj:`List[str]`, :obj:`Set[str]`, :obj:`Dict[str, int]`):
+                The contexts (single context, list of contexts, set of contexts or dictionary of contexts) to add to the dictionary.
+            lazy (:obj:`bool`, optional, defaults to ``None``):
+                Whether to tokenize the contexts right away or not.
+
+        Returns:
+            :obj:`List[int]`: The index of the contexts just inserted.
+        """
+
+        return self.contexts.add_labels(contexts)
+
+    def get_contexts(self) -> Dict[str, int]:
+        """
+        Returns all the contexts in the context dictionary.
+
+        Returns:
+            :obj:`Dict[str, int]`: The context dictionary, from ``str`` to ``int``.
+        """
+        return self.contexts.get_labels()
+
+    def get_tokenized_context(
+        self, context: Union[str, int], force_tokenize: bool = False, **kwargs
+    ) -> Dict:
+        """
+        Returns the tokenized context in input.
+
+        Args:
+            context (:obj:`Union[str, int]`):
+                The context to tokenize.
+            force_tokenize (:obj:`bool`, optional, defaults to ``False``):
+                Whether to force the tokenization of the context or not.
+            kwargs:
+                Additional keyword arguments to pass to the tokenizer.
+
+        Returns:
+            :obj:`Dict`: The tokenized context.
+        """
+        context_index: Optional[int] = None
+        context_str: Optional[str] = None
+
+        if isinstance(context, str):
+            context_index = self.contexts.get_index_from_label(context)
+            context_str = context
+        elif isinstance(context, int):
+            context_index = context
+            context_str = self.contexts.get_label_from_index(context)
+        else:
+            raise ValueError(
+                f"`context` should be either a `str` or an `int`. Provided type: {type(context)}."
+            )
+
+        if context_index not in self._tokenized_contexts or force_tokenize:
+            self._tokenized_contexts[context_index] = self.tokenizer(
+                context_str, **kwargs
+            )
+
+        return self._tokenized_contexts[context_index]
+
+    def _tokenize_contexts(self, **kwargs):
+        for context in self.contexts.get_labels():
+            self.get_tokenized_context(context, **kwargs)
+
+    def tokenize(self, text: Union[str, List[str]], **kwargs):
+        """
+        Tokenizes the text in input using the tokenizer.
+
+        Args:
+            text (:obj:`str`, :obj:`List[str]`):
+                The text to tokenize.
+            **kwargs:
+                Additional keyword arguments to pass to the tokenizer.
+
+        Returns:
+            :obj:`List[str]`: The tokenized text.
+
+        """
+        return self.tokenizer(text, **kwargs)
+
+
+import dbm
+
+
+class ContextManagerDB:
+    def __init__(
+        self,
+        tokenizer: tr.PreTrainedTokenizer,
+        contexts: Optional[Union[Dict[str, Dict[str, int]], Labels, List[str]]] = None,
+        lazy: bool = True,
+        store_path: Optional[str] = None,
+        **kwargs,
+    ):
+        if contexts is None:
+            self.contexts = Labels()
+        elif isinstance(contexts, Labels):
+            self.contexts = contexts
+        elif isinstance(contexts, dict):
+            self.contexts = Labels(contexts)
+        elif isinstance(contexts, list):
+            self.contexts = Labels()
+            self.contexts.add_labels(contexts)
+        else:
+            raise ValueError(
+                "`contexts` should be either a Labels object or a dictionary."
+            )
+
+        self.tokenizer = tokenizer
+        self.lazy = lazy
+
+        self._tokenized_contexts = {}
+
+        if not self.lazy:
+            self._tokenize_contexts(self.contexts)
+
+    def __len__(self) -> int:
+        return self.contexts.get_label_size()
+
+    def get_index_from_context(self, context: str) -> int:
+        """
+        Returns the index of the context in input.
+
+        Args:
+            context (:obj:`str`):
+                The context to get the index from.
+
+        Returns:
+            :obj:`int`: The index of the context.
+        """
+        return self.contexts.get_index_from_label(context)
+
+    def get_context_from_index(self, index: int) -> str:
+        """ "
+        Returns the context from the index in input.
+
+        Args:
+            index (:obj:`int`):
+                The index to get the context from.
+
+        Returns:
+            :obj:`str`: The context.
+        """
+        return self.contexts.get_label_from_index(index)
+
+    def add_contexts(
+        self,
+        contexts: Union[str, List[str], Set[str], Dict[str, int]],
+        lazy: Optional[bool] = None,
+    ) -> List[int]:
+        """
+        Adds the contexts in input in the context dictionary.
+
+        Args:
+            contexts (:obj:`str`, :obj:`List[str]`, :obj:`Set[str]`, :obj:`Dict[str, int]`):
+                The contexts (single context, list of contexts, set of contexts or dictionary of contexts) to add to the dictionary.
+            lazy (:obj:`bool`, optional, defaults to ``None``):
+                Whether to tokenize the contexts right away or not.
+
+        Returns:
+            :obj:`List[int]`: The index of the contexts just inserted.
+        """
+
+        return self.contexts.add_labels(contexts)
+
+    def get_contexts(self) -> Dict[str, int]:
+        """
+        Returns all the contexts in the context dictionary.
+
+        Returns:
+            :obj:`Dict[str, int]`: The context dictionary, from ``str`` to ``int``.
+        """
+        return self.contexts.get_labels()
+
+    def get_tokenized_context(
+        self, context: Union[str, int], force_tokenize: bool = False, **kwargs
+    ) -> Dict:
+        """
+        Returns the tokenized context in input.
+
+        Args:
+            context (:obj:`Union[str, int]`):
+                The context to tokenize.
+            force_tokenize (:obj:`bool`, optional, defaults to ``False``):
+                Whether to force the tokenization of the context or not.
+            kwargs:
+                Additional keyword arguments to pass to the tokenizer.
+
+        Returns:
+            :obj:`Dict`: The tokenized context.
+        """
+        context_index: Optional[int] = None
+        context_str: Optional[str] = None
+
+        if isinstance(context, str):
+            context_index = self.contexts.get_index_from_label(context)
+            context_str = context
+        elif isinstance(context, int):
+            context_index = context
+            context_str = self.contexts.get_label_from_index(context)
+        else:
+            raise ValueError(
+                f"`context` should be either a `str` or an `int`. Provided type: {type(context)}."
+            )
+
+        if context_index not in self._tokenized_contexts or force_tokenize:
+            self._tokenized_contexts[context_index] = self.tokenizer(
+                context_str, **kwargs
+            )
+
+        return self._tokenized_contexts[context_index]
+
+    def _tokenize_contexts(self, **kwargs):
+        for context in self.contexts.get_labels():
+            self.get_tokenized_context(context, **kwargs)
+
+    def tokenize(self, text: Union[str, List[str]], **kwargs):
+        """
+        Tokenizes the text in input using the tokenizer.
+
+        Args:
+            text (:obj:`str`, :obj:`List[str]`):
+                The text to tokenize.
+            **kwargs:
+                Additional keyword arguments to pass to the tokenizer.
+
+        Returns:
+            :obj:`List[str]`: The tokenized text.
+
+        """
+        return self.tokenizer(text, **kwargs)

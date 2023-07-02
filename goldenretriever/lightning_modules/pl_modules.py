@@ -42,7 +42,7 @@ class GoldenRetrieverPLModule(pl.LightningModule):
         self.log(
             "loss",
             forward_output["loss"],
-            batch_size=batch.questions.input_ids.size(0),
+            batch_size=batch["questions"]["input_ids"].size(0),
             prog_bar=True,
         )
         return forward_output["loss"]
@@ -52,7 +52,7 @@ class GoldenRetrieverPLModule(pl.LightningModule):
         self.log(
             "val_loss",
             forward_output["loss"],
-            batch_size=batch.questions.input_ids.size(0),
+            batch_size=batch["questions"]["input_ids"].size(0),
         )
 
     def test_step(self, batch: ModelInputs, batch_idx: int) -> Any:
@@ -60,7 +60,7 @@ class GoldenRetrieverPLModule(pl.LightningModule):
         self.log(
             "test_loss",
             forward_output["loss"],
-            batch_size=batch.questions.input_ids.size(0),
+            batch_size=batch["questions"]["input_ids"].size(0),
         )
 
     def configure_optimizers(self):

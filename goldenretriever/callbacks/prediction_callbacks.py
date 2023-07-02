@@ -1,14 +1,11 @@
-import json
+from copy import deepcopy
 import logging
-import tempfile
 import time
 from pathlib import Path
 from typing import List, Optional, Set, Union
 
-import psutil
 import pytorch_lightning as pl
 import torch
-from datasets import load_dataset
 from omegaconf import DictConfig
 from pytorch_lightning.trainer.states import RunningStage
 from torch.utils.data import DataLoader
@@ -18,8 +15,8 @@ import transformers as tr
 from goldenretriever.callbacks.base import PredictionCallback
 from goldenretriever.common.log import get_console_logger, get_logger
 from goldenretriever.common.model_inputs import ModelInputs
-from goldenretriever.data.datasets import BaseDataset
-from goldenretriever.data.dpr.hard_negatives_manager import HardNegativeManager
+from goldenretriever.data.base.datasets import BaseDataset
+from goldenretriever.data.utils import HardNegativesManager
 from goldenretriever.models.model import GoldenRetriever
 
 console_logger = get_console_logger()
@@ -71,7 +68,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         logger.info(f"Computing predictions for stage {stage.value}")
         if stage not in self.stages:
             raise ValueError(
-                f"Stage {stage} not supported, only {self.stages} are supported"
+                f"Stage `{stage}` not supported, only {self.stages} are supported"
             )
 
         # get the tokenizer
@@ -167,7 +164,8 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                 dataloader,
                 desc=f"Computing predictions for dataset {current_dataset.name}",
             ):
-                batch = batch.to(pl_module.device)
+                # batch = batch
+                batch = ModelInputs(**batch).to(pl_module.device)
                 # get the top-k indices
                 retriever_output = retriever.retrieve(
                     **batch.questions, k=self.k, precision=self.precision
@@ -175,7 +173,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                 # compute recall at k
                 for batch_idx, retrieved_samples in enumerate(retriever_output):
                     # get the positive contexts
-                    gold_contexts = batch.positives[batch_idx]
+                    gold_contexts = batch["positives"][batch_idx]
                     # get the index of the gold contexts in the retrieved contexts
                     gold_context_indices = [
                         retriever.get_index_from_context(context)
@@ -201,8 +199,6 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                             retriever.get_context_from_index(i) for i in wrong_indices
                         ],
                     )
-                    # if "id" in batch:
-                    #     prediction_output["id"] = batch.id[batch_idx]
                     predictions.append(prediction_output)
             end = time.time()
             logger.info(f"Time to retrieve: {str(end - start)}")
@@ -227,7 +223,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                 contexts.update(
                     [
                         " ".join(map(str, [c for c in context_ids.tolist() if c != 0]))
-                        for context_ids in batch.contexts.input_ids
+                        for context_ids in batch["contexts"]["input_ids"]
                     ]
                 )
             for d in trainer.val_dataloaders:
@@ -237,7 +233,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                             " ".join(
                                 map(str, [c for c in context_ids.tolist() if c != 0])
                             )
-                            for context_ids in batch.contexts.input_ids
+                            for context_ids in batch["contexts"]["input_ids"]
                         ]
                     )
             for d in trainer.test_dataloaders:
@@ -247,7 +243,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                             " ".join(
                                 map(str, [c for c in context_ids.tolist() if c != 0])
                             )
-                            for context_ids in batch.contexts.input_ids
+                            for context_ids in batch["contexts"]["input_ids"]
                         ]
                     )
             contexts = list(contexts)
@@ -261,7 +257,7 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
         self,
         k: int = 100,
         batch_size: int = 32,
-        num_workers: int = 4,
+        num_workers: int = 0,
         use_faiss: bool = False,
         move_index_to_cpu: bool = False,
         force_reindex: bool = False,
@@ -311,7 +307,7 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
 
         if self.metrics_to_monitor not in trainer.logged_metrics:
             raise ValueError(
-                f"Metric {self.metric_to_monitor} not found in trainer.logged_metrics"
+                f"Metric `{self.metrics_to_monitor}` not found in trainer.logged_metrics"
                 f"Available metrics: {trainer.logged_metrics.keys()}"
             )
         if trainer.logged_metrics[self.metrics_to_monitor] < self.threshold:
@@ -348,15 +344,21 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
             f"{self.threshold}. Computing hard negatives."
         )
 
-        trainer.datamodule.train_dataset.current_iteration += 1
-        # reset hn_manager
+        # make a copy of the dataset to avoid modifying the original one
         trainer.datamodule.train_dataset.hn_manager = None
-
+        dataset_copy = deepcopy(trainer.datamodule.train_dataset)
         predictions = super().__call__(
             trainer,
             pl_module,
-            datasets=trainer.datamodule.train_dataset,
-            dataloaders=trainer.datamodule.train_dataloader(),
+            datasets=dataset_copy,
+            dataloaders=DataLoader(
+                dataset_copy.to_torch_dataset(),
+                shuffle=False,
+                batch_size=None,
+                num_workers=self.num_workers,
+                pin_memory=True,
+                collate_fn=lambda x: x,
+            ),
             *args,
             **kwargs,
         )
@@ -377,12 +379,11 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
             ][: self.max_negatives]
             hard_negatives_list[prediction["sample_idx"]] = wrong_contexts
 
-        hn_manager = HardNegativeManager(
+        trainer.datamodule.train_dataset.hn_manager = HardNegativesManager(
             tokenizer=trainer.datamodule.tokenizer,
             max_length=trainer.datamodule.train_dataset.max_context_length,
             data=hard_negatives_list,
         )
-        trainer.datamodule.train_dataset.hn_manager = hn_manager
 
         # normalize predictions as in the original GoldenRetrieverPredictionCallback
         predictions = {0: predictions}

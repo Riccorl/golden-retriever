@@ -9,7 +9,7 @@ from pytorch_lightning.trainer.states import RunningStage
 from torch.utils.data import DataLoader, Dataset
 
 from goldenretriever.common.log import get_logger
-from goldenretriever.data.datasets import BaseDataset
+from goldenretriever.data.base.datasets import BaseDataset
 
 logger = get_logger()
 
@@ -129,7 +129,7 @@ class PredictionCallback(pl.Callback):
             # get dataset
             if isinstance(dataset, DictConfig):
                 dataset = hydra.utils.instantiate(dataset, _recursive_=False)
-            datasets = [dataset] if isinstance(dataset, Dataset) else dataset
+            datasets = [dataset] if not isinstance(dataset, list) else dataset
             if dataloader is not None:
                 dataloaders = (
                     [dataloader] if isinstance(dataloader, DataLoader) else dataloader

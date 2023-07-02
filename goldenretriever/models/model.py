@@ -26,7 +26,7 @@ from goldenretriever.common.utils import (
     is_remote_url,
     sapienzanlp_model_urls,
 )
-from goldenretriever.data.datasets import BaseDataset
+from goldenretriever.data.base.datasets import BaseDataset
 from goldenretriever.data.labels import Labels
 from goldenretriever.models.faiss_indexer import FaissIndexer, FaissOutput
 
@@ -309,6 +309,7 @@ class GoldenRetriever(torch.nn.Module):
             )
 
         if question_encodings is None:
+            # print(questions)
             question_encodings = self.question_encoder(**questions)
         if contexts_encodings is None:
             contexts_encodings = self.context_encoder(**contexts)

@@ -1,0 +1,49 @@
+shared_params:
+  contexts_path: null
+  max_context_length: 64
+  context_batch_size: 64
+  question_batch_size: 64
+  use_topics: False
+
+datamodule:
+  _target_: goldenretriever.lightning_modules.pl_data_modules.GoldenRetrieverPLDataModule
+  tokenizer: ${model.language_model}
+  datasets:
+    train:
+      _target_: goldenretriever.data.datasets.InBatchNegativesDataset
+      name: 'train'
+      path: null
+      contexts_path: ${data.shared_params.contexts_path}
+      max_context_length: ${data.shared_params.max_context_length}
+      question_batch_size: ${data.shared_params.question_batch_size}
+      context_batch_size: ${data.shared_params.context_batch_size}
+      subsample_strategy: null
+      subsample_portion: 0.1
+      shuffle: True
+      use_topics: ${data.shared_params.use_topics}
+
+    val:
+      - _target_: goldenretriever.data.datasets.InBatchNegativesDataset
+        name: 'val'
+        path: null
+        contexts_path: ${data.shared_params.contexts_path}
+        max_context_length: ${data.shared_params.max_context_length}
+        question_batch_size: ${data.shared_params.question_batch_size}
+        context_batch_size: ${data.shared_params.context_batch_size}
+        use_topics: ${data.shared_params.use_topics}
+
+    test:
+      - _target_: goldenretriever.data.datasets.InBatchNegativesDataset
+        name: 'test'
+        path: null
+        contexts_path: ${data.shared_params.contexts_path}
+        max_context_length: ${data.shared_params.max_context_length}
+        question_batch_size: ${data.shared_params.question_batch_size}
+        context_batch_size: ${data.shared_params.context_batch_size}
+        use_topics: ${data.shared_params.use_topics}
+
+  num_workers:
+    train: 0
+    val: 0
+    test: 0
+ 

@@ -6,7 +6,7 @@ CHECK_MARK="\033[0;32m\xE2\x9C\x94\033[0m"
 # usage text
 USAGE="$(basename "$0") [-h --help] [-l --language-model LANG_MODEL_NAME] [-d --debug] [-p --precision PRECISION]
 [-c --cpu] [-g --devices DEVICES] [-n --nodes NODES] [-m --gpu-mem GPU_MEM] [-s --strategy STRATEGY]
-[-o --offline] [-t --test] [--config-path CONFIG_PATH] [--checkpoint CHECKPOINT_PATH] [-w --wand WANDB_PROJECT] OVERRIDES
+[-o --offline] [-t --test] [--config-path CONFIG_PATH] [--checkpoint CHECKPOINT_PATH] [-w --wandb WANDB_PROJECT] OVERRIDES
 
 where:
     -h --help             Show this help text
@@ -138,7 +138,7 @@ fi
 # if -p is not specified, PRECISION is 16
 if [ -z "$PRECISION" ]; then
   # default value
-  PRECISION=16
+  PRECISION=16-mixed
 fi
 
 # if -c is not specified, USE_CPU is False
@@ -196,7 +196,7 @@ fi
 if [ -z "$WANDB_PROJECT" ]; then
   WANDB_PROJECT=""
 else
-  WANDB_PROJECT="$OVERRIDES project_name=$WANDB_PROJECT"
+  OVERRIDES="$OVERRIDES project_name=$WANDB_PROJECT"
 fi
 
 # if -t is not specified, ONLY_TEST is False
@@ -267,7 +267,7 @@ cat <<EOF
 |  ██   ██ ███████    ██    ██   ██ ██ ███████   ████   ███████ ██   ██   |
 |                                                                         |       
 '-------------------------------------------------------------------------'    
-                                                         
+
              ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⣤⣴⣶⣾⠿⠶⢶⣶⣤⣤⣀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀                  
              ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣠⣴⡿⠟⠋⠉⠀⠀⠀⠀⠀⠀⠈⠉⠉⠻⣧⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀                  
              ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣠⣾⠟⠉⠀⠀⣠⣤⣶⣷⢀⡀⠀⠀⠀⠀⠀⠀⠈⠻⣦⡀⠀⠀⠀⠀⠀⠀⠀                  
@@ -291,26 +291,10 @@ cat <<EOF
              ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠙⠾⠋⠁⢈⣿⣿⣿⡇⠀⣾⡟⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀                  
              ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣼⡿⠋⠉⢿⣾⡿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀                  
              ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠋⠀⠀⠀⠈⠿⡇⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀                  
-                                                                      
-.---------------------------------------------------------------------------.
-| Configuration:                                                            |
-|---------------------------------------------------------------------------|
-| python:                           $(which python)                         |   
-| Config name:                      $CONFIG_NAME                            |
-| LM name:                          $LANG_MODEL_NAME                        |
-| Run in debug mode:                $DEV_RUN                                |
-| Requested VRAM:                   $GPU_MEM MB                             |
-| Available VRAM:                   $FREE_MEM MB                            |
-| Precision:                        $PRECISION bit                          |
-| Number of GPUs:                   $DEVICES                                |
-| Number of nodes:                  $NODES                                  |
-| Use CPU:                          $USE_CPU                                |
-| W&B Mode:                         $WANDB                                  |
-'---------------------------------------------------------------------------'
-                                                                   
+
+                Golden Retriever Training Script
 EOF
 
-# | $(echo Hydra Configuration Overrides: "$OVERRIDES" | fold -w 70)
 
 # WAITING FOR VRAM STUFF
 chars="/-\|"

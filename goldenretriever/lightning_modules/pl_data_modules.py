@@ -11,13 +11,12 @@ from pytorch_lightning.utilities.types import EVAL_DATALOADERS
 from torch.utils.data import DataLoader, Dataset
 
 from goldenretriever.common.log import get_logger
-from goldenretriever.data.datasets import GenerativeDataset
 from goldenretriever.data.labels import Labels
 
 logger = get_logger()
 
 
-class PLDataModule(pl.LightningDataModule):
+class GoldenRetrieverPLDataModule(pl.LightningDataModule):
     def __init__(
         self,
         datasets: DictConfig,
@@ -96,40 +95,27 @@ class PLDataModule(pl.LightningDataModule):
                 ]
 
     def train_dataloader(self, *args, **kwargs) -> DataLoader:
+        # torch_dataset = self.train_dataset.to_torch_dataset()
         return DataLoader(
-            self.train_dataset,
-            shuffle=not isinstance(self.train_dataset, GenerativeDataset),
-            batch_size=self.batch_sizes.train
-            if not isinstance(self.train_dataset, GenerativeDataset)
-            else None,
-            num_workers=self.num_workers.train
-            if not isinstance(self.train_dataset, GenerativeDataset)
-            else 0,
+            # torch_dataset,
+            self.train_dataset.to_torch_dataset(),
+            shuffle=False,
+            batch_size=None,
+            num_workers=self.num_workers.train,
             pin_memory=True,
-            collate_fn=partial(
-                self.train_dataset.collate_fn, tokenizer=self.tokenizer, *args, **kwargs
-            )
-            if not isinstance(self.train_dataset, GenerativeDataset)
-            else lambda x: x,
+            collate_fn=lambda x: x,
         )
 
     def val_dataloader(self, *args, **kwargs) -> Union[DataLoader, List[DataLoader]]:
         return [
             DataLoader(
-                dataset,
+                # dataset,
+                dataset.to_torch_dataset(),
                 shuffle=False,
-                batch_size=self.batch_sizes.val
-                if not isinstance(dataset, GenerativeDataset)
-                else None,
-                num_workers=self.num_workers.val
-                if not isinstance(dataset, GenerativeDataset)
-                else 0,
+                batch_size=None,
+                num_workers=self.num_workers.val,
                 pin_memory=True,
-                collate_fn=partial(
-                    dataset.collate_fn, tokenizer=self.tokenizer, *args, **kwargs
-                )
-                if not isinstance(dataset, GenerativeDataset)
-                else lambda x: x,
+                collate_fn=lambda x: x,
             )
             for dataset in self.val_datasets
         ]
@@ -137,20 +123,12 @@ class PLDataModule(pl.LightningDataModule):
     def test_dataloader(self, *args, **kwargs) -> Union[DataLoader, List[DataLoader]]:
         return [
             DataLoader(
-                dataset,
+                dataset.to_torch_dataset(),
                 shuffle=False,
-                batch_size=self.batch_sizes.test
-                if not isinstance(dataset, GenerativeDataset)
-                else None,
-                num_workers=self.num_workers.test
-                if not isinstance(dataset, GenerativeDataset)
-                else 0,
+                batch_size=None,
+                num_workers=self.num_workers.test,
                 pin_memory=True,
-                collate_fn=partial(
-                    dataset.collate_fn, tokenizer=self.tokenizer, *args, **kwargs
-                )
-                if not isinstance(dataset, GenerativeDataset)
-                else lambda x: x,
+                collate_fn=lambda x: x,
             )
             for dataset in self.test_datasets
         ]

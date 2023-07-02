@@ -9,13 +9,13 @@ defaults:
   - loss: nce_loss
   - optimizer: radamw
   - scheduler: linear_scheduler
-  - data: iterable_in_batch_negatives
+  - data: dataset_v2
   - logging: wandb_logging
   - override hydra/job_logging: colorlog
   - override hydra/hydra_logging: colorlog
 
-model_name: ${model.language_model}-inbatch # used to name the model in wandb
-project_name: golden-retriever-mosaico # used to name the project in wandb
+model_name: ${model.language_model} # used to name the model in wandb
+project_name: golden-retriever # used to name the project in wandb
 
 train:
   # reproducibility
@@ -27,6 +27,8 @@ train:
   only_test: False
   # if provided, initialize the model with the weights from the checkpoint
   pretrain_ckpt_path: null
+  # if provided, start training from the checkpoint
+  checkpoint_path: null
 
   # task specific parameter
   top_k: 100
@@ -47,6 +49,7 @@ train:
     deterministic: True
     fast_dev_run: False
     precision: 16
+    reload_dataloaders_every_n_epochs: 1
 
   early_stopping_callback:
     null
@@ -110,6 +113,7 @@ train:
 
     utils_callbacks:
       - _target_: goldenretriever.callbacks.utils_callbacks.SaveRetrieverCallback
-      - _target_: goldenretriever.callbacks.utils_callbacks.ShuffleTrainDatasetCallback
-      - _target_: goldenretriever.callbacks.utils_callbacks.PrefetchTrainDatasetCallback
+      # - _target_: goldenretriever.callbacks.utils_callbacks.ShuffleTrainDatasetCallback
+      # - _target_: goldenretriever.callbacks.utils_callbacks.PrefetchTrainDatasetCallback
       - _target_: goldenretriever.callbacks.utils_callbacks.FreeUpIndexerVRAMCallback
+      # - _target_: goldenretriever.callbacks.utils_callbacks.SubsampleDataCallback
