@@ -1,24 +1,24 @@
 import os
+import random
 from copy import deepcopy
 from enum import Enum
 from functools import partial
 from pathlib import Path
-import random
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
 import datasets
 import psutil
 import torch
-from tqdm import tqdm
 import transformers as tr
 from datasets import load_dataset
 from torch.utils.data import Dataset
+from tqdm import tqdm
 
 from goldenretriever.common.log import get_console_logger, get_logger
 from goldenretriever.common.model_inputs import ModelInputs
 from goldenretriever.data.base.datasets import BaseDataset, IterableBaseDataset
-from goldenretriever.data.utils import HardNegativesManager
 from goldenretriever.data.labels import ContextManager
+from goldenretriever.data.utils import HardNegativesManager
 
 console_logger = get_console_logger()
 
@@ -118,17 +118,6 @@ class GoldenRetrieverDataset:
         self.subsample_strategy = subsample_strategy
         self.subsample_portion = subsample_portion
 
-        # context_batch_size cannot be greater than the number of contexts
-        if self.context_batch_size > len(self.context_manager):
-            logger.info(
-                f"Your context_batch_size ({context_batch_size}) "
-                f"is greater than the number of contexts ({len(self.context_manager)}). "
-                f"Setting context_batch_size to {len(self.context_manager)}."
-            )
-            self.context_batch_size = len(self.context_manager)
-
-        self.hn_manager: Optional[HardNegativesManager] = None
-
         # load the dataset
         if data is None:
             self.data: Dataset = self.load(
@@ -147,6 +136,29 @@ class GoldenRetrieverDataset:
             )
         else:
             self.data: Dataset = data
+
+        # create a manager for the contexts
+        self.context_manager = ContextManager()
+        if contexts is not None:
+            if isinstance(contexts, list):
+                context_to_add = contexts
+            else:
+                # read contexts from file if provided
+                logger.info(f"Reading contexts from {contexts}")
+                with open(self.project_folder / contexts, "r") as f:
+                    context_to_add = [line.strip() for line in f.readlines()]
+            self.context_manager.add_contexts(context_to_add)
+
+        # context_batch_size cannot be greater than the number of contexts
+        if self.context_batch_size > len(self.context_manager):
+            logger.info(
+                f"Your context_batch_size ({context_batch_size}) "
+                f"is greater than the number of contexts ({len(self.context_manager)}). "
+                f"Setting context_batch_size to {len(self.context_manager)}."
+            )
+            self.context_batch_size = len(self.context_manager)
+
+        self.hn_manager: Optional[HardNegativesManager] = None
 
         # keep track of how many times the dataset has been iterated over
         self.number_of_complete_iterations = 0
@@ -169,7 +181,6 @@ class GoldenRetrieverDataset:
         self,
         paths: Union[str, os.PathLike, List[str], List[os.PathLike]],
         tokenizer: tr.PreTrainedTokenizer = None,
-        contexts: Union[str, os.PathLike, List[str]] = None,
         load_fn_kwargs: Dict = None,
         load_from_cache_file: bool = True,
         num_proc: Optional[int] = None,
@@ -253,18 +264,6 @@ class GoldenRetrieverDataset:
         # shuffle the data
         if shuffle:
             data.shuffle(seed=42)
-
-        # create a manager for the contexts
-        self.context_manager = ContextManager()
-        if contexts is not None:
-            if isinstance(contexts, Sequence):
-                context_to_add = contexts
-            else:
-                # read contexts from file if provided
-                logger.info(f"Reading contexts from {contexts}")
-                with open(self.project_folder / contexts, "r") as f:
-                    context_to_add = (line.strip() for line in f.readlines())
-            self.context_manager.add_contexts(context_to_add)
 
         return data
 
@@ -406,7 +405,6 @@ class GoldenRetrieverDataset:
 
 
 class InBatchNegativesDataset(GoldenRetrieverDataset):
-
     def __len__(self) -> int:
         if isinstance(self.data, datasets.Dataset):
             return len(self.data)

@@ -104,7 +104,7 @@ train:
         # - sanity_check_recall@${train.top_k}
       threshold: 0.0
       max_negatives: 15
-      add_with_probability: 1.0
+      add_with_probability: 0.2
       refresh_every_n_epochs: 1
       other_callbacks:
         - _target_: goldenretriever.callbacks.evaluation_callbacks.AvgRankingEvaluationCallback

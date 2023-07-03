@@ -339,13 +339,6 @@ def train(conf: omegaconf.DictConfig) -> None:
         conf.train.pl_trainer, callbacks=callbacks_store, logger=experiment_logger
     )
 
-    if experiment_path:
-        # save labels before starting training
-        model_export = experiment_path / "model_export"
-        model_export.mkdir(exist_ok=True, parents=True)
-        # save labels
-        pl_data_module.save_labels(model_export / "labels.json")
-
     if not conf.train.only_test:
         # module fit
         trainer.fit(pl_module, datamodule=pl_data_module)

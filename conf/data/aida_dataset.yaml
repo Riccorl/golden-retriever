@@ -9,7 +9,7 @@ datamodule:
   _target_: goldenretriever.lightning_modules.pl_data_modules.GoldenRetrieverPLDataModule
   datasets:
     train:
-      _target_: goldenretriever.data.datasets.InBatchNegativesDataset
+      _target_: goldenretriever.data.datasets.AidaInBatchNegativesDataset
       name: 'train'
       path: null
       tokenizer: ${model.language_model}
@@ -23,7 +23,7 @@ datamodule:
       use_topics: ${data.shared_params.use_topics}
 
     val:
-      - _target_: goldenretriever.data.datasets.InBatchNegativesDataset
+      - _target_: goldenretriever.data.datasets.AidaInBatchNegativesDataset
         name: 'val'
         path: null
         tokenizer: ${model.language_model}
@@ -34,7 +34,7 @@ datamodule:
         use_topics: ${data.shared_params.use_topics}
 
     test:
-      - _target_: goldenretriever.data.datasets.InBatchNegativesDataset
+      - _target_: goldenretriever.data.datasets.AidaInBatchNegativesDataset
         name: 'test'
         path: null
         tokenizer: ${model.language_model}
