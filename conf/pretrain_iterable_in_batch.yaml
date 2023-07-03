@@ -78,10 +78,10 @@ train:
       precision: 16
       index_precision: 16
       other_callbacks:
-        - _target_: goldenretriever.callbacks.evaluation_callbacks.TopKEvaluationCallback
+        - _target_: goldenretriever.callbacks.evaluation_callbacks.RecallAtKEvaluationCallback
           k: ${train.top_k}
           verbose: True
-        - _target_: goldenretriever.callbacks.evaluation_callbacks.TopKEvaluationCallback
+        - _target_: goldenretriever.callbacks.evaluation_callbacks.RecallAtKEvaluationCallback
           k: 50
           verbose: True
           prog_bar: False
@@ -104,6 +104,7 @@ train:
         # - sanity_check_recall@${train.top_k}
       threshold: 0.0
       max_negatives: 15
+      add_with_probability: 1.0
       refresh_every_n_epochs: 1
       other_callbacks:
         - _target_: goldenretriever.callbacks.evaluation_callbacks.AvgRankingEvaluationCallback
@@ -113,7 +114,4 @@ train:
 
     utils_callbacks:
       - _target_: goldenretriever.callbacks.utils_callbacks.SaveRetrieverCallback
-      # - _target_: goldenretriever.callbacks.utils_callbacks.ShuffleTrainDatasetCallback
-      # - _target_: goldenretriever.callbacks.utils_callbacks.PrefetchTrainDatasetCallback
       - _target_: goldenretriever.callbacks.utils_callbacks.FreeUpIndexerVRAMCallback
-      # - _target_: goldenretriever.callbacks.utils_callbacks.SubsampleDataCallback

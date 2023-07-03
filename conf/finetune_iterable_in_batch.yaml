@@ -78,10 +78,10 @@ train:
       precision: 16
       index_precision: 16
       other_callbacks:
-        - _target_: goldenretriever.callbacks.evaluation_callbacks.TopKEvaluationCallback
+        - _target_: goldenretriever.callbacks.evaluation_callbacks.RecallAtKEvaluationCallback
           k: ${train.top_k}
           verbose: True
-        - _target_: goldenretriever.callbacks.evaluation_callbacks.TopKEvaluationCallback
+        - _target_: goldenretriever.callbacks.evaluation_callbacks.RecallAtKEvaluationCallback
           k: 50
           verbose: True
           prog_bar: False

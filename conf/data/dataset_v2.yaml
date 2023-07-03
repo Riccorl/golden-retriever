@@ -7,12 +7,12 @@ shared_params:
 
 datamodule:
   _target_: goldenretriever.lightning_modules.pl_data_modules.GoldenRetrieverPLDataModule
-  tokenizer: ${model.language_model}
   datasets:
     train:
       _target_: goldenretriever.data.datasets.InBatchNegativesDataset
       name: 'train'
       path: null
+      tokenizer: ${model.language_model}
       contexts_path: ${data.shared_params.contexts_path}
       max_context_length: ${data.shared_params.max_context_length}
       question_batch_size: ${data.shared_params.question_batch_size}
@@ -26,6 +26,7 @@ datamodule:
       - _target_: goldenretriever.data.datasets.InBatchNegativesDataset
         name: 'val'
         path: null
+        tokenizer: ${model.language_model}
         contexts_path: ${data.shared_params.contexts_path}
         max_context_length: ${data.shared_params.max_context_length}
         question_batch_size: ${data.shared_params.question_batch_size}
@@ -36,6 +37,7 @@ datamodule:
       - _target_: goldenretriever.data.datasets.InBatchNegativesDataset
         name: 'test'
         path: null
+        tokenizer: ${model.language_model}
         contexts_path: ${data.shared_params.contexts_path}
         max_context_length: ${data.shared_params.max_context_length}
         question_batch_size: ${data.shared_params.question_batch_size}
@@ -43,7 +45,7 @@ datamodule:
         use_topics: ${data.shared_params.use_topics}
 
   num_workers:
-    train: 0
-    val: 0
-    test: 0
+    train: 4
+    val: 4
+    test: 4
  

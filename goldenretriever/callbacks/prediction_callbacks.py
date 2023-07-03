@@ -1,6 +1,7 @@
-from copy import deepcopy
 import logging
+import random
 import time
+from copy import deepcopy
 from pathlib import Path
 from typing import List, Optional, Set, Union
 
@@ -10,12 +11,12 @@ from omegaconf import DictConfig
 from pytorch_lightning.trainer.states import RunningStage
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-import transformers as tr
 
 from goldenretriever.callbacks.base import PredictionCallback
 from goldenretriever.common.log import get_console_logger, get_logger
 from goldenretriever.common.model_inputs import ModelInputs
 from goldenretriever.data.base.datasets import BaseDataset
+from goldenretriever.data.datasets import GoldenRetrieverDataset
 from goldenretriever.data.utils import HardNegativesManager
 from goldenretriever.models.model import GoldenRetriever
 
@@ -72,7 +73,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
             )
 
         # get the tokenizer
-        tokenizer = trainer.datamodule.tokenizer
+        # tokenizer = trainer.datamodule.tokenizer
 
         # if datasets is not None or dataloaders is not None:
         #     self.datasets = datasets
@@ -88,7 +89,6 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                 pin_memory=True,
                 shuffle=False,
             ),
-            collate_fn_kwargs=dict(tokenizer=tokenizer),
         )
 
         # set the model to eval mode
@@ -100,12 +100,13 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         dataloader_predictions = {}
         # compute the context embeddings index for each dataloader
         for dataloader_idx, dataloader in enumerate(self.dataloaders):
-            current_dataset: BaseDataset = self.datasets[dataloader_idx]
+            current_dataset: GoldenRetrieverDataset = self.datasets[dataloader_idx]
             logger.info(
                 f"Computing context embeddings for dataset {current_dataset.name}"
             )
             contexts = self._get_contexts_dataloader(current_dataset, trainer)
 
+            tokenizer = current_dataset.tokenizer
             collate_fn = lambda x: ModelInputs(
                 tokenizer(
                     x,
@@ -164,8 +165,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                 dataloader,
                 desc=f"Computing predictions for dataset {current_dataset.name}",
             ):
-                # batch = batch
-                batch = ModelInputs(**batch).to(pl_module.device)
+                batch = batch.to(pl_module.device)
                 # get the top-k indices
                 retriever_output = retriever.retrieve(
                     **batch.questions, k=self.k, precision=self.precision
@@ -253,6 +253,47 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
 
 
 class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
+    """
+    Callback that computes the predictions of a retriever model on a dataset and computes the
+    negative examples for the training set.
+
+    Args:
+        k (:obj:`int`, `optional`, defaults to 100): 
+            The number of top-k retrieved contexts to
+            consider for the evaluation.
+        batch_size (:obj:`int`, `optional`, defaults to 32):
+            The batch size to use for the evaluation.
+        num_workers (:obj:`int`, `optional`, defaults to 0):
+            The number of workers to use for the evaluation.
+        use_faiss (:obj:`bool`, `optional`, defaults to :obj:`False`):
+            Whether to use faiss for the evaluation.
+        move_index_to_cpu (:obj:`bool`, `optional`, defaults to :obj:`False`):
+            Whether to move the index to the cpu.
+        force_reindex (:obj:`bool`, `optional`, defaults to :obj:`False`):
+            Whether to force the reindexing of the dataset.
+        retriever_dir (:obj:`Path`, `optional`):
+            The path to the retriever directory. If not specified, the retriever will be
+            initialized from scratch.
+        stages (:obj:`Set[str]`, `optional`):
+            The stages to run the callback on. If not specified, the callback will be run on
+            train, validation and test.
+        other_callbacks (:obj:`List[DictConfig]`, `optional`):
+            A list of other callbacks to run on the same stages.
+        dataset (:obj:`Union[DictConfig, BaseDataset]`, `optional`):
+            The dataset to use for the evaluation. If not specified, the dataset will be
+            initialized from scratch.
+        metrics_to_monitor (:obj:`List[str]`, `optional`):
+            The metrics to monitor for the evaluation.
+        threshold (:obj:`float`, `optional`, defaults to 0.8):
+            The threshold to consider. If the recall score of the retriever is above the
+            threshold, the negative examples will be added to the training set.
+        max_negatives (:obj:`int`, `optional`, defaults to 5):
+            The maximum number of negative examples to add to the training set.
+        add_with_probability (:obj:`float`, `optional`, defaults to 1.0):
+            The probability with which to add the negative examples to the training set.
+        refresh_every_n_epochs (:obj:`int`, `optional`, defaults to 1):
+            The number of epochs after which to refresh the index.
+    """
     def __init__(
         self,
         k: int = 100,
@@ -268,6 +309,7 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
         metrics_to_monitor: List[str] = None,
         threshold: float = 0.8,
         max_negatives: int = 5,
+        add_with_probability: float = 1.0,
         refresh_every_n_epochs: int = 1,
         *args,
         **kwargs,
@@ -291,6 +333,7 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
         self.metrics_to_monitor = metrics_to_monitor
         self.threshold = threshold
         self.max_negatives = max_negatives
+        self.add_with_probability = add_with_probability
         self.refresh_every_n_epochs = refresh_every_n_epochs
 
     @torch.no_grad()
@@ -301,6 +344,19 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
         *args,
         **kwargs,
     ) -> dict:
+        """
+        Computes the predictions of a retriever model on a dataset and computes the negative
+        examples for the training set.
+
+        Args:
+            trainer (:obj:`pl.Trainer`):
+                The trainer object.
+            pl_module (:obj:`pl.LightningModule`):
+                The lightning module.
+
+        Returns:
+            A dictionary containing the negative examples.
+        """
         stage = trainer.state.stage
         if stage not in self.stages:
             return {}
@@ -369,6 +425,8 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
         # store the predictions in a dictionary for faster access based on the sample index
         hard_negatives_list = {}
         for prediction in tqdm(predictions, desc="Collecting hard negatives"):
+            if random.random() < 1 - self.add_with_probability:
+                continue
             top_k_contexts = prediction["predictions"]
             gold_contexts = prediction["gold"]
             # get the ids of the max_negatives wrong contexts with the highest similarity
@@ -380,7 +438,7 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
             hard_negatives_list[prediction["sample_idx"]] = wrong_contexts
 
         trainer.datamodule.train_dataset.hn_manager = HardNegativesManager(
-            tokenizer=trainer.datamodule.tokenizer,
+            tokenizer=trainer.datamodule.train_dataset.tokenizer,
             max_length=trainer.datamodule.train_dataset.max_context_length,
             data=hard_negatives_list,
         )

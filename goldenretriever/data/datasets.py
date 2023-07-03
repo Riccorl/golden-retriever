@@ -20,7 +20,6 @@ from goldenretriever.data.base.datasets import BaseDataset, IterableBaseDataset
 from goldenretriever.data.utils import HardNegativesManager
 from goldenretriever.data.labels import ContextManager
 
-
 console_logger = get_console_logger()
 
 logger = get_logger(__name__)
@@ -38,6 +37,22 @@ class GoldenRetrieverDataset:
         name: str,
         path: Union[str, os.PathLike, List[str], List[os.PathLike]] = None,
         data: Any = None,
+        tokenizer: Optional[Union[str, tr.PreTrainedTokenizer]] = None,
+        contexts: Union[str, os.PathLike, List[str]] = None,
+        context_batch_size: int = 32,
+        question_batch_size: int = 32,
+        max_positives: int = -1,
+        max_negatives: int = 0,
+        max_hard_negatives: int = 0,
+        max_question_length: int = 256,
+        max_context_length: int = 64,
+        shuffle: bool = False,
+        subsample_strategy: Optional[str] = SubsampleStrategyEnum.NONE,
+        subsample_portion: float = 0.1,
+        num_proc: Optional[int] = None,
+        load_from_cache_file: bool = True,
+        keep_in_memory: bool = False,
+        prefetch: bool = True,
         load_fn_kwargs: Optional[Dict[str, Any]] = None,
         batch_fn_kwargs: Optional[Dict[str, Any]] = None,
         collate_fn_kwargs: Optional[Dict[str, Any]] = None,
@@ -45,11 +60,96 @@ class GoldenRetrieverDataset:
         if path is None and data is None:
             raise ValueError("Either `path` or `data` must be provided")
 
+        if tokenizer is None:
+            raise ValueError("A tokenizer must be provided")
+
         # dataset parameters
         self.name = name
         self.path = path
         self.project_folder = Path(__file__).parent.parent.parent
         self.data = data
+
+        # hyper-parameters
+        self.context_batch_size = context_batch_size
+        self.question_batch_size = question_batch_size
+        self.max_positives = max_positives
+        self.max_negatives = max_negatives
+        self.max_hard_negatives = max_hard_negatives
+        self.max_question_length = max_question_length
+        self.max_context_length = max_context_length
+        self.shuffle = shuffle
+        self.num_proc = num_proc
+        self.load_from_cache_file = load_from_cache_file
+        self.keep_in_memory = keep_in_memory
+        self.prefetch = prefetch
+
+        self.tokenizer = tokenizer
+        if isinstance(self.tokenizer, str):
+            self.tokenizer = tr.AutoTokenizer.from_pretrained(self.tokenizer)
+
+        self.padding_ops = {
+            "input_ids": partial(
+                self.pad_sequence,
+                value=self.tokenizer.pad_token_id,
+            ),
+            "attention_mask": partial(self.pad_sequence, value=0),
+            "token_type_ids": partial(
+                self.pad_sequence,
+                value=self.tokenizer.pad_token_type_id,
+            ),
+        }
+
+        # check if subsample strategy is valid
+        if subsample_strategy is not None:
+            # subsample_strategy can be a string or a SubsampleStrategy
+            if isinstance(subsample_strategy, str):
+                try:
+                    subsample_strategy = SubsampleStrategyEnum(subsample_strategy)
+                except ValueError:
+                    raise ValueError(
+                        f"Subsample strategy {subsample_strategy} is not valid. "
+                        f"Valid strategies are: {SubsampleStrategyEnum.__members__}"
+                    )
+            if not isinstance(subsample_strategy, SubsampleStrategyEnum):
+                raise ValueError(
+                    f"Subsample strategy {subsample_strategy} is not valid. "
+                    f"Valid strategies are: {SubsampleStrategyEnum.__members__}"
+                )
+        self.subsample_strategy = subsample_strategy
+        self.subsample_portion = subsample_portion
+
+        # context_batch_size cannot be greater than the number of contexts
+        if self.context_batch_size > len(self.context_manager):
+            logger.info(
+                f"Your context_batch_size ({context_batch_size}) "
+                f"is greater than the number of contexts ({len(self.context_manager)}). "
+                f"Setting context_batch_size to {len(self.context_manager)}."
+            )
+            self.context_batch_size = len(self.context_manager)
+
+        self.hn_manager: Optional[HardNegativesManager] = None
+
+        # load the dataset
+        if data is None:
+            self.data: Dataset = self.load(
+                path,
+                tokenizer=self.tokenizer,
+                load_from_cache_file=load_from_cache_file,
+                load_fn_kwargs=load_fn_kwargs,
+                num_proc=num_proc,
+                shuffle=shuffle,
+                keep_in_memory=keep_in_memory,
+                max_positives=max_positives,
+                max_negatives=max_negatives,
+                max_hard_negatives=max_hard_negatives,
+                max_question_length=max_question_length,
+                max_context_length=max_context_length,
+            )
+        else:
+            self.data: Dataset = data
+
+        # keep track of how many times the dataset has been iterated over
+        self.number_of_complete_iterations = 0
 
     def __repr__(self) -> str:
         return f"GoldenRetrieverDataset({self.name=}, {self.path=})"
@@ -64,6 +164,109 @@ class GoldenRetrieverDataset:
 
     def to_torch_dataset(self, *args, **kwargs) -> torch.utils.data.Dataset:
         raise NotImplementedError
+
+    def load(
+        self,
+        paths: Union[str, os.PathLike, List[str], List[os.PathLike]],
+        tokenizer: tr.PreTrainedTokenizer = None,
+        contexts: Union[str, os.PathLike, List[str]] = None,
+        load_fn_kwargs: Dict = None,
+        load_from_cache_file: bool = True,
+        num_proc: Optional[int] = None,
+        shuffle: bool = False,
+        keep_in_memory: bool = True,
+        max_positives: int = -1,
+        max_negatives: int = -1,
+        max_hard_negatives: int = -1,
+        max_contexts: int = -1,
+        max_question_length: int = 256,
+        max_context_length: int = 64,
+        *args,
+        **kwargs,
+    ) -> Any:
+        if isinstance(paths, Sequence):
+            paths = [self.project_folder / path for path in paths]
+        else:
+            paths = [self.project_folder / paths]
+
+        # read the data and put it in a placeholder list
+        for path in paths:
+            if not path.exists():
+                raise ValueError(f"{path} does not exist")
+
+        fn_kwargs = dict(
+            tokenizer=tokenizer,
+            max_positives=max_positives,
+            max_negatives=max_negatives,
+            max_hard_negatives=max_hard_negatives,
+            max_contexts=max_contexts,
+            max_question_length=max_question_length,
+            max_context_length=max_context_length,
+        )
+        if load_fn_kwargs is not None:
+            fn_kwargs.update(load_fn_kwargs)
+
+        if num_proc is None:
+            num_proc = psutil.cpu_count(logical=False)
+
+        # The data is a list of dictionaries, each dictionary is a sample
+        # Each sample has the following keys:
+        #   - "question": the question
+        #   - "answers": a list of answers
+        #   - "positive_ctxs": a list of positive contexts
+        #   - "negative_ctxs": a list of negative contexts
+        #   - "hard_negative_ctxs": a list of hard negative contexts
+        # use the huggingface dataset library to load the data, by default it will load the
+        # data in a dict with the key being "train".
+        logger.info("Loading data from files")
+        data = load_dataset(
+            "json",
+            data_files=[str(p) for p in paths],  # datasets needs str paths and not Path
+            split="train",
+            streaming=False,  # TODO maybe we can make streaming work
+            keep_in_memory=keep_in_memory,
+        )
+        # add id if not present
+        if isinstance(data, datasets.Dataset):
+            data = data.add_column("sample_idx", range(len(data)))
+        else:
+            data = data.map(
+                lambda x, idx: x.update({"sample_idx": idx}), with_indices=True
+            )
+
+        map_kwargs = dict(
+            function=self.load_fn,
+            fn_kwargs=fn_kwargs,
+        )
+        if isinstance(data, datasets.Dataset):
+            map_kwargs.update(
+                dict(
+                    load_from_cache_file=load_from_cache_file,
+                    keep_in_memory=keep_in_memory,
+                    num_proc=num_proc,
+                    desc="Loading data",
+                )
+            )
+        # preprocess the data
+        data = data.map(**map_kwargs)
+
+        # shuffle the data
+        if shuffle:
+            data.shuffle(seed=42)
+
+        # create a manager for the contexts
+        self.context_manager = ContextManager()
+        if contexts is not None:
+            if isinstance(contexts, Sequence):
+                context_to_add = contexts
+            else:
+                # read contexts from file if provided
+                logger.info(f"Reading contexts from {contexts}")
+                with open(self.project_folder / contexts, "r") as f:
+                    context_to_add = (line.strip() for line in f.readlines())
+            self.context_manager.add_contexts(context_to_add)
+
+        return data
 
     @staticmethod
     def create_batches(
@@ -197,136 +400,12 @@ class GoldenRetrieverDataset:
 
     @property
     def contexts(self):
+        if self.context_manager is None:
+            return []
         return list(self.context_manager.get_contexts().keys())
 
 
 class InBatchNegativesDataset(GoldenRetrieverDataset):
-    def __init__(
-        self,
-        name: str,
-        path: Union[str, os.PathLike, List[str], List[os.PathLike]] = None,
-        data: Any = None,
-        context_batch_size: int = 32,
-        question_batch_size: int = 32,
-        max_positives: int = -1,
-        max_negatives: int = 0,
-        max_hard_negatives: int = 0,
-        max_question_length: int = 256,
-        max_context_length: int = 64,
-        contexts_path: Union[str, os.PathLike] = None,
-        tokenizer: Optional[Union[str, tr.PreTrainedTokenizer]] = None,
-        shuffle: bool = False,
-        subsample_strategy: Optional[str] = SubsampleStrategyEnum.NONE,
-        subsample_portion: float = 0.1,
-        num_proc: Optional[int] = None,
-        load_from_cache_file: bool = True,
-        keep_in_memory: bool = False,
-        prefetch: bool = True,
-        load_fn_kwargs: Optional[Dict[str, Any]] = None,
-        batch_fn_kwargs: Optional[Dict[str, Any]] = None,
-        collate_fn_kwargs: Optional[Dict[str, Any]] = None,
-        hard_negatives_probability: float = 1.0,
-        **kwargs,
-    ):
-        super().__init__(name=name, path=path, data=data)
-
-        if tokenizer is None:
-            raise ValueError("A tokenizer must be provided")
-
-        # dataset hyperparameters
-        self.context_batch_size = context_batch_size
-        self.question_batch_size = question_batch_size
-        self.max_positives = max_positives
-        self.max_negatives = max_negatives
-        self.max_hard_negatives = max_hard_negatives
-        self.max_question_length = max_question_length
-        self.max_context_length = max_context_length
-        self.shuffle = shuffle
-        self.num_proc = num_proc
-        self.load_from_cache_file = load_from_cache_file
-        self.keep_in_memory = keep_in_memory
-        self.prefetch = prefetch
-
-        # check if subsample strategy is valid
-        if subsample_strategy is not None:
-            # subsample_strategy can be a string or a SubsampleStrategy
-            if isinstance(subsample_strategy, str):
-                try:
-                    subsample_strategy = SubsampleStrategyEnum(subsample_strategy)
-                except ValueError:
-                    raise ValueError(
-                        f"Subsample strategy {subsample_strategy} is not valid. "
-                        f"Valid strategies are: {SubsampleStrategyEnum.__members__}"
-                    )
-            if not isinstance(subsample_strategy, SubsampleStrategyEnum):
-                raise ValueError(
-                    f"Subsample strategy {subsample_strategy} is not valid. "
-                    f"Valid strategies are: {SubsampleStrategyEnum.__members__}"
-                )
-        self.subsample_strategy = subsample_strategy
-        self.subsample_portion = subsample_portion
-
-        self.tokenizer = tokenizer
-        if isinstance(self.tokenizer, str):
-            self.tokenizer = tr.AutoTokenizer.from_pretrained(self.tokenizer)
-
-        self.padding_ops = {
-            "input_ids": partial(
-                self.pad_sequence,
-                value=self.tokenizer.pad_token_id,
-            ),
-            # value is None because: (read `pad_sequence` doc)
-            "attention_mask": partial(self.pad_sequence, value=0),
-            "token_type_ids": partial(
-                self.pad_sequence,
-                value=self.tokenizer.pad_token_type_id,
-            ),
-        }
-
-        # create a manager for the contexts
-        self.context_manager = ContextManager(self.tokenizer)
-        # read contexts from file if provided
-        if contexts_path:
-            logger.info(f"Reading contexts from {contexts_path}")
-            with open(self.project_folder / contexts_path, "r") as f:
-                self.context_manager.add_contexts(
-                    [line.strip() for line in f.readlines()]
-                )
-
-        # context_batch_size cannot be greater than the number of contexts
-        if self.context_batch_size > len(self.context_manager):
-            logger.info(
-                f"Your context_batch_size ({context_batch_size}) "
-                f"is greater than the number of contexts ({len(self.context_manager)}). "
-                f"Setting context_batch_size to {len(self.context_manager)}."
-            )
-            self.context_batch_size = len(self.context_manager)
-
-        self.hn_manager: Optional[HardNegativesManager] = None
-        self.hard_negatives_probability = hard_negatives_probability
-
-        # load the dataset
-        if data is None:
-            self.data: Dataset = self.load(
-                path,
-                tokenizer=self.tokenizer,
-                load_from_cache_file=load_from_cache_file,
-                load_fn_kwargs=load_fn_kwargs,
-                num_proc=num_proc,
-                shuffle=shuffle,
-                keep_in_memory=keep_in_memory,
-                max_positives=max_positives,
-                max_negatives=max_negatives,
-                max_hard_negatives=max_hard_negatives,
-                max_question_length=max_question_length,
-                max_context_length=max_context_length,
-                **kwargs,
-            )
-        else:
-            self.data: Dataset = data
-
-        # keep track of how many times the dataset has been iterated over
-        self.number_of_complete_iterations = 0
 
     def __len__(self) -> int:
         if isinstance(self.data, datasets.Dataset):
@@ -368,7 +447,7 @@ class InBatchNegativesDataset(GoldenRetrieverDataset):
                 )
                 data = deepcopy(self.data).select(range(already_selected, to_select))
 
-                # don't shuffle the data if we are subsampling and we have still not completed
+                # don't shuffle the data if we are subsampling, and we have still not completed
                 # one full iteration over the dataset
                 if self.number_of_complete_iterations > 0:
                     shuffle_this_time = False
@@ -397,7 +476,6 @@ class InBatchNegativesDataset(GoldenRetrieverDataset):
             "context_batch_size": self.context_batch_size,
             "question_batch_size": self.question_batch_size,
             "hard_negatives_manager": self.hn_manager,
-            "hard_negatives_probability": self.hard_negatives_probability,
         }
         batched_data = self.create_batches(
             data,
@@ -428,6 +506,8 @@ class InBatchNegativesDataset(GoldenRetrieverDataset):
         max_contexts: int = -1,
         max_question_length: int = 256,
         max_context_length: int = 128,
+        *args,
+        **kwargs,
     ) -> Dict:
         # remove duplicates and limit the number of contexts
         positives = list(set([p["text"].strip() for p in sample["positive_ctxs"]]))
@@ -469,7 +549,8 @@ class InBatchNegativesDataset(GoldenRetrieverDataset):
         context_batch_size: int,
         question_batch_size: int,
         hard_negatives_manager: Optional[HardNegativesManager] = None,
-        hard_negatives_probability: float = 1.0,
+        *args,
+        **kwargs,
     ) -> Dict[str, List[Dict[str, Any]]]:
         def split_batch(
             batch: Union[Dict[str, Any], ModelInputs], question_batch_size: int
@@ -496,12 +577,14 @@ class InBatchNegativesDataset(GoldenRetrieverDataset):
             batches = []
             for i in range(len(questions)):
                 batches.append(
-                    dict(
-                        sample_idx=sample_idx[i],
-                        questions=questions[i],
-                        contexts=batch["contexts"],
-                        positives=positives[i],
-                        positives_ctxs=positives_ctxs[i],
+                    ModelInputs(
+                        dict(
+                            sample_idx=sample_idx[i],
+                            questions=questions[i],
+                            contexts=batch["contexts"],
+                            positives=positives[i],
+                            positives_ctxs=positives_ctxs[i],
+                        )
                     )
                 )
             return batches
@@ -512,12 +595,14 @@ class InBatchNegativesDataset(GoldenRetrieverDataset):
         for sample in data:
             if len(contexts_in_batch) >= context_batch_size:
                 # create the batch dict
-                batch_dict = dict(
-                    sample_idx=[s["sample_idx"] for s in batch],
-                    questions=[s["question"] for s in batch],
-                    contexts=list(contexts_in_batch.values()),
-                    positives_ctxs=[s["positive_ctxs"] for s in batch],
-                    positives=[s["positives"] for s in batch],
+                batch_dict = ModelInputs(
+                    dict(
+                        sample_idx=[s["sample_idx"] for s in batch],
+                        questions=[s["question"] for s in batch],
+                        contexts=list(contexts_in_batch.values()),
+                        positives_ctxs=[s["positive_ctxs"] for s in batch],
+                        positives=[s["positives"] for s in batch],
+                    )
                 )
                 # split the batch if needed
                 if len(batch) > question_batch_size:
@@ -537,30 +622,29 @@ class InBatchNegativesDataset(GoldenRetrieverDataset):
             # we use a tuple because set doesn't support lists
             # we use input_ids as discriminator
             contexts_in_batch.update(
-                {
-                    tuple(context["input_ids"]): context
-                    for context in sample["context"]
-                }
+                {tuple(context["input_ids"]): context for context in sample["context"]}
             )
             # check for hard negatives and add with a probability of 0.1
-            if hard_negatives_manager is not None and random.random() < hard_negatives_probability:
+            if hard_negatives_manager is not None:
                 contexts_in_batch.update(
                     {
                         tuple(context["input_ids"]): context
                         for context in hard_negatives_manager.get(sample["sample_idx"])
-                        # if sample["sample_idx"] in hard_negatives_manager
+                        if sample["sample_idx"] in hard_negatives_manager
                     }
                 )
 
         # left over
         if len(batch) > 0:
             # create the batch dict
-            batch_dict = dict(
-                sample_idx=[s["sample_idx"] for s in batch],
-                questions=[s["question"] for s in batch],
-                contexts=list(contexts_in_batch.values()),
-                positives_ctxs=[s["positive_ctxs"] for s in batch],
-                positives=[s["positives"] for s in batch],
+            batch_dict = ModelInputs(
+                dict(
+                    sample_idx=[s["sample_idx"] for s in batch],
+                    questions=[s["question"] for s in batch],
+                    contexts=list(contexts_in_batch.values()),
+                    positives_ctxs=[s["positive_ctxs"] for s in batch],
+                    positives=[s["positives"] for s in batch],
+                )
             )
             # split the batch if needed
             if len(batch) > question_batch_size:
@@ -571,13 +655,11 @@ class InBatchNegativesDataset(GoldenRetrieverDataset):
 
     def collate_fn(self, batch: Any, *args, **kwargs) -> Any:
         # convert questions and contexts to a batch
-        questions = self.convert_to_batch(batch["questions"])
-        contexts = self.convert_to_batch(batch["contexts"])
+        questions = self.convert_to_batch(batch.questions)
+        contexts = self.convert_to_batch(batch.contexts)
 
         # build an index to map the position of the context in the batch
-        context_index = {
-            tuple(c["input_ids"]): i for i, c in enumerate(batch["contexts"])
-        }
+        context_index = {tuple(c["input_ids"]): i for i, c in enumerate(batch.contexts)}
 
         # now we can create the labels
         labels = torch.zeros(
@@ -591,104 +673,16 @@ class InBatchNegativesDataset(GoldenRetrieverDataset):
                 # set the label to 1
                 labels[sample_idx, index] = 1
 
-        model_inputs = {
-            "questions": questions,
-            "contexts": contexts,
-            "labels": labels,
-            "positives": batch["positives"],
-            "sample_idx": batch["sample_idx"],
-        }
+        model_inputs = ModelInputs(
+            {
+                "questions": questions,
+                "contexts": contexts,
+                "labels": labels,
+                "positives": batch["positives"],
+                "sample_idx": batch["sample_idx"],
+            }
+        )
         return model_inputs
-
-    def load(
-        self,
-        paths: Union[str, os.PathLike, List[str], List[os.PathLike]],
-        tokenizer: tr.PreTrainedTokenizer = None,
-        load_fn_kwargs: Dict = None,
-        load_from_cache_file: bool = True,
-        num_proc: Optional[int] = None,
-        shuffle: bool = False,
-        keep_in_memory: bool = True,
-        max_positives: int = -1,
-        max_negatives: int = -1,
-        max_hard_negatives: int = -1,
-        max_contexts: int = -1,
-        max_question_length: int = 256,
-        max_context_length: int = 64,
-        *args,
-        **kwargs,
-    ) -> Any:
-        if isinstance(paths, Sequence):
-            paths = [self.project_folder / path for path in paths]
-        else:
-            paths = [self.project_folder / paths]
-
-        # read the data and put it in a placeholder list
-        for path in paths:
-            if not path.exists():
-                raise ValueError(f"{path} does not exist")
-
-        fn_kwargs = dict(
-            tokenizer=tokenizer,
-            max_positives=max_positives,
-            max_negatives=max_negatives,
-            max_hard_negatives=max_hard_negatives,
-            max_contexts=max_contexts,
-            max_question_length=max_question_length,
-            max_context_length=max_context_length,
-        )
-        if load_fn_kwargs is not None:
-            fn_kwargs.update(load_fn_kwargs)
-
-        if num_proc is None:
-            num_proc = psutil.cpu_count(logical=False)
-
-        # The data is a list of dictionaries, each dictionary is a sample
-        # Each sample has the following keys:
-        #   - "question": the question
-        #   - "answers": a list of answers
-        #   - "positive_ctxs": a list of positive contexts
-        #   - "negative_ctxs": a list of negative contexts
-        #   - "hard_negative_ctxs": a list of hard negative contexts
-        # use the huggingface dataset library to load the data, by default it will load the
-        # data in a dict with the key being "train".
-        logger.info("Loading data from files")
-        data = load_dataset(
-            "json",
-            data_files=[str(p) for p in paths],  # datasets needs str paths and not Path
-            split="train",
-            streaming=False,  # TODO maybe we can make streaming work
-            keep_in_memory=keep_in_memory,
-        )
-        # add id if not present
-        if isinstance(data, datasets.Dataset):
-            data = data.add_column("sample_idx", range(len(data)))
-        else:
-            data = data.map(
-                lambda x, idx: x.update({"sample_idx": idx}), with_indices=True
-            )
-
-        map_kwargs = dict(
-            function=self.load_fn,
-            fn_kwargs=fn_kwargs,
-        )
-        if isinstance(data, datasets.Dataset):
-            map_kwargs.update(
-                dict(
-                    load_from_cache_file=load_from_cache_file,
-                    keep_in_memory=keep_in_memory,
-                    num_proc=num_proc,
-                    desc="Loading data",
-                )
-            )
-        # preprocess the data
-        data = data.map(**map_kwargs)
-
-        # shuffle the data
-        if shuffle:
-            data.shuffle(seed=42)
-
-        return data
 
 
 class AidaInBatchNegativesDataset(InBatchNegativesDataset):

@@ -10,6 +10,7 @@ from omegaconf import DictConfig
 from pytorch_lightning.utilities.types import EVAL_DATALOADERS
 from torch.utils.data import DataLoader, Dataset
 
+from goldenretriever.data.datasets import GoldenRetrieverDataset
 from goldenretriever.common.log import get_logger
 from goldenretriever.data.labels import Labels
 
@@ -19,53 +20,27 @@ logger = get_logger()
 class GoldenRetrieverPLDataModule(pl.LightningDataModule):
     def __init__(
         self,
-        datasets: DictConfig,
-        batch_sizes: Optional[DictConfig] = None,
-        num_workers: Optional[DictConfig] = None,
-        tokenizer: Union[str, tr.PreTrainedTokenizer] = None,
-        labels: Labels = None,
+        train_dataset: Optional[GoldenRetrieverDataset] = None,
+        val_datasets: Optional[Sequence[GoldenRetrieverDataset]] = None,
+        test_datasets: Optional[Sequence[GoldenRetrieverDataset]] = None,
+        num_workers: Optional[Union[DictConfig, int]] = None,
+        datasets: Optional[DictConfig] = None,
         *args,
         **kwargs,
     ):
         super().__init__()
         self.datasets = datasets
-        self.num_workers = num_workers
-        self.batch_sizes = batch_sizes
-        # data
-        self.train_dataset: Optional[Dataset] = None
-        self.val_datasets: Optional[Sequence[Dataset]] = None
-        self.test_datasets: Optional[Sequence[Dataset]] = None
-        # label file
-        self.labels: Labels = labels
-        # tokenizer
-        self.tokenizer: tr.PreTrainedTokenizer = None
-        if tokenizer is not None:
-            self.tokenizer = (
-                tokenizer
-                if isinstance(tokenizer, tr.PreTrainedTokenizer)
-                else tr.AutoTokenizer.from_pretrained(tokenizer)
+        if num_workers is None:
+            num_workers = 0
+        if isinstance(num_workers, int):
+            num_workers = DictConfig(
+                {"train": num_workers, "val": num_workers, "test": num_workers}
             )
-
-    def build_labels(self) -> Labels:
-        """
-        Builds the labels for the model
-
-        Returns:
-            `Labels`: A dictionary of labels
-        """
-        raise NotImplementedError
-
-    def save_labels(self, path: Union[str, os.PathLike]) -> None:
-        """
-        Saves the labels to a file
-
-        Args:
-            path (str): The path to save the labels to
-        """
-        if self.labels is None:
-            logger.info("No labels to save")
-            return
-        self.labels.save(path)
+        self.num_workers = num_workers
+        # data
+        self.train_dataset: Optional[GoldenRetrieverDataset] = train_dataset
+        self.val_datasets: Optional[Sequence[GoldenRetrieverDataset]] = val_datasets
+        self.test_datasets: Optional[Sequence[GoldenRetrieverDataset]] = test_datasets
 
     def prepare_data(self, *args, **kwargs):
         """
@@ -80,24 +55,21 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
             # if you need more train loader, you can follow
             # the same logic as val and test datasets
             if self.train_dataset is None:
-                self.train_dataset = hydra.utils.instantiate(
-                    self.datasets.train, tokenizer=self.tokenizer
-                )
+                self.train_dataset = hydra.utils.instantiate(self.datasets.train)
                 self.val_datasets = [
-                    hydra.utils.instantiate(dataset_cfg, tokenizer=self.tokenizer)
+                    hydra.utils.instantiate(dataset_cfg)
                     for dataset_cfg in self.datasets.val
                 ]
         if stage == "test":
             if self.test_datasets is None:
                 self.test_datasets = [
-                    hydra.utils.instantiate(dataset_cfg, tokenizer=self.tokenizer)
+                    hydra.utils.instantiate(dataset_cfg)
                     for dataset_cfg in self.datasets.test
                 ]
 
     def train_dataloader(self, *args, **kwargs) -> DataLoader:
         # torch_dataset = self.train_dataset.to_torch_dataset()
         return DataLoader(
-            # torch_dataset,
             self.train_dataset.to_torch_dataset(),
             shuffle=False,
             batch_size=None,
@@ -143,8 +115,5 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
 
     def __repr__(self) -> str:
         return (
-            f"{self.__class__.__name__}("
-            f"{self.datasets=}, "
-            f"{self.num_workers=}, "
-            f"{self.batch_sizes=})"
+            f"{self.__class__.__name__}(" f"{self.datasets=}, " f"{self.num_workers=}, "
         )

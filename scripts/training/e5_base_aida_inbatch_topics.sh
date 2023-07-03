@@ -4,6 +4,7 @@ bash scripts/train.sh \
     --config-path conf/finetune_iterable_in_batch.yaml \
     -l intfloat/e5-base-v2 \
     --print \
+    -o \
     --wandb golden-retriever-aida \
     "model_name=e5-base-aida-inbatch-topics" \
     "data.shared_params.use_topics=True" \

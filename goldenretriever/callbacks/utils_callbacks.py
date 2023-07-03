@@ -6,12 +6,10 @@ from typing import Any, Dict, Optional, Union
 
 import pytorch_lightning as pl
 import torch
+from pytorch_lightning.trainer.states import RunningStage
 
 from goldenretriever.callbacks.base import NLPTemplateCallback, PredictionCallback
 from goldenretriever.common.log import get_console_logger, get_logger
-
-from pytorch_lightning.trainer.states import RunningStage
-
 
 console_logger = get_console_logger()
 logger = get_logger(__name__, level=logging.INFO)

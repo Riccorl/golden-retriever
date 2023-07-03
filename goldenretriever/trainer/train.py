@@ -1,5 +1,6 @@
+import os
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 import hydra
 import omegaconf
@@ -16,6 +17,8 @@ from pytorch_lightning.callbacks import (
 from pytorch_lightning.loggers import WandbLogger
 from rich.pretty import pprint
 
+from goldenretriever.data.datasets import GoldenRetrieverDataset
+from goldenretriever.models.model import GoldenRetriever
 from goldenretriever.common.log import get_console_logger
 from goldenretriever.lightning_modules.pl_data_modules import (
     GoldenRetrieverPLDataModule,
@@ -28,65 +31,89 @@ logger = get_console_logger()
 class Trainer:
     def __init__(
         self,
-        pl_datamodule: GoldenRetrieverPLDataModule,
-        pl_module: Optional[GoldenRetrieverPLModule] = None,
-        lr_scheduler: Optional[dict] = None,
+        retriever: GoldenRetriever,
+        train_dataset: GoldenRetrieverDataset,
+        val_dataset: Union[GoldenRetrieverDataset, list[GoldenRetrieverDataset]],
+        test_dataset: Optional[
+            Union[GoldenRetrieverDataset, list[GoldenRetrieverDataset]]
+        ] = None,
+        optimizer: str = "radamw",
+        lr: float = 1e-5,
+        weight_decay: float = 0.01,
+        num_warmup_steps: int = 0,
+        lr_scheduler: str = "linear",
         callbacks: Optional[list] = None,
         experiment_logger: Optional[WandbLogger] = None,
+        num_workers: int = 4,
+        accelerator: str = "auto",
+        devices: int = 1,
+        num_nodes: int = 1,
+        strategy: str = "auto",
+        accumulate_grad_batches: int = 1,
+        gradient_clip_val: float = 1.0,
+        val_check_interval: float = 1.0,
+        check_val_every_n_epoch: int = 1,
+        max_steps: Optional[int] = None,
+        max_epochs: Optional[int] = None,
+        checkpoint_path: Optional[Union[str, os.PathLike]] = None,
+        deterministic: bool = True,
+        fast_dev_run: bool = False,
+        precision: int = 16,
+        reload_dataloaders_every_n_epochs: int = 1,
+        # checkpoint_monitor: str = "validate_recall@${train.top_k}",
+        # checkpoint_mode: str = "max",
+        # checkpoint_save_top_k: int = 1,
+        # checkpoint_save_last: bool = False,
+        # checkpoint_root_dir: Optional[Union[str, os.PathLike]] = None,
+        # checkpoint_filename: Union[
+        #     str, os.PathLike
+        # ] = "checkpoint-validate_recall@${train.top_k}_{validate_recall@${train.top_k}:.4f}-epoch_{epoch:02d}",
+        # auto_insert_metric_name: bool = False,
+        model_checkpoint_callback: Optional[ModelCheckpoint] = None,
+        early_stopping_callback: Optional[EarlyStopping] = None,
+        wandb_logger: Optional[WandbLogger] = None,
         seed: int = 42,
         float32_matmul_precision: str = "medium",
     ):
         # reproducibility
         pl.seed_everything(seed)
+        # set the precision of matmul operations
         torch.set_float32_matmul_precision(float32_matmul_precision)
 
+        # lightning data module declaration
+        if isinstance(val_dataset, GoldenRetrieverDataset):
+            val_dataset = [val_dataset]
+        if test_dataset is not None and isinstance(
+            test_dataset, GoldenRetrieverDataset
+        ):
+            test_dataset = [test_dataset]
+        self.lightining_datamodule = GoldenRetrieverPLDataModule(
+            train_dataset=train_dataset,
+            val_datasets=val_dataset,
+            test_datasets=test_dataset,
+            num_workers=num_workers,
+        )
+
         # lightning module declaration
-        self.pl_datamodule = pl_datamodule
-        self.pl_module: Optional[GoldenRetrieverPLModule] = pl_module
-        self.lr_scheduler = lr_scheduler
+        self.lightining_module = GoldenRetrieverPLModule(model=retriever)
 
         # callbacks declaration
-        callbacks_store = [ModelSummary(max_depth=2)]
+        self.callbacks_store = [ModelSummary(max_depth=2)]
 
-        early_stopping_callback: Optional[EarlyStopping] = None
-        if conf.train.early_stopping_callback is not None:
-            early_stopping_callback = hydra.utils.instantiate(
-                conf.train.early_stopping_callback
-            )
-            callbacks_store.append(early_stopping_callback)
+        if early_stopping_callback is not None:
+            self.callbacks_store.append(early_stopping_callback)
 
-        model_checkpoint_callback: Optional[ModelCheckpoint] = None
-        if conf.train.model_checkpoint_callback is not None:
+        if model_checkpoint_callback is not None:
             model_checkpoint_callback = hydra.utils.instantiate(
                 conf.train.model_checkpoint_callback,
                 dirpath=experiment_path / "checkpoints" if experiment_path else None,
             )
             callbacks_store.append(model_checkpoint_callback)
 
-        if "callbacks" in conf.train and conf.train.callbacks is not None:
-            for _, callback in conf.train.callbacks.items():
-                # callback can be a list of callbacks or a single callback
-                if isinstance(callback, omegaconf.listconfig.ListConfig):
-                    for cb in callback:
-                        callbacks_store.append(hydra.utils.instantiate(cb))
-                else:
-                    callbacks_store.append(hydra.utils.instantiate(callback))
-
-
-        if callbacks is not None:
-            callbacks_store.extend(callbacks)
-        self.callbacks = callbacks_store
+        
 
     def train(
         self,
-        max_epochs: Optional[int] = None,
-        max_steps: Optional[int] = None,
-        warmup_steps_ratio: Optional[float] = None,
-        pl_module: Optional[GoldenRetrieverPLModule] = None,
-        pretrain_ckpt_path: Optional[str] = None,
-        resume_ckpt_path: Optional[str] = None,
-        wandb_logger: Optional[WandbLogger] = None,
-        compile: bool = False,
     ):
         self.pl_datamodule.setup("fit")
 
@@ -136,7 +163,7 @@ class Trainer:
                 logger.log(
                     f"Failed to compile the model, you may need to install PyTorch 2.0"
                 )
-        
+
         experiment_logger: Optional[WandbLogger] = None
         experiment_path: Optional[Path] = None
         if conf.logging.log:
