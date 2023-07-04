@@ -1,18 +1,18 @@
 language_model: "intfloat/e5-small-v2"
 
-encoder:
-  _target_: goldenretriever.models.model.SentenceEncoder
-  language_model: ${model.language_model}
-  pooling_strategy: "mean"
-  projection_size: null
-  layer_norm: True
-  layer_norm_eps: 1e-12
+# encoder:
+#   _target_: goldenretriever.models.model.SentenceEncoder
+#   language_model: ${model.language_model}
+#   pooling_strategy: "mean"
+#   projection_size: null
+#   layer_norm: True
+#   layer_norm_eps: 1e-12
 
 pl_module:
   _target_: goldenretriever.lightning_modules.pl_modules.GoldenRetrieverPLModule
   model:
     _target_: goldenretriever.models.model.GoldenRetriever
-    question_encoder: ${model.encoder}
+    question_encoder: ${model.language_model}
     context_encoder: null
     loss_type: ${loss}
   optimizer: ${optimizer}

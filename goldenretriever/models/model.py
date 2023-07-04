@@ -219,9 +219,9 @@ class SentenceEncoder(torch.nn.Module):
 class GoldenRetriever(torch.nn.Module):
     def __init__(
         self,
-        question_encoder: SentenceEncoder,
+        question_encoder: str,
         loss_type: Optional[torch.nn.Module] = None,
-        passage_encoder: Optional[SentenceEncoder] = None,
+        passage_encoder: Optional[str] = None,
         passage_index: Optional[Labels] = None,
         *args,
         **kwargs,
@@ -230,15 +230,24 @@ class GoldenRetriever(torch.nn.Module):
 
         self.passage_encoder_is_question_encoder = False
         # question encoder model
-        self.question_encoder = question_encoder
+        # if isinstance(question_encoder, str):
+        self.question_encoder = tr.AutoModel.from_pretrained(question_encoder)
+        # self.question_encoder = question_encoder
         if not passage_encoder:
             # if no passage encoder is provided,
             # share the weights of the question encoder
-            passage_encoder = question_encoder
+            passage_encoder = self.question_encoder
             # keep track of the fact that the passage encoder is the same as the question encoder
             self.passage_encoder_is_question_encoder = True
+        else:
+            if isinstance(passage_encoder, str):
+                passage_encoder = tr.AutoModel.from_pretrained(passage_encoder)
         # passage encoder model
         self.passage_encoder = passage_encoder
+
+        # dropout
+        self.question_dropout = torch.nn.Dropout(kwargs.get("dropout", 0.1))
+        self.passage_dropout = torch.nn.Dropout(kwargs.get("dropout", 0.1))
 
         # loss function
         self.loss_type = loss_type
@@ -251,6 +260,30 @@ class GoldenRetriever(torch.nn.Module):
         # lazy load the tokenizer for inference
         self._question_tokenizer: Optional[tr.PreTrainedTokenizer] = None
         self._passage_tokenizer: Optional[tr.PreTrainedTokenizer] = None
+
+    @staticmethod
+    def encoder_forward(
+        encoder: torch.nn.Module,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+        token_type_ids: Optional[torch.Tensor] = None,
+        *args,
+        **kwargs,
+    ) -> torch.Tensor:
+        if token_type_ids is not None:
+            model_kwargs = dict(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                token_type_ids=token_type_ids,
+            )
+        else:
+            model_kwargs = dict(input_ids=input_ids, attention_mask=attention_mask)
+
+        last_hidden_states = encoder(**model_kwargs).last_hidden_state
+        last_hidden = last_hidden_states.masked_fill(
+            ~attention_mask[..., None].bool(), 0.0
+        )
+        return last_hidden.sum(dim=1) / attention_mask.sum(dim=1)[..., None]
 
     def forward(
         self,
@@ -302,9 +335,15 @@ class GoldenRetriever(torch.nn.Module):
 
         if question_encodings is None:
             # print(questions)
-            question_encodings = self.question_encoder(**questions)
+            question_encodings = self.encoder_forward(
+                **{**{"encoder": self.question_encoder}, **questions}
+            )
+            question_encodings = self.question_dropout(question_encodings)
         if passages_encodings is None:
-            passages_encodings = self.passage_encoder(**passages)
+            passages_encodings = self.encoder_forward(
+                **{**{"encoder": self.passage_encoder}, **passages}
+            )
+            passages_encodings = self.passage_dropout(passages_encodings)
 
         if passages_per_question is not None:
             # multiply each question encoding with a passages_per_question encodings
@@ -444,7 +483,7 @@ class GoldenRetriever(torch.nn.Module):
                 # Move the batch to the device
                 batch: ModelInputs = batch.to(self.device)
                 # Compute the passage embeddings
-                passage_outs = passage_encoder(**batch)
+                passage_outs = self.encoder_forward(**{**{"encoder": passage_encoder}, **batch})
                 # Append the passage embeddings to the list
                 if move_index_to_cpu:
                     passage_embeddings.extend([c.detach().cpu() for c in passage_outs])
@@ -704,19 +743,19 @@ class GoldenRetriever(torch.nn.Module):
             return self._question_tokenizer
 
         if (
-            self.question_encoder.language_model_name
-            == self.question_encoder.language_model_name
+            self.question_encoder.name_or_path
+            == self.question_encoder.name_or_path
         ):
             if not self._question_tokenizer:
                 self._question_tokenizer = tr.AutoTokenizer.from_pretrained(
-                    self.question_encoder.language_model_name
+                    self.question_encoder.name_or_path
                 )
             self._passage_tokenizer = self._question_tokenizer
             return self._question_tokenizer
 
         if not self._question_tokenizer:
             self._question_tokenizer = tr.AutoTokenizer.from_pretrained(
-                self.question_encoder.language_model_name
+                self.question_encoder.name_or_path
             )
         return self._question_tokenizer
 
@@ -812,8 +851,8 @@ class GoldenRetriever(torch.nn.Module):
         """
         return dict(
             _target_=f"{self.__class__.__module__}.{self.__class__.__name__}",
-            question_encoder=self.question_encoder.config,
-            passage_encoder=self.passage_encoder.config
+            question_encoder=self.question_encoder.name_or_path,
+            passage_encoder=self.passage_encoder.name_or_path
             if not self.passage_encoder_is_question_encoder
             else None,
             loss_type=dict(
@@ -827,6 +866,7 @@ class GoldenRetriever(torch.nn.Module):
         self,
         output_dir: Union[str, os.PathLike],
         config: Optional[Dict[str, Any]] = None,
+        model_name: Optional[str] = None,
     ):
         """
         Save the retriever to a directory.
@@ -854,14 +894,25 @@ class GoldenRetriever(torch.nn.Module):
 
         # override the from_pretrained parameter of the encoders
         # we don't want to load the pretrained weights from HF Hub when loading the retriever
-        config["question_encoder"]["from_pretrained"] = False
-        if config["passage_encoder"] is not None:
-            config["passage_encoder"]["from_pretrained"] = False
+        # config["question_encoder"]["from_pretrained"] = False
+        # if config["passage_encoder"] is not None:
+        #     config["passage_encoder"]["from_pretrained"] = False
         # save the config using OmegaConf
         OmegaConf.save(config, output_dir / CONFIG_NAME)
 
         if self._passage_embeddings is None or self._passage_index is None:
             raise ValueError("The passages must be indexed before they can be saved.")
+
+        if not self.passage_encoder_is_question_encoder:
+            self.question_encoder.save_pretrained(output_dir / model_name + "_question")
+            self.question_tokenizer.save_pretrained(
+                output_dir / model_name + "_question"
+            )
+            self.passage_encoder.save_pretrained(output_dir / model_name + "_passage")
+            self.passage_tokenizer.save_pretrained(output_dir / model_name + "_passage")
+        else:
+            self.question_encoder.save_pretrained(output_dir / model_name)
+            self.question_tokenizer.save_pretrained(output_dir / model_name)
 
         # save the current state of the retriever
         logger.info(f"Saving retriever state to {output_dir / WEIGHTS_NAME}")

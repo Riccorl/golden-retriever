@@ -5,13 +5,12 @@ bash scripts/train.sh \
     -l intfloat/e5-small-v2 \
     --print \
     --wandb golden-retriever-aida \
-    -o \
-    "model_name=e5-small-aida-inbatch-topics" \
+    -m 24000 \
+    "data=aida_dataset" \
+    "model_name=e5-small-aida-inbatch-topics-huggingface" \
     "data.shared_params.use_topics=True" \
     "data.shared_params.passage_batch_size=400" \
-    "++data.datamodule.datasets.train.prefetch=True" \
-    "data.datamodule.datasets.train.subsample_strategy=random" \
-    "data.shared_params.passages_path=data/dpr-like/el/definitions_only_data.txt" \
+    "data.shared_params.passages_path=data/dpr-like/el/definitions.txt" \
     "data.datamodule.datasets.train.path=['data/dpr-like/el/aida_32_tokens_topic/train.jsonl']" \
     "data.datamodule.datasets.val.0.path=['data/dpr-like/el/aida_32_tokens_topic/val.jsonl']" \
     "data.datamodule.datasets.test.0.path=['data/dpr-like/el/aida_32_tokens_topic/test.jsonl']"

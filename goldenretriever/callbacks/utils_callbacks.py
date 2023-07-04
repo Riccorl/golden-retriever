@@ -159,12 +159,14 @@ class SaveRetrieverCallback(pl.Callback):
     def __init__(
         self,
         saving_dir: Optional[Union[str, os.PathLike]] = None,
+        model_name: Optional[str] = None,
         verbose: bool = True,
         *args,
         **kwargs,
     ):
         super().__init__()
         self.saving_dir = saving_dir
+        self.model_name = model_name
         self.verbose = verbose
         self.free_up_indexer_callback = FreeUpIndexerVRAMCallback()
 
@@ -194,9 +196,10 @@ class SaveRetrieverCallback(pl.Callback):
                 )
                 return
         retriever_folder.mkdir(exist_ok=True, parents=True)
+        model_name = self.model_name or Path(trainer.logger.experiment.name)
         if self.verbose:
             logger.info(f"Saving retriever to {retriever_folder}")
-        pl_module.model.save_pretrained(retriever_folder)
+        pl_module.model.save_pretrained(retriever_folder, model_name=model_name)
 
     def on_save_checkpoint(
         self,
