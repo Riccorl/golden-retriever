@@ -10,8 +10,8 @@ if __name__ == "__main__":
             data = json.load(f)
 
         for sample in data:
-            for positive_ctx in sample["positive_ctxs"]:
-                positive_ctx["text"] = positive_ctx["text"].strip()
+            for positive_pssg in sample["positive_pssgs"]:
+                positive_pssg["text"] = positive_pssg["text"].strip()
 
         with open(
             f"/root/golden-retriever/data/aida_dpr_normalized/{set}.json", "w"

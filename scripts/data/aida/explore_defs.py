@@ -31,7 +31,7 @@ for data_set in ["train", "val", "test"]:
         data = json.load(f)
         for line in data:
             # line_data = json.loads(line)
-            for definition in line["positive_ctxs"]:
+            for definition in line["positive_pssgs"]:
                 definitions_dpr_sets.add(definition["text"])
                 definitions_titles_sets.add(definition["title"])
 

@@ -37,30 +37,30 @@ class HardNegativesManager:
         # add the tokenizer to the class for future use
         self.tokenizer = tokenizer
 
-        # invert the db to have a context -> sample_idx mapping
-        self._context_db = defaultdict(set)
-        for sample_idx, contexts in self._db.items():
-            for context in contexts:
-                self._context_db[context].add(sample_idx)
+        # invert the db to have a passage -> sample_idx mapping
+        self._passage_db = defaultdict(set)
+        for sample_idx, passages in self._db.items():
+            for passage in passages:
+                self._passage_db[passage].add(sample_idx)
 
-        self._context_hard_negatives = {}
+        self._passage_hard_negatives = {}
         if not lazy:
-            # create a dictionary of context -> hard_negative mapping
-            batch_size = min(batch_size, len(self._context_db))
-            unique_contexts = list(self._context_db.keys())
+            # create a dictionary of passage -> hard_negative mapping
+            batch_size = min(batch_size, len(self._passage_db))
+            unique_passages = list(self._passage_db.keys())
             for i in tqdm(
-                range(0, len(unique_contexts), batch_size),
+                range(0, len(unique_passages), batch_size),
                 desc="Tokenizing Hard Negatives",
             ):
-                batch = unique_contexts[i : i + batch_size]
-                tokenized_contexts = self.tokenizer(
+                batch = unique_passages[i : i + batch_size]
+                tokenized_passages = self.tokenizer(
                     batch,
                     max_length=max_length,
                     truncation=True,
                 )
-                for i, context in enumerate(batch):
-                    self._context_hard_negatives[context] = {
-                        k: tokenized_contexts[k][i] for k in tokenized_contexts.keys()
+                for i, passage in enumerate(batch):
+                    self._passage_hard_negatives[passage] = {
+                        k: tokenized_passages[k][i] for k in tokenized_passages.keys()
                     }
 
     def __len__(self) -> int:
@@ -81,18 +81,18 @@ class HardNegativesManager:
         if idx not in self._db:
             raise ValueError(f"Sample index {idx} not in the database.")
 
-        contexts = self._db[idx]
+        passages = self._db[idx]
 
         output = []
-        for context in contexts:
-            if context not in self._context_hard_negatives:
-                self._context_hard_negatives[context] = self._tokenize(context)
-            output.append(self._context_hard_negatives[context])
+        for passage in passages:
+            if passage not in self._passage_hard_negatives:
+                self._passage_hard_negatives[passage] = self._tokenize(passage)
+            output.append(self._passage_hard_negatives[passage])
 
         return output
 
-    def _tokenize(self, context: str) -> Dict:
-        return self.tokenizer(context, max_length=self.max_length, truncation=True)
+    def _tokenize(self, passage: str) -> Dict:
+        return self.tokenizer(passage, max_length=self.max_length, truncation=True)
 
 
 class NegativeSampler:

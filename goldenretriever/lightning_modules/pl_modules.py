@@ -13,6 +13,7 @@ class GoldenRetrieverPLModule(pl.LightningModule):
     def __init__(
         self,
         model: Union[torch.nn.Module, DictConfig],
+        optimizer: Union[torch.optim.Optimizer, DictConfig],
         labels: Labels = None,
         *args,
         **kwargs,
@@ -24,6 +25,8 @@ class GoldenRetrieverPLModule(pl.LightningModule):
             self.model = hydra.utils.instantiate(model, labels=labels)
         else:
             self.model = model
+        
+        self.optimizer_config = optimizer
 
     def forward(self, **kwargs) -> dict:
         """
@@ -95,11 +98,16 @@ class GoldenRetrieverPLModule(pl.LightningModule):
             ]
         else:
             optimizer_grouped_parameters = self.parameters()
-        optimizer = hydra.utils.instantiate(
-            self.hparams.optimizer,
-            params=optimizer_grouped_parameters,
-            _convert_="partial",
-        )
+        
+        if isinstance(self.optimizer_config, DictConfig):
+            optimizer = hydra.utils.instantiate(
+                self.optimizer_config,
+                params=optimizer_grouped_parameters,
+                _convert_="partial",
+            )
+        else:
+            optimizer = self.optimizer_config
+        
         if "lr_scheduler" not in self.hparams or not self.hparams.lr_scheduler:
             return optimizer
 

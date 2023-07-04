@@ -86,10 +86,10 @@ class FreeUpIndexerVRAMCallback(pl.Callback):
 
         # remove the index from the GPU memory
         # remove the embeddings from the GPU memory first
-        if pl_module.model._context_embeddings is not None:
-            pl_module.model._context_embeddings.cpu()
-        pl_module.model._context_embeddings = None
-        pl_module.model._context_index = None
+        if pl_module.model._passage_embeddings is not None:
+            pl_module.model._passage_embeddings.cpu()
+        pl_module.model._passage_embeddings = None
+        pl_module.model._passage_index = None
         pl_module.model._faiss_indexer = None
 
         import gc

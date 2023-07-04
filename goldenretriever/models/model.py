@@ -64,7 +64,7 @@ class GoldenRetrieverOutput(tr.file_utils.ModelOutput):
     logits: Optional[torch.FloatTensor] = None
     loss: Optional[torch.FloatTensor] = None
     question_encodings: Optional[torch.FloatTensor] = None
-    contexts_encodings: Optional[torch.FloatTensor] = None
+    passages_encodings: Optional[torch.FloatTensor] = None
 
 
 @dataclass
@@ -221,45 +221,45 @@ class GoldenRetriever(torch.nn.Module):
         self,
         question_encoder: SentenceEncoder,
         loss_type: Optional[torch.nn.Module] = None,
-        context_encoder: Optional[SentenceEncoder] = None,
-        context_index: Optional[Labels] = None,
+        passage_encoder: Optional[SentenceEncoder] = None,
+        passage_index: Optional[Labels] = None,
         *args,
         **kwargs,
     ):
         super().__init__()
 
-        self.context_encoder_is_question_encoder = False
+        self.passage_encoder_is_question_encoder = False
         # question encoder model
         self.question_encoder = question_encoder
-        if not context_encoder:
-            # if no context encoder is provided,
+        if not passage_encoder:
+            # if no passage encoder is provided,
             # share the weights of the question encoder
-            context_encoder = question_encoder
-            # keep track of the fact that the context encoder is the same as the question encoder
-            self.context_encoder_is_question_encoder = True
-        # context encoder model
-        self.context_encoder = context_encoder
+            passage_encoder = question_encoder
+            # keep track of the fact that the passage encoder is the same as the question encoder
+            self.passage_encoder_is_question_encoder = True
+        # passage encoder model
+        self.passage_encoder = passage_encoder
 
         # loss function
         self.loss_type = loss_type
 
         # indexer stuff, lazy loaded
-        self._context_index: Optional[Labels] = context_index
-        self._context_embeddings: Optional[torch.Tensor] = None
+        self._passage_index: Optional[Labels] = passage_index
+        self._passage_embeddings: Optional[torch.Tensor] = None
         self._faiss_indexer: Optional[FaissIndexer] = None
 
         # lazy load the tokenizer for inference
         self._question_tokenizer: Optional[tr.PreTrainedTokenizer] = None
-        self._context_tokenizer: Optional[tr.PreTrainedTokenizer] = None
+        self._passage_tokenizer: Optional[tr.PreTrainedTokenizer] = None
 
     def forward(
         self,
         questions: Optional[Dict[str, torch.Tensor]] = None,
-        contexts: Optional[Dict[str, torch.Tensor]] = None,
+        passages: Optional[Dict[str, torch.Tensor]] = None,
         labels: Optional[torch.Tensor] = None,
         question_encodings: Optional[torch.Tensor] = None,
-        contexts_encodings: Optional[torch.Tensor] = None,
-        contexts_per_question: Optional[List[int]] = None,
+        passages_encodings: Optional[torch.Tensor] = None,
+        passages_per_question: Optional[List[int]] = None,
         return_loss: bool = False,
         return_encodings: bool = False,
         *args,
@@ -271,18 +271,18 @@ class GoldenRetriever(torch.nn.Module):
         Args:
             questions (`Dict[str, torch.Tensor]`):
                 The questions to encode.
-            contexts (`Dict[str, torch.Tensor]`):
-                The contexts to encode.
+            passages (`Dict[str, torch.Tensor]`):
+                The passages to encode.
             labels (`torch.Tensor`):
                 The labels of the sentences.
             return_loss (`bool`):
                 Whether to compute the predictions.
             question_encodings (`torch.Tensor`):
                 The encodings of the questions.
-            contexts_encodings (`torch.Tensor`):
-                The encodings of the contexts.
-            contexts_per_question (`List[int]`):
-                The number of contexts per question.
+            passages_encodings (`torch.Tensor`):
+                The encodings of the passages.
+            passages_per_question (`List[int]`):
+                The number of passages per question.
             return_loss (`bool`):
                 Whether to compute the loss.
             return_encodings (`bool`):
@@ -295,36 +295,36 @@ class GoldenRetriever(torch.nn.Module):
             raise ValueError(
                 "Either `questions` or `question_encodings` must be provided"
             )
-        if contexts is None and contexts_encodings is None:
+        if passages is None and passages_encodings is None:
             raise ValueError(
-                "Either `contexts` or `contexts_encodings` must be provided"
+                "Either `passages` or `passages_encodings` must be provided"
             )
 
         if question_encodings is None:
             # print(questions)
             question_encodings = self.question_encoder(**questions)
-        if contexts_encodings is None:
-            contexts_encodings = self.context_encoder(**contexts)
+        if passages_encodings is None:
+            passages_encodings = self.passage_encoder(**passages)
 
-        if contexts_per_question is not None:
-            # multiply each question encoding with a contexts_per_question encodings
-            concatenated_contexts = torch.stack(
-                torch.split(contexts_encodings, contexts_per_question)
+        if passages_per_question is not None:
+            # multiply each question encoding with a passages_per_question encodings
+            concatenated_passages = torch.stack(
+                torch.split(passages_encodings, passages_per_question)
             ).transpose(1, 2)
             if isinstance(self.loss_type, torch.nn.BCEWithLogitsLoss):
                 # normalize the encodings for cosine similarity
-                concatenated_contexts = F.normalize(concatenated_contexts, p=2, dim=2)
+                concatenated_passages = F.normalize(concatenated_passages, p=2, dim=2)
                 question_encodings = F.normalize(question_encodings, p=2, dim=1)
             logits = torch.bmm(
-                question_encodings.unsqueeze(1), concatenated_contexts
+                question_encodings.unsqueeze(1), concatenated_passages
             ).view(question_encodings.shape[0], -1)
         else:
             if isinstance(self.loss_type, torch.nn.BCEWithLogitsLoss):
                 # normalize the encodings for cosine similarity
                 question_encodings = F.normalize(question_encodings, p=2, dim=1)
-                contexts_encodings = F.normalize(contexts_encodings, p=2, dim=1)
+                passages_encodings = F.normalize(passages_encodings, p=2, dim=1)
 
-            logits = torch.matmul(question_encodings, contexts_encodings.T)
+            logits = torch.matmul(question_encodings, passages_encodings.T)
 
         output = dict(logits=logits)
 
@@ -343,7 +343,7 @@ class GoldenRetriever(torch.nn.Module):
 
         if return_encodings:
             output["question_encodings"] = question_encodings
-            output["contexts_encodings"] = contexts_encodings
+            output["passages_encodings"] = passages_encodings
 
         return GoldenRetrieverOutput(**output)
 
@@ -351,10 +351,10 @@ class GoldenRetriever(torch.nn.Module):
     @torch.inference_mode()
     def index(
         self,
-        contexts: List[str],
+        passages: List[str],
         batch_size: int = 32,
         num_workers: int = 4,
-        context_max_length: Optional[int] = None,
+        passage_max_length: Optional[int] = None,
         collate_fn: Optional[Callable] = None,
         force_reindex: bool = False,
         use_faiss: bool = False,
@@ -364,21 +364,21 @@ class GoldenRetriever(torch.nn.Module):
         index_precision: Optional[Union[str, int]] = None,
     ):
         """
-        Index the contexts for later retrieval.
+        Index the passages for later retrieval.
 
         Args:
-            contexts (`List[str]`):
-                The contexts to index.
+            passages (`List[str]`):
+                The passages to index.
             batch_size (`int`):
                 The batch size to use for the indexing.
             num_workers (`int`):
                 The number of workers to use for the indexing.
-            context_max_length (`Optional[int]`):
-                The maximum length of the contexts.
+            passage_max_length (`Optional[int]`):
+                The maximum length of the passages.
             collate_fn (`Callable`):
                 The collate function to use for the indexing.
             force_reindex (`bool`):
-                Whether to force reindexing even if the contexts are already indexed.
+                Whether to force reindexing even if the passages are already indexed.
             use_faiss (`bool`):
                 Whether to use faiss for the indexing.
             use_ort (`bool`):
@@ -390,7 +390,7 @@ class GoldenRetriever(torch.nn.Module):
             index_precision (`Optional[Union[str, int]]`):
                 The precision to use for the index.
         """
-        if self._context_embeddings is not None and not force_reindex:
+        if self._passage_embeddings is not None and not force_reindex:
             return
 
         if self._faiss_indexer is not None and not force_reindex and use_faiss:
@@ -398,18 +398,18 @@ class GoldenRetriever(torch.nn.Module):
 
         # release the memory
         if collate_fn is None:
-            tokenizer = self.context_tokenizer
+            tokenizer = self.passage_tokenizer
             collate_fn = lambda x: ModelInputs(
                 tokenizer(
                     x,
                     padding=True,
                     return_tensors="pt",
                     truncation=True,
-                    max_length=context_max_length or tokenizer.model_max_length,
+                    max_length=passage_max_length or tokenizer.model_max_length,
                 )
             )
         dataloader = DataLoader(
-            BaseDataset(name="context", data=contexts),
+            BaseDataset(name="passage", data=passages),
             batch_size=batch_size,
             shuffle=False,
             num_workers=num_workers,
@@ -418,18 +418,18 @@ class GoldenRetriever(torch.nn.Module):
         )
         # we can use the onnx runtime optimized encoder for the indexing
         if not use_ort:
-            context_encoder = self.context_encoder
+            passage_encoder = self.passage_encoder
         else:
-            context_encoder = self._load_ort_optimized_encoder(self.context_encoder)
-        # Create empty lists to store the context embeddings and context index
-        context_embeddings: List[torch.Tensor] = []
+            passage_encoder = self._load_ort_optimized_encoder(self.passage_encoder)
+        # Create empty lists to store the passage embeddings and passage index
+        passage_embeddings: List[torch.Tensor] = []
 
         # fucking autocast only wants pure strings like 'cpu' or 'cuda'
         # we need to convert the model device to that
         device_type_for_autocast = str(self.device).split(":")[0]
         # autocast doesn't work with CPU and stuff different from bfloat16
-        autocast_ctx_mngr = (
-            contextlib.nullcontext()
+        autocast_pssg_mngr = (
+            contextlib.nullpassage()
             if device_type_for_autocast == "cpu"
             else (
                 torch.autocast(
@@ -438,48 +438,48 @@ class GoldenRetriever(torch.nn.Module):
                 )
             )
         )
-        with autocast_ctx_mngr:
+        with autocast_pssg_mngr:
             # Iterate through each batch in the dataloader
             for batch in tqdm(dataloader, desc="Indexing"):
                 # Move the batch to the device
                 batch: ModelInputs = batch.to(self.device)
-                # Compute the context embeddings
-                context_outs = context_encoder(**batch)
-                # Append the context embeddings to the list
+                # Compute the passage embeddings
+                passage_outs = passage_encoder(**batch)
+                # Append the passage embeddings to the list
                 if move_index_to_cpu:
-                    context_embeddings.extend([c.detach().cpu() for c in context_outs])
+                    passage_embeddings.extend([c.detach().cpu() for c in passage_outs])
                 else:
-                    context_embeddings.extend([c for c in context_outs])
+                    passage_embeddings.extend([c for c in passage_outs])
 
-        # move the context embeddings to the CPU if not already done
+        # move the passage embeddings to the CPU if not already done
         # the move to cpu and then to gpu is needed to avoid OOM when using mixed precision
         if not move_index_to_cpu:
-            context_embeddings = [c.detach().cpu() for c in context_embeddings]
+            passage_embeddings = [c.detach().cpu() for c in passage_embeddings]
         # stack it
-        context_embeddings: torch.Tensor = torch.stack(context_embeddings, dim=0)
-        # move the context embeddings to the gpu if needed
+        passage_embeddings: torch.Tensor = torch.stack(passage_embeddings, dim=0)
+        # move the passage embeddings to the gpu if needed
         if not move_index_to_cpu:
             if index_precision:
-                context_embeddings = context_embeddings.to(
+                passage_embeddings = passage_embeddings.to(
                     PRECISION_MAP[index_precision]
                 )
-            context_embeddings = context_embeddings.to(self.device)
-        self._context_embeddings = context_embeddings
+            passage_embeddings = passage_embeddings.to(self.device)
+        self._passage_embeddings = passage_embeddings
 
         # free up memory from the unused variable
-        del context_embeddings
+        del passage_embeddings
 
-        # Create a dictionary mapping the context index to the context
-        self._context_index = Labels()
-        self._context_index.add_labels(
-            {context: i for i, context in enumerate(contexts)}
+        # Create a dictionary mapping the passage index to the passage
+        self._passage_index = Labels()
+        self._passage_index.add_labels(
+            {passage: i for i, passage in enumerate(passages)}
         )
         if use_faiss and (self._faiss_indexer is None or force_reindex):
             self._faiss_indexer = FaissIndexer(
-                embeddings=self._context_embeddings, use_gpu=bool(not move_index_to_cpu)
+                embeddings=self._passage_embeddings, use_gpu=bool(not move_index_to_cpu)
             )
             # free up memory
-            self._context_embeddings = None
+            self._passage_embeddings = None
 
     @torch.no_grad()
     @torch.inference_mode()
@@ -495,13 +495,13 @@ class GoldenRetriever(torch.nn.Module):
         precision: Optional[Union[str, int]] = None,
     ) -> List[List[RetrievedSample]]:
         """
-        Retrieve the contexts for the questions.
+        Retrieve the passages for the questions.
 
         Args:
             text (`Optional[Union[str, List[str]]]`):
-                The questions to retrieve the contexts for.
+                The questions to retrieve the passages for.
             text_pair (`Optional[Union[str, List[str]]]`):
-                The questions to retrieve the contexts for.
+                The questions to retrieve the passages for.
             input_ids (`torch.Tensor`):
                 The input ids of the questions.
             attention_mask (`torch.Tensor`):
@@ -509,26 +509,26 @@ class GoldenRetriever(torch.nn.Module):
             token_type_ids (`torch.Tensor`):
                 The token type ids of the questions.
             k (`int`):
-                The number of top contexts to retrieve.
+                The number of top passages to retrieve.
             max_length (`Optional[int]`):
                 The maximum length of the questions.
             precision (`Optional[Union[str, int]]`):
                 The precision to use for the model.
 
         Returns:
-            `List[List[RetrievedSample]]`: The retrieved contexts and their indices.
+            `List[List[RetrievedSample]]`: The retrieved passages and their indices.
         """
-        if self._context_embeddings is None and self._faiss_indexer is None:
+        if self._passage_embeddings is None and self._faiss_indexer is None:
             raise ValueError(
-                "The contexts must be indexed before they can be retrieved."
+                "The passages must be indexed before they can be retrieved."
             )
         if text is None and input_ids is None:
             raise ValueError(
-                "Either `text` or `input_ids` must be provided to retrieve the contexts."
+                "Either `text` or `input_ids` must be provided to retrieve the passages."
             )
 
         if k is None:
-            k = self._context_embeddings.size(0)
+            k = self._passage_embeddings.size(0)
 
         if text is not None:
             if isinstance(text, str):
@@ -566,8 +566,8 @@ class GoldenRetriever(torch.nn.Module):
             # we need to convert the model device to that
             device_type_for_autocast = str(self.device).split(":")[0]
             # autocast doesn't work with CPU and stuff different from bfloat16
-            autocast_ctx_mngr = (
-                contextlib.nullcontext()
+            autocast_pssg_mngr = (
+                contextlib.nullpassage()
                 if device_type_for_autocast == "cpu"
                 else (
                     torch.autocast(
@@ -576,28 +576,28 @@ class GoldenRetriever(torch.nn.Module):
                     )
                 )
             )
-            with autocast_ctx_mngr:
-                # check if the device of the context embeddings is the same
+            with autocast_pssg_mngr:
+                # check if the device of the passage embeddings is the same
                 # as the device of the input ids
-                if self._context_embeddings.device != model_inputs.input_ids.device:
-                    self._context_embeddings = self._context_embeddings.to(
+                if self._passage_embeddings.device != model_inputs.input_ids.device:
+                    self._passage_embeddings = self._passage_embeddings.to(
                         model_inputs.input_ids.device
                     )
                 model_inputs = dict(
                     questions=model_inputs,
-                    contexts_encodings=self._context_embeddings,
+                    passages_encodings=self._passage_embeddings,
                 )
                 # check that the device of the question encoder is the same as
-                # the device of the context embeddings
+                # the device of the passage embeddings
                 past_device = self.device
-                if past_device != self._context_embeddings:
-                    self.to(self._context_embeddings.device)
-                # Compute the similarity between the questions and the contexts
+                if past_device != self._passage_embeddings:
+                    self.to(self._passage_embeddings.device)
+                # Compute the similarity between the questions and the passages
                 similarity = self(**model_inputs)["logits"]
                 # move the model back to the original device
                 if past_device != self.device:
                     self.to(past_device)
-                # Retrieve the indices of the top k context embeddings
+                # Retrieve the indices of the top k passage embeddings
                 retriever_out: Tuple = torch.topk(
                     similarity, k=min(k, similarity.shape[-1]), dim=1
                 )
@@ -607,93 +607,93 @@ class GoldenRetriever(torch.nn.Module):
         batch_top_k: List[List[int]] = batch_top_k.detach().cpu().tolist()
         # get float values
         batch_scores: List[List[float]] = batch_scores.detach().cpu().tolist()
-        # Retrieve the contexts corresponding to the indices
-        batch_contexts = [
-            [self._context_index.get_label_from_index(i) for i in indices]
+        # Retrieve the passages corresponding to the indices
+        batch_passages = [
+            [self._passage_index.get_label_from_index(i) for i in indices]
             for indices in batch_top_k
         ]
         # build the output object
         batch_retrieved_samples = [
             [
-                RetrievedSample(label=context, index=index, score=score)
-                for context, index, score in zip(contexts, indices, scores)
+                RetrievedSample(label=passage, index=index, score=score)
+                for passage, index, score in zip(passages, indices, scores)
             ]
-            for contexts, indices, scores in zip(
-                batch_contexts, batch_top_k, batch_scores
+            for passages, indices, scores in zip(
+                batch_passages, batch_top_k, batch_scores
             )
         ]
         # return
         return batch_retrieved_samples
 
-    def get_index_from_context(self, context: str) -> int:
+    def get_index_from_passage(self, passage: str) -> int:
         """
-        Get the index of the context.
+        Get the index of the passage.
 
         Args:
-            context (`str`):
-                The context to get the index for.
+            passage (`str`):
+                The passage to get the index for.
 
         Returns:
-            `int`: The index of the context.
+            `int`: The index of the passage.
         """
-        if self._context_embeddings is None and self._faiss_indexer is None:
+        if self._passage_embeddings is None and self._faiss_indexer is None:
             raise ValueError(
-                "The contexts must be indexed before they can be retrieved."
+                "The passages must be indexed before they can be retrieved."
             )
-        return self._context_index.get_index_from_label(context)
+        return self._passage_index.get_index_from_label(passage)
 
-    def get_context_from_index(self, index: int) -> str:
+    def get_passage_from_index(self, index: int) -> str:
         """
-        Get the context from the index.
+        Get the passage from the index.
 
         Args:
             index (`int`):
-                The index of the context.
+                The index of the passage.
 
         Returns:
-            `str`: The context.
+            `str`: The passage.
         """
-        if self._context_embeddings is None and self._faiss_indexer is None:
+        if self._passage_embeddings is None and self._faiss_indexer is None:
             raise ValueError(
-                "The contexts must be indexed before they can be retrieved."
+                "The passages must be indexed before they can be retrieved."
             )
-        return self._context_index.get_label_from_index(index)
+        return self._passage_index.get_label_from_index(index)
 
     def get_vector_from_index(self, index: int) -> torch.Tensor:
         """
-        Get the context vector from the index.
+        Get the passage vector from the index.
 
         Args:
             index (`int`):
-                The index of the context.
+                The index of the passage.
 
         Returns:
-            `torch.Tensor`: The context vector.
+            `torch.Tensor`: The passage vector.
         """
-        if self._context_embeddings is None and self._faiss_indexer is None:
+        if self._passage_embeddings is None and self._faiss_indexer is None:
             raise ValueError(
-                "The contexts must be indexed before they can be retrieved."
+                "The passages must be indexed before they can be retrieved."
             )
-        if self._context_embeddings is None:
+        if self._passage_embeddings is None:
             return self._faiss_indexer.reconstruct(index)
-        return self._context_embeddings[index]
+        return self._passage_embeddings[index]
 
-    def get_vector_from_context(self, context: str) -> torch.Tensor:
+    def get_vector_from_passage(self, passage: str) -> torch.Tensor:
         """
-        Get the context vector from the context.
+        Get the passage vector from the passage.
 
         Args:
-            context (`str`):
-                The context.
+            passage (`str`):
+                The passage.
 
         Returns:
-            `torch.Tensor`: The context vector.
+            `torch.Tensor`: The passage vector.
         """
-        if self._context_embeddings is None and self._faiss_indexer is None:
+        if self._passage_embeddings is None and self._faiss_indexer is None:
             raise ValueError(
-                "The contexts must be indexed before they can be retrieved."
+                "The passages must be indexed before they can be retrieved."
             )
-        return self.get_vector_from_index(self.get_index_from_context(context))
+        return self.get_vector_from_index(self.get_index_from_passage(passage))
 
     @property
     def question_tokenizer(self) -> tr.PreTrainedTokenizer:
@@ -711,7 +711,7 @@ class GoldenRetriever(torch.nn.Module):
                 self._question_tokenizer = tr.AutoTokenizer.from_pretrained(
                     self.question_encoder.language_model_name
                 )
-            self._context_tokenizer = self._question_tokenizer
+            self._passage_tokenizer = self._question_tokenizer
             return self._question_tokenizer
 
         if not self._question_tokenizer:
@@ -721,43 +721,43 @@ class GoldenRetriever(torch.nn.Module):
         return self._question_tokenizer
 
     @property
-    def context_tokenizer(self) -> tr.PreTrainedTokenizer:
+    def passage_tokenizer(self) -> tr.PreTrainedTokenizer:
         """
-        The context tokenizer.
+        The passage tokenizer.
         """
-        if self._context_tokenizer:
-            return self._context_tokenizer
+        if self._passage_tokenizer:
+            return self._passage_tokenizer
 
         if (
             self.question_encoder.language_model_name
-            == self.context_encoder.language_model_name
+            == self.passage_encoder.language_model_name
         ):
             if not self._question_tokenizer:
                 self._question_tokenizer = tr.AutoTokenizer.from_pretrained(
                     self.question_encoder.language_model_name
                 )
-            self._context_tokenizer = self._question_tokenizer
-            return self._context_tokenizer
+            self._passage_tokenizer = self._question_tokenizer
+            return self._passage_tokenizer
 
-        if not self._context_tokenizer:
-            self._context_tokenizer = tr.AutoTokenizer.from_pretrained(
-                self.context_encoder.language_model_name
+        if not self._passage_tokenizer:
+            self._passage_tokenizer = tr.AutoTokenizer.from_pretrained(
+                self.passage_encoder.language_model_name
             )
-        return self._context_tokenizer
+        return self._passage_tokenizer
 
     @property
-    def context_embeddings(self) -> torch.Tensor:
+    def passage_embeddings(self) -> torch.Tensor:
         """
-        The context embeddings.
+        The passage embeddings.
         """
-        return self._context_embeddings
+        return self._passage_embeddings
 
     @property
-    def context_index(self) -> Labels:
+    def passage_index(self) -> Labels:
         """
-        The context index.
+        The passage index.
         """
-        return self._context_index
+        return self._passage_index
 
     @property
     def device(self) -> torch.device:
@@ -813,14 +813,14 @@ class GoldenRetriever(torch.nn.Module):
         return dict(
             _target_=f"{self.__class__.__module__}.{self.__class__.__name__}",
             question_encoder=self.question_encoder.config,
-            context_encoder=self.context_encoder.config
-            if not self.context_encoder_is_question_encoder
+            passage_encoder=self.passage_encoder.config
+            if not self.passage_encoder_is_question_encoder
             else None,
             loss_type=dict(
                 _target_=f"{self.loss_type.__class__.__module__}.{self.loss_type.__class__.__name__}"
             ),
-            # context_index is not saved because it might be too large
-            context_index=None,
+            # passage_index is not saved because it might be too large
+            passage_index=None,
         )
 
     def save_pretrained(
@@ -855,23 +855,23 @@ class GoldenRetriever(torch.nn.Module):
         # override the from_pretrained parameter of the encoders
         # we don't want to load the pretrained weights from HF Hub when loading the retriever
         config["question_encoder"]["from_pretrained"] = False
-        if config["context_encoder"] is not None:
-            config["context_encoder"]["from_pretrained"] = False
+        if config["passage_encoder"] is not None:
+            config["passage_encoder"]["from_pretrained"] = False
         # save the config using OmegaConf
         OmegaConf.save(config, output_dir / CONFIG_NAME)
 
-        if self._context_embeddings is None or self._context_index is None:
-            raise ValueError("The contexts must be indexed before they can be saved.")
+        if self._passage_embeddings is None or self._passage_index is None:
+            raise ValueError("The passages must be indexed before they can be saved.")
 
         # save the current state of the retriever
         logger.info(f"Saving retriever state to {output_dir / WEIGHTS_NAME}")
         torch.save(self.state_dict(), output_dir / WEIGHTS_NAME)
-        # save the context embeddings
-        logger.info(f"Saving context embeddings to {output_dir / INDEX_VECTOR_NAME}")
-        torch.save(self._context_embeddings, output_dir / INDEX_VECTOR_NAME)
-        # save the context index
-        logger.info(f"Saving context index to {output_dir / INDEX_NAME}")
-        self._context_index.save(output_dir / INDEX_NAME)
+        # save the passage embeddings
+        logger.info(f"Saving passage embeddings to {output_dir / INDEX_VECTOR_NAME}")
+        torch.save(self._passage_embeddings, output_dir / INDEX_VECTOR_NAME)
+        # save the passage index
+        logger.info(f"Saving passage index to {output_dir / INDEX_NAME}")
+        self._passage_index.save(output_dir / INDEX_NAME)
         # save the faiss indexer
         # if self._faiss_indexer is not None:
         #     logger.log(f"Saving faiss index to {output_dir / FAISS_INDEX_NAME}")
@@ -973,14 +973,14 @@ class GoldenRetriever(torch.nn.Module):
         pprint(OmegaConf.to_container(config), console=console_logger, expand_all=True)
 
         # load the index vocabulary
-        context_index = Labels.from_file(model_dir / INDEX_NAME)
+        passage_index = Labels.from_file(model_dir / INDEX_NAME)
 
         weights_path = model_dir / WEIGHTS_NAME
 
         # load model from config
         logger.info("Loading model")
         model = hydra.utils.instantiate(
-            config, context_index=context_index, *args, **kwargs
+            config, passage_index=passage_index, *args, **kwargs
         )
         # load model weights
         model_state = torch.load(weights_path, map_location=device)
@@ -1031,7 +1031,7 @@ class GoldenRetriever(torch.nn.Module):
             else:
                 if device == "cuda":
                     embeddings = embeddings.to(device)
-                model._context_embeddings = embeddings
+                model._passage_embeddings = embeddings
 
         # move model to device
         model.to(device)

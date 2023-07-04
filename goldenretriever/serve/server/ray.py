@@ -148,7 +148,7 @@ class GoldenRetrieverServer:
                 documents = [documents]
 
             # output list
-            windows_contexts = []
+            windows_passages = []
             # split documents into windows
             document_windows = [
                 window
@@ -173,18 +173,18 @@ class GoldenRetrieverServer:
             ):
                 text, text_pair = zip(*batch)
                 batch_predictions = await self.handle_batch(text, text_pair)
-                windows_contexts.extend(
+                windows_passages.extend(
                     [
                         [p.label for p in predictions]
                         for predictions in batch_predictions
                     ]
                 )
 
-            # add context to document windows
-            for window, contexts in zip(document_windows, windows_contexts):
-                # clean up contexts (remove everything after first <def> tag if present)
-                contexts = [c.split(" <def>", 1)[0] for c in contexts]
-                window.window_candidates = contexts
+            # add passage to document windows
+            for window, passages in zip(document_windows, windows_passages):
+                # clean up passages (remove everything after first <def> tag if present)
+                passages = [c.split(" <def>", 1)[0] for c in passages]
+                window.window_candidates = passages
 
             # return document windows
             return document_windows

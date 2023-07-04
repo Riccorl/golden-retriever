@@ -5,12 +5,13 @@ bash scripts/train.sh \
     -l intfloat/e5-base-v2 \
     --print \
     --wandb golden-retriever-blink \
-    "model_name=e5-base-blink-inbatch-first1M" \
-    "data.shared_params.context_batch_size=400" \
+    "model_name=e5-base-blink-inbatch-first1M-random-hnprob-0.2" \
+    "data.shared_params.passage_batch_size=400" \
     "++train.pl_trainer.num_sanity_val_steps=0" \
     "++data.datamodule.datasets.train.prefetch=True" \
-    "data.shared_params.contexts_path=data/dpr-like/el/definitions.txt" \
+    "train.callbacks.hard_negatives_callback.add_with_probability=0.2" \
     "data.datamodule.datasets.train.subsample_strategy=random" \
-    "data.datamodule.datasets.train.path=['/media/data/EL/blink/window_32_tokens/random_1M/dpr-like/first_1M.jsonl']" \
-    "data.datamodule.datasets.val.0.path=['data/dpr-like/el/blink/val.jsonl']" \
-    "data.datamodule.datasets.test.0.path=['data/dpr-like/el/blink/val.jsonl']"
+    "data.shared_params.passages_path=data/dpr-like/el/definitions.txt" \
+    "data.datamodule.datasets.train.path=['/media/ssd/ric/data/golden/EL/blink/window_32_tokens/random_1M/dpr-like/first_1M.jsonl']" \
+    "data.datamodule.datasets.val.0.path=['/media/ssd/ric/data/golden/EL/blink/window_32_tokens/random_1M/dpr-like/val.jsonl']" \
+    "data.datamodule.datasets.test.0.path=['/media/ssd/ric/data/golden/EL/blink/window_32_tokens/random_1M/dpr-like/val.jsonl']"

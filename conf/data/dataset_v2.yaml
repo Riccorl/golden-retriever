@@ -1,51 +1,46 @@
 shared_params:
-  contexts_path: null
-  max_context_length: 64
-  context_batch_size: 64
+  passages_path: null
+  max_passage_length: 64
+  passage_batch_size: 64
   question_batch_size: 64
-  use_topics: False
 
 datamodule:
   _target_: goldenretriever.lightning_modules.pl_data_modules.GoldenRetrieverPLDataModule
   datasets:
     train:
       _target_: goldenretriever.data.datasets.InBatchNegativesDataset
-      name: 'train'
+      name: "train"
       path: null
       tokenizer: ${model.language_model}
-      contexts: ${data.shared_params.contexts_path}
-      max_context_length: ${data.shared_params.max_context_length}
+      passages: ${data.shared_params.passages_path}
+      max_passage_length: ${data.shared_params.max_passage_length}
       question_batch_size: ${data.shared_params.question_batch_size}
-      context_batch_size: ${data.shared_params.context_batch_size}
+      passage_batch_size: ${data.shared_params.passage_batch_size}
       subsample_strategy: null
       subsample_portion: 0.1
       shuffle: True
-      use_topics: ${data.shared_params.use_topics}
 
     val:
       - _target_: goldenretriever.data.datasets.InBatchNegativesDataset
-        name: 'val'
+        name: "val"
         path: null
         tokenizer: ${model.language_model}
-        contexts: ${data.shared_params.contexts_path}
-        max_context_length: ${data.shared_params.max_context_length}
+        passages: ${data.shared_params.passages_path}
+        max_passage_length: ${data.shared_params.max_passage_length}
         question_batch_size: ${data.shared_params.question_batch_size}
-        context_batch_size: ${data.shared_params.context_batch_size}
-        use_topics: ${data.shared_params.use_topics}
+        passage_batch_size: ${data.shared_params.passage_batch_size}
 
     test:
       - _target_: goldenretriever.data.datasets.InBatchNegativesDataset
-        name: 'test'
+        name: "test"
         path: null
         tokenizer: ${model.language_model}
-        contexts: ${data.shared_params.contexts_path}
-        max_context_length: ${data.shared_params.max_context_length}
+        passages: ${data.shared_params.passages_path}
+        max_passage_length: ${data.shared_params.max_passage_length}
         question_batch_size: ${data.shared_params.question_batch_size}
-        context_batch_size: ${data.shared_params.context_batch_size}
-        use_topics: ${data.shared_params.use_topics}
+        passage_batch_size: ${data.shared_params.passage_batch_size}
 
   num_workers:
     train: 4
     val: 4
     test: 4
- 

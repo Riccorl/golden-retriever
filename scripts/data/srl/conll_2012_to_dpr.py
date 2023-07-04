@@ -31,23 +31,23 @@ def conll_2012_to_dpr(
     # Output DPR file, a list of dictionaries with the following keys:
     # "question": "....",
     # "answers": ["...", "...", "..."],
-    # "positive_ctxs": [{
+    # "positive_pssgs": [{
     #     "title": "...",
     #     "text": "...."
     # }],
-    # "negative_ctxs": ["..."],
-    # "hard_negative_ctxs": ["..."]
+    # "negative_pssgs": ["..."],
+    # "hard_negative_pssgs": ["..."]
     dpr = []
     for sentence_id, sentence in conll_data.items():
         question = " ".join(sentence["words"])
-        positive_ctxs = []
+        positive_pssgs = []
         for predicate_index, annotation in sentence["annotations"].items():
             if annotation["predicate"] not in definitions:
                 print(f"Predicate {annotation['predicate']} not found in definitions")
                 continue
             predicate_definition = definitions[annotation["predicate"]]
             if not only_roles:
-                positive_ctxs.append(
+                positive_pssgs.append(
                     {
                         "title": annotation["predicate"],
                         "text": predicate_definition["definition"],
@@ -67,7 +67,7 @@ def conll_2012_to_dpr(
                     role_text = predicate_definition["roleset"].get(role, role)
                     if role in argm_definitions:
                         role_text = argm_definitions[role]
-                    positive_ctxs.append(
+                    positive_pssgs.append(
                         {
                             "title": role,
                             "text": role_text.strip(),
@@ -75,23 +75,23 @@ def conll_2012_to_dpr(
                         }
                     )
                 # for argm_role, argm_def in argm_definitions.values():
-                #     positive_ctxs.append(
+                #     positive_pssgs.append(
                 #         {
                 #             "title": argm_role,
                 #             "text": argm_def,
                 #             "passage_id": f"{sentence_id}_{predicate_index}_{role_index}",
                 #         }
                 #     )
-        if len(positive_ctxs) == 0:
+        if len(positive_pssgs) == 0:
             continue
         dpr.append(
             {
                 "id": f"{sentence_id}",
                 "question": question,
                 "answers": "",
-                "positive_ctxs": positive_ctxs,
-                "negative_ctxs": "",
-                "hard_negative_ctxs": "",
+                "positive_pssgs": positive_pssgs,
+                "negative_pssgs": "",
+                "hard_negative_pssgs": "",
             }
         )
     # Write DPR file
@@ -127,16 +127,16 @@ def conll_2012_to_dpr_pairs(
     # Output DPR file, a list of dictionaries with the following keys:
     # "question": "....",
     # "answers": ["...", "...", "..."],
-    # "positive_ctxs": [{
+    # "positive_pssgs": [{
     #     "title": "...",
     #     "text": "...."
     # }],
-    # "negative_ctxs": ["..."],
-    # "hard_negative_ctxs": ["..."]
+    # "negative_pssgs": ["..."],
+    # "hard_negative_pssgs": ["..."]
     dpr = []
     for sentence_id, sentence in conll_data.items():
         question = " ".join(sentence["words"])
-        positive_ctxs = []
+        positive_pssgs = []
         for predicate_index, annotation in sentence["annotations"].items():
             if annotation["predicate"] not in definitions:
                 print(f"Predicate {annotation['predicate']} not found in definitions")
@@ -158,7 +158,7 @@ def conll_2012_to_dpr_pairs(
                 )
             else:
                 predicate_definition = predicate_definition + "."
-            positive_ctxs.append(
+            positive_pssgs.append(
                 {
                     "title": title.strip(),
                     "text": predicate_definition.strip(),
@@ -177,23 +177,23 @@ def conll_2012_to_dpr_pairs(
             #     role_text = predicate["roleset"].get(role, role)
             #     if role in argm_definitions:
             #         role_text = argm_definitions[role]
-            #         positive_ctxs.append(
+            #         positive_pssgs.append(
             #             {
             #                 "title": role,
             #                 "text": role_text.strip() + ".",
             #                 "passage_id": f"{sentence_id}_{predicate_index}_{role_index}",
             #             }
             #         )
-        if len(positive_ctxs) == 0:
+        if len(positive_pssgs) == 0:
             continue
         dpr.append(
             {
                 "id": f"{sentence_id}",
                 "question": question,
                 "answers": "",
-                "positive_ctxs": positive_ctxs,
-                "negative_ctxs": "",
-                "hard_negative_ctxs": "",
+                "positive_pssgs": positive_pssgs,
+                "negative_pssgs": "",
+                "hard_negative_pssgs": "",
             }
         )
     # Write DPR file

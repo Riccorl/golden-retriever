@@ -16,6 +16,14 @@ from pytorch_lightning.callbacks import (
 )
 from pytorch_lightning.loggers import WandbLogger
 from rich.pretty import pprint
+from goldenretriever.callbacks.prediction_callbacks import (
+    GoldenRetrieverPredictionCallback,
+    NegativeAugmentationCallback,
+)
+from goldenretriever.callbacks.utils_callbacks import (
+    FreeUpIndexerVRAMCallback,
+    SaveRetrieverCallback,
+)
 
 from goldenretriever.data.datasets import GoldenRetrieverDataset
 from goldenretriever.models.model import GoldenRetriever
@@ -43,7 +51,6 @@ class Trainer:
         num_warmup_steps: int = 0,
         lr_scheduler: str = "linear",
         callbacks: Optional[list] = None,
-        experiment_logger: Optional[WandbLogger] = None,
         num_workers: int = 4,
         accelerator: str = "auto",
         devices: int = 1,
@@ -55,20 +62,11 @@ class Trainer:
         check_val_every_n_epoch: int = 1,
         max_steps: Optional[int] = None,
         max_epochs: Optional[int] = None,
-        checkpoint_path: Optional[Union[str, os.PathLike]] = None,
+        # checkpoint_path: Optional[Union[str, os.PathLike]] = None,
         deterministic: bool = True,
         fast_dev_run: bool = False,
         precision: int = 16,
         reload_dataloaders_every_n_epochs: int = 1,
-        # checkpoint_monitor: str = "validate_recall@${train.top_k}",
-        # checkpoint_mode: str = "max",
-        # checkpoint_save_top_k: int = 1,
-        # checkpoint_save_last: bool = False,
-        # checkpoint_root_dir: Optional[Union[str, os.PathLike]] = None,
-        # checkpoint_filename: Union[
-        #     str, os.PathLike
-        # ] = "checkpoint-validate_recall@${train.top_k}_{validate_recall@${train.top_k}:.4f}-epoch_{epoch:02d}",
-        # auto_insert_metric_name: bool = False,
         model_checkpoint_callback: Optional[ModelCheckpoint] = None,
         early_stopping_callback: Optional[EarlyStopping] = None,
         wandb_logger: Optional[WandbLogger] = None,
@@ -100,21 +98,83 @@ class Trainer:
         # callbacks declaration
         self.callbacks_store = [ModelSummary(max_depth=2)]
 
+        # early stopping callback if specified
+        self.early_stopping_callback: Optional[EarlyStopping] = None
         if early_stopping_callback is not None:
+            self.early_stopping_callback = early_stopping_callback
             self.callbacks_store.append(early_stopping_callback)
 
-        if model_checkpoint_callback is not None:
-            model_checkpoint_callback = hydra.utils.instantiate(
-                conf.train.model_checkpoint_callback,
-                dirpath=experiment_path / "checkpoints" if experiment_path else None,
+        # wandb logger if specified
+        self.wandb_logger: Optional[WandbLogger] = None
+        self.experiment_path: Optional[Path] = None
+        if wandb_logger:
+            # logger.log(f"Instantiating Wandb Logger")
+            self.wandb_logger = wandb_logger
+            experiment_path = Path(wandb_logger.experiment.dir)
+            # Store the YaML config separately into the wandb dir
+            # yaml_conf: str = OmegaConf.to_yaml(cfg=conf)
+            # (experiment_path / "hparams.yaml").write_text(yaml_conf)
+            # Add a Learning Rate Monitor callback to log the learning rate
+            self.callbacks_store.append(LearningRateMonitor(logging_interval="step"))
+
+        # model checkpoint callback if specified
+        self.model_checkpoint_callback: Optional[ModelCheckpoint] = None
+        if model_checkpoint_callback is None:
+            checkpoint_path = (
+                "checkpoint-validate_recall@"
+                + train.top_k
+                + "_{validate_recall@"
+                + train.top_k
+                + ":.4f}-epoch_{epoch:02d}"
             )
-            callbacks_store.append(model_checkpoint_callback)
+            model_checkpoint_callback = ModelCheckpoint(
+                monitor=f"validate_recall@{train.top_k}",
+                mode="max",
+                verbose=True,
+                save_top_k=1,
+                save_last=False,
+                filename=checkpoint_path,
+                dirpath=experiment_path / "checkpoints" if experiment_path else None,
+                auto_insert_metric_name=False,
+            )
+        self.callbacks_store.append(self.model_checkpoint_callback)
 
-        
+        # prediction callback
+        self.prediction_callback = GoldenRetrieverPredictionCallback(
+            k=train.top_k,
+            batch_size=128,
+            use_faiss=False,
+            move_index_to_cpu=False,
+            precision=16,
+            index_precision=16,
+            other_callbacks=None,
+        )
+        self.callbacks_store.append(self.prediction_callback)
 
-    def train(
-        self,
-    ):
+        # hard negative mining callback
+        self.hard_negatives_callback = NegativeAugmentationCallback(
+            k=train.top_k,
+            batch_size=128,
+            use_faiss=False,
+            move_index_to_cpu=False,
+            precision=16,
+            index_precision=16,
+            stages=["validate"],
+            metrics_to_monitor=f"validate_recall@{train.top_k}",
+            threshold=0.0,
+            max_negatives=15,
+            add_with_probability=0.2,
+            refresh_every_n_epochs=1,
+            other_callbacks=None,
+        )
+        self.callbacks_store.append(self.hard_negatives_callback)
+
+        # utils callback
+        self.callbacks_store.append(
+            SaveRetrieverCallback(), FreeUpIndexerVRAMCallback()
+        )
+
+    def train(self):
         self.pl_datamodule.setup("fit")
 
         # count the number of training steps
@@ -279,7 +339,7 @@ def train(conf: omegaconf.DictConfig) -> None:
                 f"Loading pretrained checkpoint from {conf.train.pretrain_ckpt_path}"
             )
             pl_module.load_state_dict(
-                torch.load(conf.train.pretrain_ckpt_path)["state_dict"]
+                torch.load(conf.train.pretrain_ckpt_path)["state_dict"], strict=False
             )
 
         if "compile" in conf.model.pl_module and conf.model.pl_module.compile:

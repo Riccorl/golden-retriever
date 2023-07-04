@@ -1,4 +1,4 @@
-max_contexts: 64
+max_passages: 64
 
 datamodule:
   _target_: goldenretriever.lightning_modules.pl_data_modules.PLDataModule
@@ -6,26 +6,26 @@ datamodule:
   datasets:
     train:
       _target_: goldenretriever.data.dpr.datasets.SampledNegativesDPRDataset
-      name: 'train'
-      contexts_path: ${data_overrides.contexts_path}
-      max_context_length: 64
-      max_contexts: ${data.max_contexts}
+      name: "train"
+      passages_path: ${data_overrides.passages_path}
+      max_passage_length: 64
+      max_passages: ${data.max_passages}
       path: ${data_overrides.train_path}
 
     val:
       - _target_: goldenretriever.data.dpr.datasets.SampledNegativesDPRDataset
-        name: 'val'
-        contexts_path: ${data_overrides.contexts_path}
-        max_context_length: 64
-        max_contexts: ${data.max_contexts}
+        name: "val"
+        passages_path: ${data_overrides.passages_path}
+        max_passage_length: 64
+        max_passages: ${data.max_passages}
         path: ${data_overrides.val_path}
 
     test:
       - _target_: goldenretriever.data.dpr.datasets.SampledNegativesDPRDataset
-        name: 'test'
-        contexts_path: ${data_overrides.contexts_path}
-        max_context_length: 64
-        max_contexts: ${data.max_contexts}
+        name: "test"
+        passages_path: ${data_overrides.passages_path}
+        max_passage_length: 64
+        max_passages: ${data.max_passages}
         path: ${data_overrides.test_path}
 
   batch_sizes:
@@ -37,4 +37,3 @@ datamodule:
     train: 4
     val: 4
     test: 4
- 

@@ -17,7 +17,7 @@ def check_definitions(
 
     missing_definitions = []
     for sample in tqdm(data):
-        for defs in sample["positive_ctxs"]:
+        for defs in sample["positive_pssgs"]:
             text = defs["text"]
             # clean text
             text = text.strip()

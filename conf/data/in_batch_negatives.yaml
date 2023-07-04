@@ -1,6 +1,6 @@
 shared_params:
-  contexts_path: null
-  max_context_length: 64
+  passages_path: null
+  max_passage_length: 64
   prefetch_batches: True
   use_topics: False
 
@@ -12,8 +12,8 @@ datamodule:
       _target_: goldenretriever.data.dpr.datasets.InBatchNegativesDPRDataset
       name: "train"
       path: null
-      contexts_path: ${data.shared_params.contexts_path}
-      max_context_length: ${data.shared_params.max_context_length}
+      passages_path: ${data.shared_params.passages_path}
+      max_passage_length: ${data.shared_params.max_passage_length}
       prefetch_batches: ${data.shared_params.prefetch_batches}
       subsample: null
       shuffle: True
@@ -23,8 +23,8 @@ datamodule:
       - _target_: goldenretriever.data.dpr.datasets.InBatchNegativesDPRDataset
         name: "val"
         path: null
-        contexts_path: ${data.shared_params.contexts_path}
-        max_context_length: ${data.shared_params.max_context_length}
+        passages_path: ${data.shared_params.passages_path}
+        max_passage_length: ${data.shared_params.max_passage_length}
         prefetch_batches: ${data.shared_params.prefetch_batches}
         use_topics: ${data.shared_params.use_topics}
 
@@ -32,8 +32,8 @@ datamodule:
       - _target_: goldenretriever.data.dpr.datasets.InBatchNegativesDPRDataset
         name: "test"
         path: null
-        contexts_path: ${data.shared_params.contexts_path}
-        max_context_length: ${data.shared_params.max_context_length}
+        passages_path: ${data.shared_params.passages_path}
+        max_passage_length: ${data.shared_params.max_passage_length}
         prefetch_batches: ${data.shared_params.prefetch_batches}
         use_topics: ${data.shared_params.use_topics}
 

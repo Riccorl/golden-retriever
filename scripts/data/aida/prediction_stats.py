@@ -16,7 +16,7 @@ if __name__ == "__main__":
 
     definitions = []
     for doc in train:
-        positives = doc["positive_ctxs"]
+        positives = doc["positive_pssgs"]
         definitions.extend([p["text"] for p in positives])
 
     totally_missed = []

@@ -17,7 +17,7 @@ from tqdm import tqdm
 from goldenretriever.common.log import get_console_logger, get_logger
 from goldenretriever.common.model_inputs import ModelInputs
 from goldenretriever.data.base.datasets import BaseDataset, IterableBaseDataset
-from goldenretriever.data.labels import ContextManager
+from goldenretriever.data.labels import passageManager
 from goldenretriever.data.utils import HardNegativesManager
 
 console_logger = get_console_logger()
@@ -38,14 +38,14 @@ class GoldenRetrieverDataset:
         path: Union[str, os.PathLike, List[str], List[os.PathLike]] = None,
         data: Any = None,
         tokenizer: Optional[Union[str, tr.PreTrainedTokenizer]] = None,
-        contexts: Union[str, os.PathLike, List[str]] = None,
-        context_batch_size: int = 32,
+        passages: Union[str, os.PathLike, List[str]] = None,
+        passage_batch_size: int = 32,
         question_batch_size: int = 32,
         max_positives: int = -1,
         max_negatives: int = 0,
         max_hard_negatives: int = 0,
         max_question_length: int = 256,
-        max_context_length: int = 64,
+        max_passage_length: int = 64,
         shuffle: bool = False,
         subsample_strategy: Optional[str] = SubsampleStrategyEnum.NONE,
         subsample_portion: float = 0.1,
@@ -70,13 +70,13 @@ class GoldenRetrieverDataset:
         self.data = data
 
         # hyper-parameters
-        self.context_batch_size = context_batch_size
+        self.passage_batch_size = passage_batch_size
         self.question_batch_size = question_batch_size
         self.max_positives = max_positives
         self.max_negatives = max_negatives
         self.max_hard_negatives = max_hard_negatives
         self.max_question_length = max_question_length
-        self.max_context_length = max_context_length
+        self.max_passage_length = max_passage_length
         self.shuffle = shuffle
         self.num_proc = num_proc
         self.load_from_cache_file = load_from_cache_file
@@ -132,31 +132,31 @@ class GoldenRetrieverDataset:
                 max_negatives=max_negatives,
                 max_hard_negatives=max_hard_negatives,
                 max_question_length=max_question_length,
-                max_context_length=max_context_length,
+                max_passage_length=max_passage_length,
             )
         else:
             self.data: Dataset = data
 
-        # create a manager for the contexts
-        self.context_manager = ContextManager()
-        if contexts is not None:
-            if isinstance(contexts, list):
-                context_to_add = contexts
+        # create a manager for the passages
+        self.passage_manager = passageManager()
+        if passages is not None:
+            if isinstance(passages, list):
+                passage_to_add = passages
             else:
-                # read contexts from file if provided
-                logger.info(f"Reading contexts from {contexts}")
-                with open(self.project_folder / contexts, "r") as f:
-                    context_to_add = [line.strip() for line in f.readlines()]
-            self.context_manager.add_contexts(context_to_add)
+                # read passages from file if provided
+                logger.info(f"Reading passages from {passages}")
+                with open(self.project_folder / passages, "r") as f:
+                    passage_to_add = [line.strip() for line in f.readlines()]
+            self.passage_manager.add_passages(passage_to_add)
 
-        # context_batch_size cannot be greater than the number of contexts
-        if self.context_batch_size > len(self.context_manager):
+        # passage_batch_size cannot be greater than the number of passages
+        if self.passage_batch_size > len(self.passage_manager):
             logger.info(
-                f"Your context_batch_size ({context_batch_size}) "
-                f"is greater than the number of contexts ({len(self.context_manager)}). "
-                f"Setting context_batch_size to {len(self.context_manager)}."
+                f"Your passage_batch_size ({passage_batch_size}) "
+                f"is greater than the number of passages ({len(self.passage_manager)}). "
+                f"Setting passage_batch_size to {len(self.passage_manager)}."
             )
-            self.context_batch_size = len(self.context_manager)
+            self.passage_batch_size = len(self.passage_manager)
 
         self.hn_manager: Optional[HardNegativesManager] = None
 
@@ -189,9 +189,9 @@ class GoldenRetrieverDataset:
         max_positives: int = -1,
         max_negatives: int = -1,
         max_hard_negatives: int = -1,
-        max_contexts: int = -1,
+        max_passages: int = -1,
         max_question_length: int = 256,
-        max_context_length: int = 64,
+        max_passage_length: int = 64,
         *args,
         **kwargs,
     ) -> Any:
@@ -210,9 +210,9 @@ class GoldenRetrieverDataset:
             max_positives=max_positives,
             max_negatives=max_negatives,
             max_hard_negatives=max_hard_negatives,
-            max_contexts=max_contexts,
+            max_passages=max_passages,
             max_question_length=max_question_length,
-            max_context_length=max_context_length,
+            max_passage_length=max_passage_length,
         )
         if load_fn_kwargs is not None:
             fn_kwargs.update(load_fn_kwargs)
@@ -224,9 +224,9 @@ class GoldenRetrieverDataset:
         # Each sample has the following keys:
         #   - "question": the question
         #   - "answers": a list of answers
-        #   - "positive_ctxs": a list of positive contexts
-        #   - "negative_ctxs": a list of negative contexts
-        #   - "hard_negative_ctxs": a list of hard negative contexts
+        #   - "positive_ctxs": a list of positive passages
+        #   - "negative_ctxs": a list of negative passages
+        #   - "hard_negative_ctxs": a list of hard negative passages
         # use the huggingface dataset library to load the data, by default it will load the
         # data in a dict with the key being "train".
         logger.info("Loading data from files")
@@ -398,10 +398,10 @@ class GoldenRetrieverDataset:
         self.data = self.data.shuffle(seed=seed)
 
     @property
-    def contexts(self):
-        if self.context_manager is None:
+    def passages(self):
+        if self.passage_manager is None:
             return []
-        return list(self.context_manager.get_contexts().keys())
+        return list(self.passage_manager.get_passages().keys())
 
 
 class InBatchNegativesDataset(GoldenRetrieverDataset):
@@ -471,7 +471,7 @@ class InBatchNegativesDataset(GoldenRetrieverDataset):
             data = data.shuffle(seed=42 + self.number_of_complete_iterations)
 
         batch_fn_kwargs = {
-            "context_batch_size": self.context_batch_size,
+            "passage_batch_size": self.passage_batch_size,
             "question_batch_size": self.question_batch_size,
             "hard_negatives_manager": self.hn_manager,
         }
@@ -501,13 +501,13 @@ class InBatchNegativesDataset(GoldenRetrieverDataset):
         max_positives: int,
         max_negatives: int,
         max_hard_negatives: int,
-        max_contexts: int = -1,
+        max_passages: int = -1,
         max_question_length: int = 256,
-        max_context_length: int = 128,
+        max_passage_length: int = 128,
         *args,
         **kwargs,
     ) -> Dict:
-        # remove duplicates and limit the number of contexts
+        # remove duplicates and limit the number of passages
         positives = list(set([p["text"].strip() for p in sample["positive_ctxs"]]))
         if max_positives != -1:
             positives = positives[:max_positives]
@@ -524,27 +524,27 @@ class InBatchNegativesDataset(GoldenRetrieverDataset):
             sample["question"], max_length=max_question_length, truncation=True
         )
 
-        context = positives + negatives + hard_negatives
-        if max_contexts != -1:
-            context = context[:max_contexts]
+        passage = positives + negatives + hard_negatives
+        if max_passages != -1:
+            passage = passage[:max_passages]
 
-        context = tokenizer(context, max_length=max_context_length, truncation=True)
+        passage = tokenizer(passage, max_length=max_passage_length, truncation=True)
 
-        # invert the context data structure from a dict of lists to a list of dicts
-        context = [dict(zip(context, t)) for t in zip(*context.values())]
+        # invert the passage data structure from a dict of lists to a list of dicts
+        passage = [dict(zip(passage, t)) for t in zip(*passage.values())]
 
         output = dict(
             question=question,
-            context=context,
+            passage=passage,
             positives=positives,
-            positive_ctxs=context[: len(positives)],
+            positive_pssgs=passage[: len(positives)],
         )
         return output
 
     @staticmethod
     def batch_fn(
         data: Dataset,
-        context_batch_size: int,
+        passage_batch_size: int,
         question_batch_size: int,
         hard_negatives_manager: Optional[HardNegativesManager] = None,
         *args,
@@ -555,7 +555,7 @@ class InBatchNegativesDataset(GoldenRetrieverDataset):
         ) -> List[ModelInputs]:
             """
             Split a batch into multiple batches of size `question_batch_size` while keeping
-            the same number of contexts.
+            the same number of passages.
             """
 
             split_fn = lambda x: [
@@ -568,8 +568,8 @@ class InBatchNegativesDataset(GoldenRetrieverDataset):
             questions = split_fn(batch["questions"])
             # split the positives
             positives = split_fn(batch["positives"])
-            # split the positives_ctxs
-            positives_ctxs = split_fn(batch["positives_ctxs"])
+            # split the positives_pssgs
+            positives_pssgs = split_fn(batch["positives_pssgs"])
 
             # collect the new batches
             batches = []
@@ -579,26 +579,26 @@ class InBatchNegativesDataset(GoldenRetrieverDataset):
                         dict(
                             sample_idx=sample_idx[i],
                             questions=questions[i],
-                            contexts=batch["contexts"],
+                            passages=batch["passages"],
                             positives=positives[i],
-                            positives_ctxs=positives_ctxs[i],
+                            positives_pssgs=positives_pssgs[i],
                         )
                     )
                 )
             return batches
 
         batch = []
-        contexts_in_batch = {}
+        passages_in_batch = {}
 
         for sample in data:
-            if len(contexts_in_batch) >= context_batch_size:
+            if len(passages_in_batch) >= passage_batch_size:
                 # create the batch dict
                 batch_dict = ModelInputs(
                     dict(
                         sample_idx=[s["sample_idx"] for s in batch],
                         questions=[s["question"] for s in batch],
-                        contexts=list(contexts_in_batch.values()),
-                        positives_ctxs=[s["positive_ctxs"] for s in batch],
+                        passages=list(passages_in_batch.values()),
+                        positives_pssgs=[s["positive_pssgs"] for s in batch],
                         positives=[s["positives"] for s in batch],
                     )
                 )
@@ -611,26 +611,28 @@ class InBatchNegativesDataset(GoldenRetrieverDataset):
 
                 # reset batch
                 batch = []
-                contexts_in_batch = {}
+                passages_in_batch = {}
 
             batch.append(sample)
             # yes it's a bit ugly but it works :)
-            # count the number of contexts in the batch and stop if we reach the limit
-            # we use a set to avoid counting the same context twice
+            # count the number of passages in the batch and stop if we reach the limit
+            # we use a set to avoid counting the same passage twice
             # we use a tuple because set doesn't support lists
             # we use input_ids as discriminator
-            contexts_in_batch.update(
-                {tuple(context["input_ids"]): context for context in sample["context"]}
+            passages_in_batch.update(
+                {tuple(passage["input_ids"]): passage for passage in sample["passage"]}
             )
             # check for hard negatives and add with a probability of 0.1
             if hard_negatives_manager is not None:
-                contexts_in_batch.update(
-                    {
-                        tuple(context["input_ids"]): context
-                        for context in hard_negatives_manager.get(sample["sample_idx"])
-                        if sample["sample_idx"] in hard_negatives_manager
-                    }
-                )
+                if sample["sample_idx"] in hard_negatives_manager:
+                    passages_in_batch.update(
+                        {
+                            tuple(passage["input_ids"]): passage
+                            for passage in hard_negatives_manager.get(
+                                sample["sample_idx"]
+                            )
+                        }
+                    )
 
         # left over
         if len(batch) > 0:
@@ -639,8 +641,8 @@ class InBatchNegativesDataset(GoldenRetrieverDataset):
                 dict(
                     sample_idx=[s["sample_idx"] for s in batch],
                     questions=[s["question"] for s in batch],
-                    contexts=list(contexts_in_batch.values()),
-                    positives_ctxs=[s["positive_ctxs"] for s in batch],
+                    passages=list(passages_in_batch.values()),
+                    positives_pssgs=[s["positive_pssgs"] for s in batch],
                     positives=[s["positives"] for s in batch],
                 )
             )
@@ -652,29 +654,29 @@ class InBatchNegativesDataset(GoldenRetrieverDataset):
                 yield batch_dict
 
     def collate_fn(self, batch: Any, *args, **kwargs) -> Any:
-        # convert questions and contexts to a batch
+        # convert questions and passages to a batch
         questions = self.convert_to_batch(batch.questions)
-        contexts = self.convert_to_batch(batch.contexts)
+        passages = self.convert_to_batch(batch.passages)
 
-        # build an index to map the position of the context in the batch
-        context_index = {tuple(c["input_ids"]): i for i, c in enumerate(batch.contexts)}
+        # build an index to map the position of the passage in the batch
+        passage_index = {tuple(c["input_ids"]): i for i, c in enumerate(batch.passages)}
 
         # now we can create the labels
         labels = torch.zeros(
-            questions["input_ids"].shape[0], contexts["input_ids"].shape[0]
+            questions["input_ids"].shape[0], passages["input_ids"].shape[0]
         )
-        # iterate over the questions and set the labels to 1 if the context is positive
+        # iterate over the questions and set the labels to 1 if the passage is positive
         for sample_idx in range(len(questions["input_ids"])):
-            for ctx in batch["positives_ctxs"][sample_idx]:
-                # get the index of the positive context
-                index = context_index[tuple(ctx["input_ids"])]
+            for pssg in batch["positives_pssgs"][sample_idx]:
+                # get the index of the positive passage
+                index = passage_index[tuple(pssg["input_ids"])]
                 # set the label to 1
                 labels[sample_idx, index] = 1
 
         model_inputs = ModelInputs(
             {
                 "questions": questions,
-                "contexts": contexts,
+                "passages": passages,
                 "labels": labels,
                 "positives": batch["positives"],
                 "sample_idx": batch["sample_idx"],
@@ -697,14 +699,14 @@ class AidaInBatchNegativesDataset(InBatchNegativesDataset):
         max_positives: int,
         max_negatives: int,
         max_hard_negatives: int,
-        max_contexts: int = -1,
+        max_passages: int = -1,
         max_question_length: int = 256,
-        max_context_length: int = 128,
+        max_passage_length: int = 128,
         use_topics: bool = False,
         *args,
         **kwargs,
     ) -> Dict:
-        # remove duplicates and limit the number of contexts
+        # remove duplicates and limit the number of passages
         positives = list(set([p["text"].strip() for p in sample["positive_ctxs"]]))
         if max_positives != -1:
             positives = positives[:max_positives]
@@ -717,31 +719,33 @@ class AidaInBatchNegativesDataset(InBatchNegativesDataset):
         if max_hard_negatives != -1:
             hard_negatives = hard_negatives[:max_hard_negatives]
 
+        question = sample["question"]
+
         if "doc_topic" in sample and use_topics:
             question = tokenizer(
-                sample["question"],
+                question,
                 sample["doc_topic"],
                 max_length=max_question_length,
                 truncation=True,
             )
         else:
             question = tokenizer(
-                sample["question"], max_length=max_question_length, truncation=True
+                question, max_length=max_question_length, truncation=True
             )
 
-        context = positives + negatives + hard_negatives
-        if max_contexts != -1:
-            context = context[:max_contexts]
+        passage = positives + negatives + hard_negatives
+        if max_passages != -1:
+            passage = passage[:max_passages]
 
-        context = tokenizer(context, max_length=max_context_length, truncation=True)
+        passage = tokenizer(passage, max_length=max_passage_length, truncation=True)
 
-        # invert the context data structure from a dict of lists to a list of dicts
-        context = [dict(zip(context, t)) for t in zip(*context.values())]
+        # invert the passage data structure from a dict of lists to a list of dicts
+        passage = [dict(zip(passage, t)) for t in zip(*passage.values())]
 
         output = dict(
             question=question,
-            context=context,
+            passage=passage,
             positives=positives,
-            positive_ctxs=context[: len(positives)],
+            positive_pssgs=passage[: len(positives)],
         )
         return output

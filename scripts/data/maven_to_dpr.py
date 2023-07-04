@@ -29,18 +29,18 @@ def maven_to_dpr(
     # Output DPR file, a list of dictionaries with the following keys:
     # "question": "....",
     # "answers": ["...", "...", "..."],
-    # "positive_ctxs": [{
+    # "positive_pssgs": [{
     #     "title": "...",
     #     "text": "...."
     # }],
-    # "negative_ctxs": ["..."],
-    # "hard_negative_ctxs": ["..."]
+    # "negative_pssgs": ["..."],
+    # "hard_negative_pssgs": ["..."]
     dpr = []
     for document in maven_data:
         d_idx = document["id"]
         for s_idx, sample in enumerate(document["content"]):
             question = sample["sentence"]
-            positive_ctxs = []
+            positive_pssgs = []
             for event in document["events"]:
                 for mention in event["mention"]:
                     if mention["sent_id"] != s_idx:
@@ -54,7 +54,7 @@ def maven_to_dpr(
                         )
                     event_type = event["type"].replace("_", " ").lower()
 
-                positive_ctxs.append(
+                positive_pssgs.append(
                     {
                         "title": f"{event['type']}",
                         "text": event_type,
@@ -62,19 +62,19 @@ def maven_to_dpr(
                     }
                 )
 
-            if len(positive_ctxs) == 0:
+            if len(positive_pssgs) == 0:
                 continue
 
             # remove duplicates
-            positive_ctxs = list({v["text"]: v for v in positive_ctxs}.values())
+            positive_pssgs = list({v["text"]: v for v in positive_pssgs}.values())
             dpr.append(
                 {
                     "id": f"{d_idx}_{s_idx}",
                     "question": question,
                     "answers": "",
-                    "positive_ctxs": positive_ctxs,
-                    "negative_ctxs": "",
-                    "hard_negative_ctxs": "",
+                    "positive_pssgs": positive_pssgs,
+                    "negative_pssgs": "",
+                    "hard_negative_pssgs": "",
                 }
             )
     # Write DPR file

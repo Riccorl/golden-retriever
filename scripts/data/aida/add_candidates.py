@@ -1,7 +1,7 @@
 # Path: scripts/data/aida/add_candidates.py
 
 import argparse
-import contextlib
+import passagelib
 import json
 import logging
 import os
@@ -80,7 +80,7 @@ def add_candidates(
         )
         logger.info(f"Creating dataloader with batch size {batch_size}")
         dataloader = torch.utils.data.DataLoader(
-            BaseDataset(name="context", data=samples),
+            BaseDataset(name="passage", data=samples),
             batch_size=batch_size,
             shuffle=False,
             num_workers=num_workers,
@@ -108,14 +108,19 @@ def add_candidates(
                     # the dataloader is not shuffled, so we can just count the number of
                     # documents we have seen so far
                     for sample, retrieved in zip(
-                        samples[num_completed_docs : num_completed_docs + len(retrieved_accumulator)],
+                        samples[
+                            num_completed_docs : num_completed_docs
+                            + len(retrieved_accumulator)
+                        ],
                         retrieved_accumulator,
                     ):
                         candidate_titles = [
                             c.label.split(" <def>", 1)[0] for c in retrieved
                         ]
                         sample["window_candidates"] = candidate_titles
-                        sample["window_candidates_scores"] = [c.score for c in retrieved]
+                        sample["window_candidates_scores"] = [
+                            c.score for c in retrieved
+                        ]
                         output_data.append(sample)
 
                     for sample in output_data:
@@ -123,14 +128,17 @@ def add_candidates(
 
                     num_completed_docs += len(retrieved_accumulator)
                     retrieved_accumulator = []
-                
+
             if len(retrieved_accumulator) > 0:
                 output_data = []
                 # get the correct document from the original dataset
                 # the dataloader is not shuffled, so we can just count the number of
                 # documents we have seen so far
                 for sample, retrieved in zip(
-                    samples[num_completed_docs : num_completed_docs + len(retrieved_accumulator)],
+                    samples[
+                        num_completed_docs : num_completed_docs
+                        + len(retrieved_accumulator)
+                    ],
                     retrieved_accumulator,
                 ):
                     candidate_titles = [

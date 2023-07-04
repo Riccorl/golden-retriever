@@ -98,13 +98,13 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
 
         # here we will store the samples with predictions for each dataloader
         dataloader_predictions = {}
-        # compute the context embeddings index for each dataloader
+        # compute the passage embeddings index for each dataloader
         for dataloader_idx, dataloader in enumerate(self.dataloaders):
             current_dataset: GoldenRetrieverDataset = self.datasets[dataloader_idx]
             logger.info(
-                f"Computing context embeddings for dataset {current_dataset.name}"
+                f"Computing passage embeddings for dataset {current_dataset.name}"
             )
-            contexts = self._get_contexts_dataloader(current_dataset, trainer)
+            passages = self._get_passages_dataloader(current_dataset, trainer)
 
             tokenizer = current_dataset.tokenizer
             collate_fn = lambda x: ModelInputs(
@@ -112,12 +112,12 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                     x,
                     truncation=True,
                     padding=True,
-                    max_length=current_dataset.max_context_length,
+                    max_length=current_dataset.max_passage_length,
                     return_tensors="pt",
                 )
             )
 
-            # check if we need to reindex the contexts and
+            # check if we need to reindex the passages and
             # also if we need to load the retriever from disk
             if (self.retriever_dir is not None and trainer.current_epoch == 0) or (
                 self.retriever_dir is not None and stage == RunningStage.TESTING
@@ -138,7 +138,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
             retriever.eval()
 
             retriever.index(
-                contexts,
+                passages,
                 batch_size=self.batch_size,
                 num_workers=self.num_workers,
                 collate_fn=collate_fn,
@@ -172,31 +172,31 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                 )
                 # compute recall at k
                 for batch_idx, retrieved_samples in enumerate(retriever_output):
-                    # get the positive contexts
-                    gold_contexts = batch["positives"][batch_idx]
-                    # get the index of the gold contexts in the retrieved contexts
-                    gold_context_indices = [
-                        retriever.get_index_from_context(context)
-                        for context in gold_contexts
+                    # get the positive passages
+                    gold_passages = batch["positives"][batch_idx]
+                    # get the index of the gold passages in the retrieved passages
+                    gold_passage_indices = [
+                        retriever.get_index_from_passage(passage)
+                        for passage in gold_passages
                     ]
                     retrieved_indices = [r.index for r in retrieved_samples]
-                    retrieved_contexts = [r.label for r in retrieved_samples]
+                    retrieved_passages = [r.label for r in retrieved_samples]
                     retrieved_scores = [r.score for r in retrieved_samples]
-                    # correct predictions are the contexts that are in the top-k and are gold
-                    correct_indices = set(gold_context_indices) & set(retrieved_indices)
-                    # wrong predictions are the contexts that are in the top-k and are not gold
-                    wrong_indices = set(retrieved_indices) - set(gold_context_indices)
+                    # correct predictions are the passages that are in the top-k and are gold
+                    correct_indices = set(gold_passage_indices) & set(retrieved_indices)
+                    # wrong predictions are the passages that are in the top-k and are not gold
+                    wrong_indices = set(retrieved_indices) - set(gold_passage_indices)
                     # add the predictions to the list
                     prediction_output = dict(
                         sample_idx=batch.sample_idx[batch_idx],
-                        gold=gold_contexts,
-                        predictions=retrieved_contexts,
+                        gold=gold_passages,
+                        predictions=retrieved_passages,
                         scores=retrieved_scores,
                         correct=[
-                            retriever.get_context_from_index(i) for i in correct_indices
+                            retriever.get_passage_from_index(i) for i in correct_indices
                         ],
                         wrong=[
-                            retriever.get_context_from_index(i) for i in wrong_indices
+                            retriever.get_passage_from_index(i) for i in wrong_indices
                         ],
                     )
                     predictions.append(prediction_output)
@@ -212,44 +212,44 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         return dataloader_predictions
 
     @staticmethod
-    def _get_contexts_dataloader(dataset, trainer):
-        if dataset.contexts is None:
+    def _get_passages_dataloader(dataset, trainer):
+        if dataset.passages is None:
             logger.info(
-                f"Contexts not found in dataset {dataset.name}, computing them from the dataloaders"
+                f"passages not found in dataset {dataset.name}, computing them from the dataloaders"
             )
-            # get the contexts from the all the dataloader context ids
-            contexts = set()  # set to avoid duplicates
+            # get the passages from the all the dataloader passage ids
+            passages = set()  # set to avoid duplicates
             for batch in trainer.train_dataloader:
-                contexts.update(
+                passages.update(
                     [
-                        " ".join(map(str, [c for c in context_ids.tolist() if c != 0]))
-                        for context_ids in batch["contexts"]["input_ids"]
+                        " ".join(map(str, [c for c in passage_ids.tolist() if c != 0]))
+                        for passage_ids in batch["passages"]["input_ids"]
                     ]
                 )
             for d in trainer.val_dataloaders:
                 for batch in d:
-                    contexts.update(
+                    passages.update(
                         [
                             " ".join(
-                                map(str, [c for c in context_ids.tolist() if c != 0])
+                                map(str, [c for c in passage_ids.tolist() if c != 0])
                             )
-                            for context_ids in batch["contexts"]["input_ids"]
+                            for passage_ids in batch["passages"]["input_ids"]
                         ]
                     )
             for d in trainer.test_dataloaders:
                 for batch in d:
-                    contexts.update(
+                    passages.update(
                         [
                             " ".join(
-                                map(str, [c for c in context_ids.tolist() if c != 0])
+                                map(str, [c for c in passage_ids.tolist() if c != 0])
                             )
-                            for context_ids in batch["contexts"]["input_ids"]
+                            for passage_ids in batch["passages"]["input_ids"]
                         ]
                     )
-            contexts = list(contexts)
+            passages = list(passages)
         else:
-            contexts = dataset.contexts
-        return contexts
+            passages = dataset.passages
+        return passages
 
 
 class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
@@ -258,8 +258,8 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
     negative examples for the training set.
 
     Args:
-        k (:obj:`int`, `optional`, defaults to 100): 
-            The number of top-k retrieved contexts to
+        k (:obj:`int`, `optional`, defaults to 100):
+            The number of top-k retrieved passages to
             consider for the evaluation.
         batch_size (:obj:`int`, `optional`, defaults to 32):
             The batch size to use for the evaluation.
@@ -294,6 +294,7 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
         refresh_every_n_epochs (:obj:`int`, `optional`, defaults to 1):
             The number of epochs after which to refresh the index.
     """
+
     def __init__(
         self,
         k: int = 100,
@@ -427,19 +428,19 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
         for prediction in tqdm(predictions, desc="Collecting hard negatives"):
             if random.random() < 1 - self.add_with_probability:
                 continue
-            top_k_contexts = prediction["predictions"]
-            gold_contexts = prediction["gold"]
-            # get the ids of the max_negatives wrong contexts with the highest similarity
-            wrong_contexts = [
-                context_id
-                for context_id in top_k_contexts
-                if context_id not in gold_contexts
+            top_k_passages = prediction["predictions"]
+            gold_passages = prediction["gold"]
+            # get the ids of the max_negatives wrong passages with the highest similarity
+            wrong_passages = [
+                passage_id
+                for passage_id in top_k_passages
+                if passage_id not in gold_passages
             ][: self.max_negatives]
-            hard_negatives_list[prediction["sample_idx"]] = wrong_contexts
+            hard_negatives_list[prediction["sample_idx"]] = wrong_passages
 
         trainer.datamodule.train_dataset.hn_manager = HardNegativesManager(
             tokenizer=trainer.datamodule.train_dataset.tokenizer,
-            max_length=trainer.datamodule.train_dataset.max_context_length,
+            max_length=trainer.datamodule.train_dataset.max_passage_length,
             data=hard_negatives_list,
         )
 

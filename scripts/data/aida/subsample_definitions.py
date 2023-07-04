@@ -18,7 +18,7 @@ if __name__ == "__main__":
     data_definitons = set()
     for data in [train, val, test]:
         for sample in data:
-            for positive in sample["positive_ctxs"]:
+            for positive in sample["positive_pssgs"]:
                 data_definitons.add(positive["text"].strip())
 
     random_def = random.sample(definitions, 1_000_000)

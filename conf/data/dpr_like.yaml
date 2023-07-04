@@ -4,20 +4,20 @@ datamodule:
   datasets:
     train:
       _target_: goldenretriever.data.dpr.datasets.DPRDataset
-      name: 'train'
-      contexts_path: ${data_overrides.contexts_path}
+      name: "train"
+      passages_path: ${data_overrides.passages_path}
       path: ${data_overrides.train_path}
 
     val:
       - _target_: goldenretriever.data.dpr.datasets.DPRDataset
-        name: 'val'
-        contexts_path: ${data_overrides.contexts_path}
+        name: "val"
+        passages_path: ${data_overrides.passages_path}
         path: ${data_overrides.val_path}
 
     test:
       - _target_: goldenretriever.data.dpr.datasets.DPRDataset
-        name: 'test'
-        contexts_path: ${data_overrides.contexts_path}
+        name: "test"
+        passages_path: ${data_overrides.passages_path}
         path: ${data_overrides.test_path}
 
   batch_sizes:
@@ -29,4 +29,3 @@ datamodule:
     train: 4
     val: 4
     test: 4
- 

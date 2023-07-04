@@ -40,7 +40,7 @@ def aida_to_dpr(
             sentence = json.loads(line)
             # for sentence in aida_data:
             question = sentence["text"]
-            positive_ctxs = []
+            positive_pssgs = []
             for idx, entity in enumerate(sentence["window_labels"]):
                 entity = entity[2]
                 if not entity:
@@ -50,7 +50,7 @@ def aida_to_dpr(
                     entity = title_to_lower_map[entity]
                 if entity in definitions:
                     def_text = definitions[entity]
-                    positive_ctxs.append(
+                    positive_pssgs.append(
                         {
                             "title": title_to_lower_map[entity.lower()],
                             "text": f"{title_to_lower_map[entity.lower()]} <def> {def_text}",
@@ -58,7 +58,7 @@ def aida_to_dpr(
                         }
                     )
 
-            if len(positive_ctxs) == 0:
+            if len(positive_pssgs) == 0:
                 continue
 
             dpr_sentence = {
@@ -66,9 +66,9 @@ def aida_to_dpr(
                 "doc_topic": sentence["doc_topic"],
                 "question": question,
                 "answers": "",
-                "positive_ctxs": positive_ctxs,
-                "negative_ctxs": "",
-                "hard_negative_ctxs": "",
+                "positive_pssgs": positive_pssgs,
+                "negative_pssgs": "",
+                "hard_negative_pssgs": "",
             }
             f_out.write(json.dumps(dpr_sentence) + "\n")
 

@@ -1,7 +1,7 @@
 shared_params:
-  contexts_path: null
-  max_context_length: 64
-  max_contexts_per_batch: 64
+  passages_path: null
+  max_passage_length: 64
+  max_passages_per_batch: 64
   max_questions_per_batch: 64
   prefetch_batches: True
   use_topics: False
@@ -12,12 +12,12 @@ datamodule:
   datasets:
     train:
       _target_: goldenretriever.data.dpr.datasets.InBatchNegativesDPRIterableDataset
-      name: 'train'
+      name: "train"
       path: null
-      contexts_path: ${data.shared_params.contexts_path}
-      max_context_length: ${data.shared_params.max_context_length}
+      passages_path: ${data.shared_params.passages_path}
+      max_passage_length: ${data.shared_params.max_passage_length}
       max_questions_per_batch: ${data.shared_params.max_questions_per_batch}
-      max_contexts_per_batch: ${data.shared_params.max_contexts_per_batch}
+      max_passages_per_batch: ${data.shared_params.max_passages_per_batch}
       prefetch_batches: ${data.shared_params.prefetch_batches}
       subsample: null
       random_subsample: False
@@ -26,23 +26,23 @@ datamodule:
 
     val:
       - _target_: goldenretriever.data.dpr.datasets.InBatchNegativesDPRIterableDataset
-        name: 'val'
+        name: "val"
         path: null
-        contexts_path: ${data.shared_params.contexts_path}
-        max_context_length: ${data.shared_params.max_context_length}
+        passages_path: ${data.shared_params.passages_path}
+        max_passage_length: ${data.shared_params.max_passage_length}
         max_questions_per_batch: ${data.shared_params.max_questions_per_batch}
-        max_contexts_per_batch: ${data.shared_params.max_contexts_per_batch}
+        max_passages_per_batch: ${data.shared_params.max_passages_per_batch}
         prefetch_batches: ${data.shared_params.prefetch_batches}
         use_topics: ${data.shared_params.use_topics}
 
     test:
       - _target_: goldenretriever.data.dpr.datasets.InBatchNegativesDPRIterableDataset
-        name: 'test'
+        name: "test"
         path: null
-        contexts_path: ${data.shared_params.contexts_path}
-        max_context_length: ${data.shared_params.max_context_length}
+        passages_path: ${data.shared_params.passages_path}
+        max_passage_length: ${data.shared_params.max_passage_length}
         max_questions_per_batch: ${data.shared_params.max_questions_per_batch}
-        max_contexts_per_batch: ${data.shared_params.max_contexts_per_batch}
+        max_passages_per_batch: ${data.shared_params.max_passages_per_batch}
         prefetch_batches: ${data.shared_params.prefetch_batches}
         use_topics: ${data.shared_params.use_topics}
 
@@ -50,4 +50,3 @@ datamodule:
     train: 0
     val: 0
     test: 0
- 
