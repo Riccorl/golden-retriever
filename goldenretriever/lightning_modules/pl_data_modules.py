@@ -68,9 +68,10 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
                 ]
 
     def train_dataloader(self, *args, **kwargs) -> DataLoader:
-        # torch_dataset = self.train_dataset.to_torch_dataset()
+        torch_dataset = self.train_dataset.to_torch_dataset()
         return DataLoader(
-            self.train_dataset.to_torch_dataset(),
+            # self.train_dataset.to_torch_dataset(),
+            torch_dataset,
             shuffle=False,
             batch_size=None,
             num_workers=self.num_workers.train,
@@ -79,31 +80,59 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
         )
 
     def val_dataloader(self, *args, **kwargs) -> Union[DataLoader, List[DataLoader]]:
-        return [
-            DataLoader(
-                # dataset,
-                dataset.to_torch_dataset(),
-                shuffle=False,
-                batch_size=None,
-                num_workers=self.num_workers.val,
-                pin_memory=True,
-                collate_fn=lambda x: x,
+        dataloaders = []
+        for dataset in self.val_datasets:
+            torch_dataset = dataset.to_torch_dataset()
+            dataloaders.append(
+                DataLoader(
+                    torch_dataset,
+                    shuffle=False,
+                    batch_size=None,
+                    num_workers=self.num_workers.val,
+                    pin_memory=True,
+                    collate_fn=lambda x: x,
+                )
             )
-            for dataset in self.val_datasets
-        ]
+        # return [
+        #     DataLoader(
+        #         # dataset,
+        #         dataset.to_torch_dataset(),
+        #         shuffle=False,
+        #         batch_size=None,
+        #         num_workers=self.num_workers.val,
+        #         pin_memory=True,
+        #         collate_fn=lambda x: x,
+        #     )
+        #     for dataset in self.val_datasets
+        # ]
+        return dataloaders
 
     def test_dataloader(self, *args, **kwargs) -> Union[DataLoader, List[DataLoader]]:
-        return [
-            DataLoader(
-                dataset.to_torch_dataset(),
-                shuffle=False,
-                batch_size=None,
-                num_workers=self.num_workers.test,
-                pin_memory=True,
-                collate_fn=lambda x: x,
+        dataloaders = []
+        for dataset in self.test_datasets:
+            torch_dataset = dataset.to_torch_dataset()
+            dataloaders.append(
+                DataLoader(
+                    torch_dataset,
+                    shuffle=False,
+                    batch_size=None,
+                    num_workers=self.num_workers.test,
+                    pin_memory=True,
+                    collate_fn=lambda x: x,
+                )
             )
-            for dataset in self.test_datasets
-        ]
+        return dataloaders
+        # return [
+        #     DataLoader(
+        #         dataset.to_torch_dataset(),
+        #         shuffle=False,
+        #         batch_size=None,
+        #         num_workers=self.num_workers.test,
+        #         pin_memory=True,
+        #         collate_fn=lambda x: x,
+        #     )
+        #     for dataset in self.test_datasets
+        # ]
 
     def predict_dataloader(self) -> EVAL_DATALOADERS:
         raise NotImplementedError

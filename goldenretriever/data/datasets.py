@@ -17,7 +17,7 @@ from tqdm import tqdm
 from goldenretriever.common.log import get_console_logger, get_logger
 from goldenretriever.common.model_inputs import ModelInputs
 from goldenretriever.data.base.datasets import BaseDataset, IterableBaseDataset
-from goldenretriever.data.labels import passageManager
+from goldenretriever.data.labels import PassageManager
 from goldenretriever.data.utils import HardNegativesManager
 
 console_logger = get_console_logger()
@@ -138,7 +138,7 @@ class GoldenRetrieverDataset:
             self.data: Dataset = data
 
         # create a manager for the passages
-        self.passage_manager = passageManager()
+        self.passage_manager = PassageManager()
         if passages is not None:
             if isinstance(passages, list):
                 passage_to_add = passages

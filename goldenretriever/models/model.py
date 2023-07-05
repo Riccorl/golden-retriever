@@ -231,7 +231,7 @@ class GoldenRetriever(torch.nn.Module):
         self.passage_encoder_is_question_encoder = False
         # question encoder model
         self.question_encoder = question_encoder
-        if not passage_encoder:
+        if passage_encoder is None:
             # if no passage encoder is provided,
             # share the weights of the question encoder
             passage_encoder = question_encoder

@@ -66,9 +66,9 @@ def aida_to_dpr(
                 "doc_topic": sentence["doc_topic"],
                 "question": question,
                 "answers": "",
-                "positive_pssgs": positive_pssgs,
-                "negative_pssgs": "",
-                "hard_negative_pssgs": "",
+                "positive_ctxs": positive_pssgs,
+                "negative_ctxs": "",
+                "hard_negative_ctxs": "",
             }
             f_out.write(json.dumps(dpr_sentence) + "\n")
 

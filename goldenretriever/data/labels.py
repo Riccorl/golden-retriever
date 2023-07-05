@@ -188,7 +188,7 @@ class Labels:
             json.dump(self._labels_to_index, f, indent=2)
 
 
-class passageManager:
+class PassageManager:
     def __init__(
         self,
         tokenizer: Optional[tr.PreTrainedTokenizer] = None,
