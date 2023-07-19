@@ -15,6 +15,7 @@ from omegaconf import OmegaConf
 from rich.pretty import pprint
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+from transformers.activations import GELUActivation
 
 from goldenretriever.common.log import get_console_logger, get_logger
 from goldenretriever.common.model_inputs import ModelInputs
@@ -116,16 +117,6 @@ class SentenceEncoder(torch.nn.Module):
             for param in self.language_model.parameters():
                 param.requires_grad = False
 
-        # projection layer
-        self.projection: Optional[torch.nn.Sequential] = None
-        if projection_size is not None:
-            self.projection = torch.nn.Sequential(
-                torch.nn.Linear(
-                    self.language_model.config.hidden_size, projection_size
-                ),
-                torch.nn.Dropout(projection_dropout),
-            )
-
         # normalization layer
         self.layer_norm_layer: Optional[torch.nn.LayerNorm] = None
         if layer_norm:
@@ -136,6 +127,22 @@ class SentenceEncoder(torch.nn.Module):
             )
             self.layer_norm_layer = torch.nn.LayerNorm(
                 layer_norm_size, eps=layer_norm_eps
+            )
+
+        # projection layer
+        self.projection: Optional[torch.nn.Sequential] = None
+        if projection_size is not None:
+            self.projection = torch.nn.Sequential(
+                torch.nn.Dropout(projection_dropout),
+                torch.nn.Linear(
+                    self.language_model.config.hidden_size,
+                    self.language_model.config.hidden_size,
+                ),
+                GELUActivation(),
+                torch.nn.Dropout(projection_dropout),
+                torch.nn.Linear(
+                    self.language_model.config.hidden_size, projection_size
+                ),
             )
 
         # save the other parameters
@@ -301,7 +308,6 @@ class GoldenRetriever(torch.nn.Module):
             )
 
         if question_encodings is None:
-            # print(questions)
             question_encodings = self.question_encoder(**questions)
         if passages_encodings is None:
             passages_encodings = self.passage_encoder(**passages)

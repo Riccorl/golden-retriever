@@ -16,6 +16,7 @@ from pytorch_lightning.callbacks import (
 )
 from pytorch_lightning.loggers import WandbLogger
 from rich.pretty import pprint
+from goldenretriever.callbacks.evaluation_callbacks import AvgRankingEvaluationCallback
 from goldenretriever.callbacks.prediction_callbacks import (
     GoldenRetrieverPredictionCallback,
     NegativeAugmentationCallback,
@@ -26,6 +27,7 @@ from goldenretriever.callbacks.utils_callbacks import (
 )
 
 from goldenretriever.data.datasets import GoldenRetrieverDataset
+from goldenretriever.models.indexers.base import BaseIndexer
 from goldenretriever.models.model import GoldenRetriever
 from goldenretriever.common.log import get_console_logger
 from goldenretriever.lightning_modules.pl_data_modules import (
@@ -40,6 +42,7 @@ class Trainer:
     def __init__(
         self,
         retriever: GoldenRetriever,
+        index: BaseIndexer,
         train_dataset: GoldenRetrieverDataset,
         val_dataset: Union[GoldenRetrieverDataset, list[GoldenRetrieverDataset]],
         test_dataset: Optional[
@@ -70,6 +73,11 @@ class Trainer:
         model_checkpoint_callback: Optional[ModelCheckpoint] = None,
         early_stopping_callback: Optional[EarlyStopping] = None,
         wandb_logger: Optional[WandbLogger] = None,
+        # hard negatives callback parameters
+        max_hard_negatives_to_mine: int = 15,
+        hard_negatives_threshold: float = 0.0,
+        metrics_to_monitor_for_hard_negatives: Optional[str] = None,
+        mine_hard_negatives_with_probability: float = 1.0,
         seed: int = 42,
         float32_matmul_precision: str = "medium",
     ):
@@ -85,6 +93,18 @@ class Trainer:
             test_dataset, GoldenRetrieverDataset
         ):
             test_dataset = [test_dataset]
+
+        # # add the index to the datasets
+        # train_dataset.index = index
+        # for ds in val_dataset:
+        #     ds.index = index
+        # if test_dataset is not None:
+        #     for ds in test_dataset:
+        #         ds.index = index
+        
+        # and to the retriever
+        retriever.index = index
+
         self.lightining_datamodule = GoldenRetrieverPLDataModule(
             train_dataset=train_dataset,
             val_datasets=val_dataset,
@@ -152,22 +172,32 @@ class Trainer:
         self.callbacks_store.append(self.prediction_callback)
 
         # hard negative mining callback
-        self.hard_negatives_callback = NegativeAugmentationCallback(
-            k=train.top_k,
-            batch_size=128,
-            use_faiss=False,
-            move_index_to_cpu=False,
-            precision=16,
-            index_precision=16,
-            stages=["validate"],
-            metrics_to_monitor=f"validate_recall@{train.top_k}",
-            threshold=0.0,
-            max_negatives=15,
-            add_with_probability=0.2,
-            refresh_every_n_epochs=1,
-            other_callbacks=None,
-        )
-        self.callbacks_store.append(self.hard_negatives_callback)
+        self.hard_negatives_callback: Optional[NegativeAugmentationCallback] = None
+        if max_hard_negatives_to_mine > 0:
+            metrics_to_monitor = (
+                metrics_to_monitor_for_hard_negatives
+                or f"validate_recall@{train.top_k}"
+            )
+            self.hard_negatives_callback = NegativeAugmentationCallback(
+                k=train.top_k,
+                batch_size=128,
+                use_faiss=False,
+                move_index_to_cpu=False,
+                precision=16,
+                index_precision=16,
+                stages=["validate"],
+                metrics_to_monitor=metrics_to_monitor,
+                threshold=hard_negatives_threshold,
+                max_negatives=max_hard_negatives_to_mine,
+                add_with_probability=mine_hard_negatives_with_probability,
+                refresh_every_n_epochs=1,
+                other_callbacks=[
+                    AvgRankingEvaluationCallback(
+                        k="${train.top_k}", verbose=True, prefix="train"
+                    )
+                ],
+            )
+            self.callbacks_store.append(self.hard_negatives_callback)
 
         # utils callback
         self.callbacks_store.append(
@@ -341,6 +371,9 @@ def train(conf: omegaconf.DictConfig) -> None:
             pl_module.load_state_dict(
                 torch.load(conf.train.pretrain_ckpt_path)["state_dict"], strict=False
             )
+            # pl_module.model.question_encoder.language_model.save_pretrained("/home/ric/projects/golden-retriever-v2/experiments/e5-base-blink-inbatch-first1M-random-hnprob-0.2/2023-07-11/20-51-29/wandb/run-20230711_205151-v8saqfvh/files/hf")
+            # pl_module.model.question_tokenizer.save_pretrained("/home/ric/projects/golden-retriever-v2/experiments/e5-base-blink-inbatch-first1M-random-hnprob-0.2/2023-07-11/20-51-29/wandb/run-20230711_205151-v8saqfvh/files/hf")
+            # a
 
         if "compile" in conf.model.pl_module and conf.model.pl_module.compile:
             try:

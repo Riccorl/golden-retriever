@@ -12,6 +12,6 @@ bash scripts/train.sh \
     "train.callbacks.hard_negatives_callback.add_with_probability=0.2" \
     "data.datamodule.datasets.train.subsample_strategy=random" \
     "data.shared_params.passages_path=data/dpr-like/el/definitions.txt" \
-    "data.datamodule.datasets.train.path=['data/dpr-like/el/mosaico/nowsd/first_1M.jsonl']" \
-    "data.datamodule.datasets.val.0.path=['data/dpr-like/el/mosaico/nowsd/val.jsonl']" \
-    "data.datamodule.datasets.test.0.path=['data/dpr-like/el/mosaico/nowsd/val.jsonl']"
+    "data.datamodule.datasets.train.path=['/media/ssd/ric/data/golden/EL/mosaico/window_32_tokens/nowsd/dpr/first_1M.jsonl']" \
+    "data.datamodule.datasets.val.0.path=['/media/ssd/ric/data/golden/EL/mosaico/window_32_tokens/dpr/val.jsonl']" \
+    "data.datamodule.datasets.test.0.path=['/media/ssd/ric/data/golden/EL/mosaico/window_32_tokens/dpr/val.jsonl']"

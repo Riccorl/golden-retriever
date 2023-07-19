@@ -3,6 +3,7 @@ import logging
 import os
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
+import hydra
 
 import pytorch_lightning as pl
 import torch
@@ -10,6 +11,7 @@ from pytorch_lightning.trainer.states import RunningStage
 
 from goldenretriever.callbacks.base import NLPTemplateCallback, PredictionCallback
 from goldenretriever.common.log import get_console_logger, get_logger
+from goldenretriever.lightning_modules.pl_modules import GoldenRetrieverPLModule
 
 console_logger = get_console_logger()
 logger = get_logger(__name__, level=logging.INFO)
@@ -73,6 +75,27 @@ class SavePredictionsCallback(NLPTemplateCallback):
                         if isinstance(v, set):
                             prediction[k] = list(v)
                     f.write(json.dumps(prediction) + "\n")
+
+
+class ResetModelCallback(pl.Callback):
+    def __init__(self, conf, verbose: bool = True) -> None:
+        super().__init__()
+        self.conf = conf
+
+    def on_train_epoch_start(
+        self, trainer: pl.Trainer, pl_module: pl.LightningModule, *args, **kwargs
+    ) -> None:
+        if trainer.current_epoch == 0:
+            return
+
+        pl_module = hydra.utils.instantiate(self.conf, _recursive_=False)
+
+        trainer.model = pl_module
+
+        optimizers, lr_scheduler_configs = pl_module.configure_optimizers()
+        trainer.optimizers = optimizers
+        trainer.lr_schedulers = trainer.configure_schedulers(lr_scheduler_configs)
+        trainer.optimizer_frequencies = []  # or optimizers frequencies if you have any
 
 
 class FreeUpIndexerVRAMCallback(pl.Callback):

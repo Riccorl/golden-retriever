@@ -93,18 +93,6 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
                     collate_fn=lambda x: x,
                 )
             )
-        # return [
-        #     DataLoader(
-        #         # dataset,
-        #         dataset.to_torch_dataset(),
-        #         shuffle=False,
-        #         batch_size=None,
-        #         num_workers=self.num_workers.val,
-        #         pin_memory=True,
-        #         collate_fn=lambda x: x,
-        #     )
-        #     for dataset in self.val_datasets
-        # ]
         return dataloaders
 
     def test_dataloader(self, *args, **kwargs) -> Union[DataLoader, List[DataLoader]]:
@@ -122,17 +110,6 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
                 )
             )
         return dataloaders
-        # return [
-        #     DataLoader(
-        #         dataset.to_torch_dataset(),
-        #         shuffle=False,
-        #         batch_size=None,
-        #         num_workers=self.num_workers.test,
-        #         pin_memory=True,
-        #         collate_fn=lambda x: x,
-        #     )
-        #     for dataset in self.test_datasets
-        # ]
 
     def predict_dataloader(self) -> EVAL_DATALOADERS:
         raise NotImplementedError
