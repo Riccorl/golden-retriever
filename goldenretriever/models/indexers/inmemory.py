@@ -89,7 +89,6 @@ class InMemoryDocumentIndex(BaseDocumentIndex):
         max_length: Optional[int] = None,
         collate_fn: Optional[Callable] = None,
         encoder_precision: Optional[Union[str, int]] = None,
-        precision: Optional[Union[str, int]] = None,
         compute_on_cpu: bool = False,
         force_reindex: bool = False,
     ) -> "InMemoryDocumentIndex":
@@ -188,14 +187,13 @@ class InMemoryDocumentIndex(BaseDocumentIndex):
 
         # move the passage embeddings to the CPU if not already done
         # the move to cpu and then to gpu is needed to avoid OOM when using mixed precision
-        if self.device == "cpu":
+        if not self.device == "cpu":  # this if is to avoid unnecessary moves
             passage_embeddings = [c.detach().cpu() for c in passage_embeddings]
         # stack it
         passage_embeddings: torch.Tensor = torch.stack(passage_embeddings, dim=0)
         # move the passage embeddings to the gpu if needed
         if not self.device == "cpu":
-            if precision:
-                passage_embeddings = passage_embeddings.to(PRECISION_MAP[precision])
+            passage_embeddings = passage_embeddings.to(PRECISION_MAP[self.precision])
             passage_embeddings = passage_embeddings.to(self.device)
         self.embeddings = passage_embeddings
 

@@ -74,8 +74,6 @@ train:
       _target_: goldenretriever.callbacks.prediction_callbacks.GoldenRetrieverPredictionCallback
       k: ${train.top_k}
       batch_size: 128
-      use_faiss: False
-      move_index_to_cpu: False
       precision: 16
       index_precision: 16
       other_callbacks:
@@ -95,8 +93,6 @@ train:
       _target_: goldenretriever.callbacks.prediction_callbacks.NegativeAugmentationCallback
       k: ${train.top_k}
       batch_size: 128
-      use_faiss: False
-      move_index_to_cpu: False
       precision: 16
       index_precision: 16
       stages: [validate] #[validate, sanity_check]
@@ -116,3 +112,6 @@ train:
     utils_callbacks:
       - _target_: goldenretriever.callbacks.utils_callbacks.SaveRetrieverCallback
       - _target_: goldenretriever.callbacks.utils_callbacks.FreeUpIndexerVRAMCallback
+      - _target_: goldenretriever.callbacks.utils_callbacks.ResetModelCallback
+        conf: ${train.pretrain_ckpt_path}
+  

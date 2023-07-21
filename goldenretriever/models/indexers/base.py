@@ -37,31 +37,34 @@ class BaseDocumentIndex:
         documents: Union[str, List[str], Labels, os.PathLike, List[os.PathLike]],
         embeddings: Optional[torch.Tensor] = None,
     ) -> None:
-        documents_are_paths = False
-
-        # normalize the documents to list if not already
-        if not isinstance(documents, list):
-            documents = [documents]
-
-        # now check if the documents are a list of paths (either str or os.PathLike)
-        if isinstance(documents[0], str) or isinstance(documents[0], os.PathLike):
-            # check if the str is a path
-            documents_are_paths = is_str_a_path(documents[0])
-
-        # if the documents are a list of paths, then we load them
-        if documents_are_paths:
-            logger.info("Loading documents from paths")
-            _documents = []
-            for doc in documents:
-                with open(relative_to_absolute_path(doc)) as f:
-                    _documents += [line.strip() for line in f.readlines()]
-            # remove duplicates
-            documents = list(set(_documents))
-
-        # documents to be used for indexing
         if isinstance(documents, Labels):
             self.documents = documents
         else:
+            documents_are_paths = False
+
+            # normalize the documents to list if not already
+            if not isinstance(documents, list):
+                documents = [documents]
+
+            # now check if the documents are a list of paths (either str or os.PathLike)
+            if isinstance(documents[0], str) or isinstance(documents[0], os.PathLike):
+                # check if the str is a path
+                documents_are_paths = is_str_a_path(documents[0])
+
+            # if the documents are a list of paths, then we load them
+            if documents_are_paths:
+                logger.info("Loading documents from paths")
+                _documents = []
+                for doc in documents:
+                    with open(relative_to_absolute_path(doc)) as f:
+                        _documents += [line.strip() for line in f.readlines()]
+                # remove duplicates
+                documents = list(set(_documents))
+
+        # # documents to be used for indexing
+        # if isinstance(documents, Labels):
+        #     self.documents = documents
+        # else:
             self.documents = Labels()
             self.documents.add_labels(documents)
 

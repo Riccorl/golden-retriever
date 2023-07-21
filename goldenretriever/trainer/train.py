@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from typing import Optional, Union
+from typing import List, Optional, Union
 
 import hydra
 import omegaconf
@@ -16,13 +16,17 @@ from pytorch_lightning.callbacks import (
 )
 from pytorch_lightning.loggers import WandbLogger
 from rich.pretty import pprint
-from goldenretriever.callbacks.evaluation_callbacks import AvgRankingEvaluationCallback
+from goldenretriever.callbacks.evaluation_callbacks import (
+    AvgRankingEvaluationCallback,
+    RecallAtKEvaluationCallback,
+)
 from goldenretriever.callbacks.prediction_callbacks import (
     GoldenRetrieverPredictionCallback,
     NegativeAugmentationCallback,
 )
 from goldenretriever.callbacks.utils_callbacks import (
     FreeUpIndexerVRAMCallback,
+    SavePredictionsCallback,
     SaveRetrieverCallback,
 )
 
@@ -70,9 +74,27 @@ class Trainer:
         fast_dev_run: bool = False,
         precision: int = 16,
         reload_dataloaders_every_n_epochs: int = 1,
-        model_checkpoint_callback: Optional[ModelCheckpoint] = None,
-        early_stopping_callback: Optional[EarlyStopping] = None,
-        wandb_logger: Optional[WandbLogger] = None,
+        top_ks: Union[int, List[int]] = 100,
+        # early stopping parameters
+        early_stopping: bool = True,
+        early_stopping_patience: int = 10,
+        # wandb logger parameters
+        log_to_wandb: bool = True,
+        wandb_entity: Optional[str] = None,
+        wandb_experiment_name: Optional[str] = None,
+        wandb_project_name: Optional[str] = None,
+        wandb_save_dir: Optional[Union[str, os.PathLike]] = None,
+        wandb_log_model: bool = True,
+        wandb_offline_mode: bool = False,
+        wandb_watch: str = "all",
+        # checkpoint parameters
+        model_checkpointing: bool = True,
+        chekpoint_dir: Optional[Union[str, os.PathLike]] = None,
+        checkpoint_filename: Optional[Union[str, os.PathLike]] = None,
+        save_top_k: int = 1,
+        save_last: bool = False,
+        # prediction callback parameters
+        prediction_batch_size: int = 128,
         # hard negatives callback parameters
         max_hard_negatives_to_mine: int = 15,
         hard_negatives_threshold: float = 0.0,
@@ -94,14 +116,6 @@ class Trainer:
         ):
             test_dataset = [test_dataset]
 
-        # # add the index to the datasets
-        # train_dataset.index = index
-        # for ds in val_dataset:
-        #     ds.index = index
-        # if test_dataset is not None:
-        #     for ds in test_dataset:
-        #         ds.index = index
-
         # and to the retriever
         retriever.index = index
 
@@ -118,19 +132,47 @@ class Trainer:
         # callbacks declaration
         self.callbacks_store = [ModelSummary(max_depth=2)]
 
+        # metric to monitor
+        if isinstance(top_ks, int):
+            top_ks = [top_ks]
+        # order the top_ks in descending order
+        top_ks = sorted(top_ks, reverse=True)
+        # get the max top_k to monitor
+        top_k = top_ks[0]
+        metric_to_monitor = f"validate_recall@{top_k}"
+        monitor_mode = "max"
+
         # early stopping callback if specified
         self.early_stopping_callback: Optional[EarlyStopping] = None
-        if early_stopping_callback is not None:
-            self.early_stopping_callback = early_stopping_callback
-            self.callbacks_store.append(early_stopping_callback)
+        if early_stopping:
+            logger.log(f"Eanbling Early Stopping, patience: {early_stopping_patience}")
+            self.early_stopping_callback = EarlyStopping(
+                monitor=metric_to_monitor,
+                mode=monitor_mode,
+                patience=early_stopping_patience,
+            )
+            self.callbacks_store.append(self.early_stopping_callback)
 
         # wandb logger if specified
         self.wandb_logger: Optional[WandbLogger] = None
         self.experiment_path: Optional[Path] = None
-        if wandb_logger:
-            # logger.log(f"Instantiating Wandb Logger")
-            self.wandb_logger = wandb_logger
-            experiment_path = Path(wandb_logger.experiment.dir)
+        if log_to_wandb:
+            # define some default values for the wandb logger
+            if wandb_project_name is None:
+                wandb_project_name = "goldenretriever"
+            if wandb_save_dir is None:
+                wandb_save_dir = "./"
+            logger.log(f"Instantiating Wandb Logger")
+            self.wandb_logger = WandbLogger(
+                entity=wandb_entity,
+                project=wandb_project_name,
+                name=wandb_experiment_name,
+                save_dir=wandb_save_dir,
+                log_model=wandb_log_model,
+                mode="offline" if wandb_offline_mode else "online",
+            )
+            self.wandb_logger.watch(self.lightining_module, log=wandb_watch)
+            experiment_path = Path(self.wandb_logger.experiment.dir)
             # Store the YaML config separately into the wandb dir
             # yaml_conf: str = OmegaConf.to_yaml(cfg=conf)
             # (experiment_path / "hparams.yaml").write_text(yaml_conf)
@@ -139,35 +181,45 @@ class Trainer:
 
         # model checkpoint callback if specified
         self.model_checkpoint_callback: Optional[ModelCheckpoint] = None
-        if model_checkpoint_callback is None:
-            checkpoint_path = (
-                "checkpoint-validate_recall@"
-                + train.top_k
-                + "_{validate_recall@"
-                + train.top_k
-                + ":.4f}-epoch_{epoch:02d}"
-            )
-            model_checkpoint_callback = ModelCheckpoint(
-                monitor=f"validate_recall@{train.top_k}",
-                mode="max",
+        if model_checkpointing:
+            logger.log(f"Enabling Model Checkpointing")
+            if chekpoint_dir is None:
+                chekpoint_dir = (
+                    experiment_path / "checkpoints" if experiment_path else None
+                )
+            if checkpoint_filename is None:
+                checkpoint_filename = (
+                    "checkpoint-validate_recall@"
+                    + top_k
+                    + "_{validate_recall@"
+                    + top_k
+                    + ":.4f}-epoch_{epoch:02d}"
+                )
+            self.model_checkpoint_callback = ModelCheckpoint(
+                monitor=metric_to_monitor,
+                mode=monitor_mode,
                 verbose=True,
-                save_top_k=1,
-                save_last=False,
-                filename=checkpoint_path,
-                dirpath=experiment_path / "checkpoints" if experiment_path else None,
+                save_top_k=save_top_k,
+                save_last=save_last,
+                filename=checkpoint_filename,
+                dirpath=chekpoint_dir,
                 auto_insert_metric_name=False,
             )
-        self.callbacks_store.append(self.model_checkpoint_callback)
+            self.callbacks_store.append(self.model_checkpoint_callback)
 
         # prediction callback
+        other_callbacks_for_prediction = [
+            RecallAtKEvaluationCallback(k) for k in top_ks
+        ]
+        other_callbacks_for_prediction += [
+            AvgRankingEvaluationCallback(k=top_k, verbose=True, prefix="train"),
+            SavePredictionsCallback(),
+        ]
         self.prediction_callback = GoldenRetrieverPredictionCallback(
-            k=train.top_k,
-            batch_size=128,
-            use_faiss=False,
-            move_index_to_cpu=False,
+            k=top_k,
+            batch_size=prediction_batch_size,
             precision=16,
-            index_precision=16,
-            other_callbacks=None,
+            other_callbacks=other_callbacks_for_prediction,
         )
         self.callbacks_store.append(self.prediction_callback)
 
@@ -175,16 +227,12 @@ class Trainer:
         self.hard_negatives_callback: Optional[NegativeAugmentationCallback] = None
         if max_hard_negatives_to_mine > 0:
             metrics_to_monitor = (
-                metrics_to_monitor_for_hard_negatives
-                or f"validate_recall@{train.top_k}"
+                metrics_to_monitor_for_hard_negatives or f"validate_recall@{top_k}"
             )
             self.hard_negatives_callback = NegativeAugmentationCallback(
-                k=train.top_k,
-                batch_size=128,
-                use_faiss=False,
-                move_index_to_cpu=False,
+                k=top_k,
+                batch_size=prediction_batch_size,
                 precision=16,
-                index_precision=16,
                 stages=["validate"],
                 metrics_to_monitor=metrics_to_monitor,
                 threshold=hard_negatives_threshold,
@@ -192,9 +240,7 @@ class Trainer:
                 add_with_probability=mine_hard_negatives_with_probability,
                 refresh_every_n_epochs=1,
                 other_callbacks=[
-                    AvgRankingEvaluationCallback(
-                        k="${train.top_k}", verbose=True, prefix="train"
-                    )
+                    AvgRankingEvaluationCallback(k=top_k, verbose=True, prefix="train")
                 ],
             )
             self.callbacks_store.append(self.hard_negatives_callback)
@@ -371,9 +417,6 @@ def train(conf: omegaconf.DictConfig) -> None:
             pl_module.load_state_dict(
                 torch.load(conf.train.pretrain_ckpt_path)["state_dict"], strict=False
             )
-            # pl_module.model.question_encoder.language_model.save_pretrained("/home/ric/projects/golden-retriever-v2/experiments/e5-base-blink-inbatch-first1M-random-hnprob-0.2/2023-07-11/20-51-29/wandb/run-20230711_205151-v8saqfvh/files/hf")
-            # pl_module.model.question_tokenizer.save_pretrained("/home/ric/projects/golden-retriever-v2/experiments/e5-base-blink-inbatch-first1M-random-hnprob-0.2/2023-07-11/20-51-29/wandb/run-20230711_205151-v8saqfvh/files/hf")
-            # a
 
         if "compile" in conf.model.pl_module and conf.model.pl_module.compile:
             try:
@@ -422,7 +465,7 @@ def train(conf: omegaconf.DictConfig) -> None:
             # callback can be a list of callbacks or a single callback
             if isinstance(callback, omegaconf.listconfig.ListConfig):
                 for cb in callback:
-                    callbacks_store.append(hydra.utils.instantiate(cb))
+                    callbacks_store.append(hydra.utils.instantiate(cb, _recursive_=False))
             else:
                 callbacks_store.append(hydra.utils.instantiate(callback))
 

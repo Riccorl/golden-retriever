@@ -81,21 +81,39 @@ class ResetModelCallback(pl.Callback):
     def __init__(self, conf, verbose: bool = True) -> None:
         super().__init__()
         self.conf = conf
+        self.verbose = verbose
 
     def on_train_epoch_start(
         self, trainer: pl.Trainer, pl_module: pl.LightningModule, *args, **kwargs
     ) -> None:
         if trainer.current_epoch == 0:
+            if self.verbose:
+                logger.info("Current epoch is 0, skipping resetting model")
             return
 
-        pl_module = hydra.utils.instantiate(self.conf, _recursive_=False)
+        if self.verbose:
+            logger.info("Resetting model, optimizer and lr scheduler")
+        # reload model from scratch
+        trainer.model.load_state_dict(torch.load(self.conf)["state_dict"])
+        # trainer.strategy._lightning_module = hydra.utils.instantiate(self.conf, _recursive_=False)
+        # trainer.strategy._lightning_module.trainer = trainer
+        # # links data to the trainer
+        # self._data_connector.attach_data(
+        #     trainer.strategy._lightning_module.trainer, train_dataloaders=trainer.train_dataloaders, val_dataloaders=trainer.val_dataloaders, datamodule=trainer.datamodule
+        # )
+        # trainer.strategy.setup(trainer)
 
-        trainer.model = pl_module
-
-        optimizers, lr_scheduler_configs = pl_module.configure_optimizers()
-        trainer.optimizers = optimizers
-        trainer.lr_schedulers = trainer.configure_schedulers(lr_scheduler_configs)
-        trainer.optimizer_frequencies = []  # or optimizers frequencies if you have any
+        # reset the model
+        # pl_module.model = hydra.utils.instantiate(self.conf.model)
+        # assign the model to the trainer
+        # pl_module = hydra.utils.instantiate(self.conf, _recursive_=False)
+        # previous_device = pl_module.device
+        # trainer.model.model = hydra.utils.instantiate(self.conf)
+        # trainer.model.model.to(previous_device)
+        # optimizers, lr_scheduler_configs = pl_module.configure_optimizers()
+        # trainer.optimizers = optimizers
+        # trainer.lr_schedulers = trainer.configure_schedulers(lr_scheduler_configs)
+        # trainer.optimizer_frequencies = []  # or optimizers frequencies if you have any
 
 
 class FreeUpIndexerVRAMCallback(pl.Callback):

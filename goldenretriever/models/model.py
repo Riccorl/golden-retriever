@@ -356,7 +356,6 @@ class GoldenRetriever(torch.nn.Module):
         use_ort: bool = False,
         compute_on_cpu: bool = False,
         precision: Optional[Union[str, int]] = None,
-        index_precision: Optional[Union[str, int]] = None,
     ):
         """
         Index the passages for later retrieval.
@@ -392,7 +391,6 @@ class GoldenRetriever(torch.nn.Module):
             max_length=max_length,
             collate_fn=collate_fn,
             encoder_precision=precision,
-            precision=index_precision,
             compute_on_cpu=compute_on_cpu,
             force_reindex=force_reindex,
         )
@@ -839,7 +837,7 @@ class GoldenRetriever(torch.nn.Module):
 
         if load_index_vector:
             index_device = index_device or device
-            model.indexer = index_type.load(
+            model.document_index = index_type.load(
                 model_dir, device=index_device, precision=index_precision
             )
 

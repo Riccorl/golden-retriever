@@ -31,11 +31,8 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         k: Optional[int] = None,
         batch_size: int = 32,
         num_workers: int = 8,
-        indexer: Optional[BaseDocumentIndex] = None,
-        use_faiss: bool = False,
-        move_index_to_cpu: bool = True,
+        document_index: Optional[BaseDocumentIndex] = None,
         precision: Union[str, int] = 32,
-        index_precision: Union[str, int] = 32,
         force_reindex: bool = True,
         retriever_dir: Optional[Path] = None,
         stages: Optional[Set[Union[str, RunningStage]]] = None,
@@ -48,11 +45,8 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         super().__init__(batch_size, stages, other_callbacks, dataset, dataloader)
         self.k = k
         self.num_workers = num_workers
-        self.indexer = indexer
-        self.use_faiss = use_faiss
-        self.move_index_to_cpu = move_index_to_cpu
+        self.document_index = document_index
         self.precision = precision
-        self.index_precision = index_precision
         self.force_reindex = force_reindex
         self.retriever_dir = retriever_dir
 
@@ -139,18 +133,15 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                 max_length=current_dataset.max_passage_length,
                 collate_fn=collate_fn,
                 precision=self.precision,
-                index_precision=self.index_precision,
                 compute_on_cpu=False,
                 force_reindex=force_reindex,
             )
 
-            pl_module_original_device = pl_module.device
-            if (
-                not self.use_faiss
-                and self.move_index_to_cpu
-                and pl_module.device.type == "cuda"
-            ):
-                pl_module.to("cpu")
+            # pl_module_original_device = pl_module.device
+            # if (
+            #     and pl_module.device.type == "cuda"
+            # ):
+            #     pl_module.to("cpu")
 
             # now compute the question embeddings and compute the top-k accuracy
             predictions = []
@@ -199,8 +190,8 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
 
             dataloader_predictions[dataloader_idx] = predictions
 
-            if pl_module_original_device != pl_module.device:
-                pl_module.to(pl_module_original_device)
+            # if pl_module_original_device != pl_module.device:
+            #     pl_module.to(pl_module_original_device)
 
         # return the predictions
         return dataloader_predictions
@@ -263,10 +254,6 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
             The batch size to use for the evaluation.
         num_workers (:obj:`int`, `optional`, defaults to 0):
             The number of workers to use for the evaluation.
-        use_faiss (:obj:`bool`, `optional`, defaults to :obj:`False`):
-            Whether to use faiss for the evaluation.
-        move_index_to_cpu (:obj:`bool`, `optional`, defaults to :obj:`False`):
-            Whether to move the index to the cpu.
         force_reindex (:obj:`bool`, `optional`, defaults to :obj:`False`):
             Whether to force the reindexing of the dataset.
         retriever_dir (:obj:`Path`, `optional`):
@@ -298,8 +285,6 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
         k: int = 100,
         batch_size: int = 32,
         num_workers: int = 0,
-        use_faiss: bool = False,
-        move_index_to_cpu: bool = False,
         force_reindex: bool = False,
         retriever_dir: Optional[Path] = None,
         stages: Set[Union[str, RunningStage]] = None,
@@ -317,8 +302,6 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
             k=k,
             batch_size=batch_size,
             num_workers=num_workers,
-            use_faiss=use_faiss,
-            move_index_to_cpu=move_index_to_cpu,
             force_reindex=force_reindex,
             retriever_dir=retriever_dir,
             stages=stages,
