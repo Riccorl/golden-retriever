@@ -9,6 +9,7 @@ project_name: golden-retriever # used to name the project in wandb
 defaults:
   - _self_
   - model: golden_retriever
+  - index: inmemory
   - loss: nce_loss
   - optimizer: radamw
   - scheduler: linear_scheduler

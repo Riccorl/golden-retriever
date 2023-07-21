@@ -13,7 +13,8 @@ pl_module:
   model:
     _target_: goldenretriever.models.model.GoldenRetriever
     question_encoder: ${model.encoder}
-    context_encoder: ${model.encoder}
+    passage_encoder: ${model.encoder}
+    document_index: ${index}
     loss_type: ${loss}
   optimizer: ${optimizer}
   lr_scheduler: ${scheduler}

@@ -27,7 +27,7 @@ from goldenretriever.callbacks.utils_callbacks import (
 )
 
 from goldenretriever.data.datasets import GoldenRetrieverDataset
-from goldenretriever.models.indexers.base import BaseIndexer
+from goldenretriever.models.indexers.base import BaseDocumentIndex
 from goldenretriever.models.model import GoldenRetriever
 from goldenretriever.common.log import get_console_logger
 from goldenretriever.lightning_modules.pl_data_modules import (
@@ -42,7 +42,7 @@ class Trainer:
     def __init__(
         self,
         retriever: GoldenRetriever,
-        index: BaseIndexer,
+        index: BaseDocumentIndex,
         train_dataset: GoldenRetrieverDataset,
         val_dataset: Union[GoldenRetrieverDataset, list[GoldenRetrieverDataset]],
         test_dataset: Optional[
@@ -101,7 +101,7 @@ class Trainer:
         # if test_dataset is not None:
         #     for ds in test_dataset:
         #         ds.index = index
-        
+
         # and to the retriever
         retriever.index = index
 

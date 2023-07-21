@@ -9,15 +9,17 @@ import torch
 from torch.utils.data import DataLoader
 import tqdm
 
-from goldenretriever.common.log import get_console_logger
+from goldenretriever.common.log import get_logger
 from goldenretriever.common.model_inputs import ModelInputs
+from goldenretriever.common.utils import is_str_a_path, relative_to_absolute_path
 from goldenretriever.data.base.datasets import BaseDataset
 from goldenretriever.data.labels import Labels
 from goldenretriever.models import PRECISION_MAP
-from goldenretriever.models.model import GoldenRetriever, RetrievedSample
+
+# from goldenretriever.models.model import GoldenRetriever, RetrievedSample
 
 
-logger = get_console_logger()
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -26,38 +28,69 @@ class IndexerOutput:
     distances: Union[torch.Tensor, numpy.ndarray]
 
 
-class BaseIndexer:
+class BaseDocumentIndex:
     DOCUMENTS_FILE_NAME = "documents.json"
     EMBEDDINGS_FILE_NAME = "embeddings.pt"
 
-    def __init__(self) -> None:
-        self.documents = None
-        self.embeddings = None
+    def __init__(
+        self,
+        documents: Union[str, List[str], Labels, os.PathLike, List[os.PathLike]],
+        embeddings: Optional[torch.Tensor] = None,
+    ) -> None:
+        documents_are_paths = False
+
+        # normalize the documents to list if not already
+        if not isinstance(documents, list):
+            documents = [documents]
+
+        # now check if the documents are a list of paths (either str or os.PathLike)
+        if isinstance(documents[0], str) or isinstance(documents[0], os.PathLike):
+            # check if the str is a path
+            documents_are_paths = is_str_a_path(documents[0])
+
+        # if the documents are a list of paths, then we load them
+        if documents_are_paths:
+            logger.info("Loading documents from paths")
+            _documents = []
+            for doc in documents:
+                with open(relative_to_absolute_path(doc)) as f:
+                    _documents += [line.strip() for line in f.readlines()]
+            # remove duplicates
+            documents = list(set(_documents))
+
+        # documents to be used for indexing
+        if isinstance(documents, Labels):
+            self.documents = documents
+        else:
+            self.documents = Labels()
+            self.documents.add_labels(documents)
+
+        self.embeddings = embeddings
 
     def index(
         self,
-        retriever: GoldenRetriever,
+        retriever,
         *args,
         **kwargs,
-    ) -> "BaseIndexer":
+    ) -> "BaseDocumentIndex":
         raise NotImplementedError
 
-    def search(self, query: Any, k: int = 1, *args, **kwargs) -> List[RetrievedSample]:
+    def search(self, query: Any, k: int = 1, *args, **kwargs) -> List:
         raise NotImplementedError
 
-    @property
-    def embeddings(self) -> torch.Tensor:
-        """
-        The document embeddings.
-        """
-        return self.embeddings
+    # @property
+    # def embeddings(self) -> torch.Tensor:
+    #     """
+    #     The document embeddings.
+    #     """
+    #     return self.embeddings
 
-    @property
-    def documents(self) -> Labels:
-        """
-        The document labels.
-        """
-        return self.documents
+    # @property
+    # def documents(self) -> Labels:
+    #     """
+    #     The document labels.
+    #     """
+    #     return self.documents
 
     def get_index_from_passage(self, document: str) -> int:
         """
@@ -132,5 +165,5 @@ class BaseIndexer:
         loading_dir: Union[str, os.PathLike],
         *args,
         **kwargs,
-    ) -> "BaseIndexer":
+    ) -> "BaseDocumentIndex":
         raise NotImplementedError

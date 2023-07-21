@@ -18,6 +18,7 @@ from goldenretriever.common.model_inputs import ModelInputs
 from goldenretriever.data.base.datasets import BaseDataset
 from goldenretriever.data.datasets import GoldenRetrieverDataset
 from goldenretriever.data.utils import HardNegativesManager
+from goldenretriever.models.indexers.base import BaseDocumentIndex
 from goldenretriever.models.model import GoldenRetriever
 
 console_logger = get_console_logger()
@@ -30,6 +31,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         k: Optional[int] = None,
         batch_size: int = 32,
         num_workers: int = 8,
+        indexer: Optional[BaseDocumentIndex] = None,
         use_faiss: bool = False,
         move_index_to_cpu: bool = True,
         precision: Union[str, int] = 32,
@@ -46,6 +48,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         super().__init__(batch_size, stages, other_callbacks, dataset, dataloader)
         self.k = k
         self.num_workers = num_workers
+        self.indexer = indexer
         self.use_faiss = use_faiss
         self.move_index_to_cpu = move_index_to_cpu
         self.precision = precision
@@ -101,10 +104,10 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         # compute the passage embeddings index for each dataloader
         for dataloader_idx, dataloader in enumerate(self.dataloaders):
             current_dataset: GoldenRetrieverDataset = self.datasets[dataloader_idx]
-            logger.info(
-                f"Computing passage embeddings for dataset {current_dataset.name}"
-            )
-            passages = self._get_passages_dataloader(current_dataset, trainer)
+            #     logger.info(
+            #         f"Computing passage embeddings for dataset {current_dataset.name}"
+            #     )
+            #     passages = self._get_passages_dataloader(current_dataset, trainer)
 
             tokenizer = current_dataset.tokenizer
             collate_fn = lambda x: ModelInputs(
@@ -138,16 +141,27 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
             retriever.eval()
 
             retriever.index(
-                passages,
                 batch_size=self.batch_size,
                 num_workers=self.num_workers,
+                max_length=current_dataset.max_passage_length,
                 collate_fn=collate_fn,
-                force_reindex=force_reindex,
-                use_faiss=self.use_faiss,
-                move_index_to_cpu=self.move_index_to_cpu,
                 precision=self.precision,
                 index_precision=self.index_precision,
+                compute_on_cpu=False,
+                force_reindex=force_reindex,
             )
+
+            # retriever.index(
+            #     passages,
+            #     batch_size=self.batch_size,
+            #     num_workers=self.num_workers,
+            #     collate_fn=collate_fn,
+            #     force_reindex=force_reindex,
+            #     use_faiss=self.use_faiss,
+            #     move_index_to_cpu=self.move_index_to_cpu,
+            #     precision=self.precision,
+            #     index_precision=self.index_precision,
+            # )
 
             pl_module_original_device = pl_module.device
             if (
@@ -211,45 +225,49 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         # return the predictions
         return dataloader_predictions
 
-    @staticmethod
-    def _get_passages_dataloader(dataset, trainer):
-        if dataset.passages is None:
-            logger.info(
-                f"passages not found in dataset {dataset.name}, computing them from the dataloaders"
-            )
-            # get the passages from the all the dataloader passage ids
-            passages = set()  # set to avoid duplicates
-            for batch in trainer.train_dataloader:
-                passages.update(
-                    [
-                        " ".join(map(str, [c for c in passage_ids.tolist() if c != 0]))
-                        for passage_ids in batch["passages"]["input_ids"]
-                    ]
-                )
-            for d in trainer.val_dataloaders:
-                for batch in d:
-                    passages.update(
-                        [
-                            " ".join(
-                                map(str, [c for c in passage_ids.tolist() if c != 0])
-                            )
-                            for passage_ids in batch["passages"]["input_ids"]
-                        ]
-                    )
-            for d in trainer.test_dataloaders:
-                for batch in d:
-                    passages.update(
-                        [
-                            " ".join(
-                                map(str, [c for c in passage_ids.tolist() if c != 0])
-                            )
-                            for passage_ids in batch["passages"]["input_ids"]
-                        ]
-                    )
-            passages = list(passages)
-        else:
-            passages = dataset.passages
-        return passages
+    # @staticmethod
+    # def _get_passages_dataloader(
+    #     indexer: Optional[BaseIndexer] = None,
+    #     dataset: Optional[GoldenRetrieverDataset] = None,
+    #     trainer: Optional[pl.Trainer] = None,
+    # ):
+    #     if indexer is None:
+    #         logger.info(
+    #             f"Indexer is None, creating indexer from passages not found in dataset {dataset.name}, computing them from the dataloaders"
+    #         )
+    #         # get the passages from the all the dataloader passage ids
+    #         passages = set()  # set to avoid duplicates
+    #         for batch in trainer.train_dataloader:
+    #             passages.update(
+    #                 [
+    #                     " ".join(map(str, [c for c in passage_ids.tolist() if c != 0]))
+    #                     for passage_ids in batch["passages"]["input_ids"]
+    #                 ]
+    #             )
+    #         for d in trainer.val_dataloaders:
+    #             for batch in d:
+    #                 passages.update(
+    #                     [
+    #                         " ".join(
+    #                             map(str, [c for c in passage_ids.tolist() if c != 0])
+    #                         )
+    #                         for passage_ids in batch["passages"]["input_ids"]
+    #                     ]
+    #                 )
+    #         for d in trainer.test_dataloaders:
+    #             for batch in d:
+    #                 passages.update(
+    #                     [
+    #                         " ".join(
+    #                             map(str, [c for c in passage_ids.tolist() if c != 0])
+    #                         )
+    #                         for passage_ids in batch["passages"]["input_ids"]
+    #                     ]
+    #                 )
+    #         passages = list(passages)
+    #     else:
+    #         passages = dataset.passages
+    #     return passages
 
 
 class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):

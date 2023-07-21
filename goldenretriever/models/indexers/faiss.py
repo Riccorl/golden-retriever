@@ -1,5 +1,6 @@
 import contextlib
 import json
+import logging
 import math
 import os
 from dataclasses import dataclass
@@ -13,20 +14,20 @@ from omegaconf import OmegaConf
 from rich.pretty import pprint
 from torch.utils.data import DataLoader
 
-from goldenretriever.common.log import get_console_logger
+from goldenretriever.common.log import get_console_logger, get_logger
 from goldenretriever.common.model_inputs import ModelInputs
 from goldenretriever.common.utils import is_package_available
 from goldenretriever.data.base.datasets import BaseDataset
 from goldenretriever.data.labels import Labels
 from goldenretriever.models import PRECISION_MAP
-from goldenretriever.models.indexers.base import BaseIndexer
+from goldenretriever.models.indexers.base import BaseDocumentIndex
 from goldenretriever.models.model import GoldenRetriever, RetrievedSample
 
 if is_package_available("faiss"):
     import faiss
     import faiss.contrib.torch_utils
 
-logger = get_console_logger()
+logger = get_logger(__name__, level=logging.INFO)
 
 
 @dataclass
@@ -35,9 +36,10 @@ class FaissOutput:
     distances: Union[torch.Tensor, numpy.ndarray]
 
 
-class FaissIndexer(BaseIndexer):
+class FaissDocumentIndex(BaseDocumentIndex):
     DOCUMENTS_FILE_NAME = "documents.json"
-    EMBEDDINGS_FILE_NAME = "embeddings.bin"
+    EMBEDDINGS_FILE_NAME = "embeddings.pt"
+    INDEX_FILE_NAME = "index.faiss"
 
     def __init__(
         self,
@@ -51,19 +53,14 @@ class FaissIndexer(BaseIndexer):
         *args,
         **kwargs,
     ) -> None:
+        super().__init__(documents, embeddings)
+
         if embeddings is not None and documents is not None:
-            logger.log("Both documents and embeddings are provided.")
-            if len(documents) != embeddings.shape[0]:
+            logger.info("Both documents and embeddings are provided.")
+            if documents.get_label_size() != embeddings.shape[0]:
                 raise ValueError(
                     "The number of documents and embeddings must be the same."
                 )
-
-        # documents to be used for indexing
-        if isinstance(documents, Labels):
-            self.documents = documents
-        else:
-            self.documents = Labels()
-            self.documents.add_labels(documents)
 
         # device to store the embeddings
         self.device = device
@@ -74,22 +71,23 @@ class FaissIndexer(BaseIndexer):
         self.normalize = normalize
 
         if index is not None:
-            self.index = index
+            self.embeddings = index
             if self.device == "cuda":
                 # use a single GPU
                 faiss_resource = faiss.StandardGpuResources()
-                self.index = faiss.index_cpu_to_gpu(faiss_resource, 0, self.index)
+                self.embeddings = faiss.index_cpu_to_gpu(
+                    faiss_resource, 0, self.embeddings
+                )
         else:
-            # build the faiss index
-            self._build_faiss_index(
-                embeddings=embeddings,
-                index_type=index_type,
-                normalize=normalize,
-                metric=metric,
-            )
-
-        # embeddings of the documents
-        self.embeddings = index
+            if embeddings is not None:
+                # build the faiss index
+                logger.info("Building the index from the embeddings.")
+                self.embeddings = self._build_faiss_index(
+                    embeddings=embeddings,
+                    index_type=index_type,
+                    normalize=normalize,
+                    metric=metric,
+                )
 
     def _build_faiss_index(
         self,
@@ -112,13 +110,13 @@ class FaissIndexer(BaseIndexer):
         index_type = index_type.replace(
             "x", str(math.ceil(math.sqrt(faiss_vector_size)) * 4)
         )
-        self.index = faiss.index_factory(faiss_vector_size, index_type, metric)
+        self.embeddings = faiss.index_factory(faiss_vector_size, index_type, metric)
 
         # convert to GPU
         if self.device == "cuda":
             # use a single GPU
             faiss_resource = faiss.StandardGpuResources()
-            self.index = faiss.index_cpu_to_gpu(faiss_resource, 0, self.index)
+            self.embeddings = faiss.index_cpu_to_gpu(faiss_resource, 0, self.embeddings)
         else:
             # move to CPU if embeddings is a torch.Tensor
             embeddings = (
@@ -129,13 +127,16 @@ class FaissIndexer(BaseIndexer):
         if isinstance(embeddings, torch.Tensor) and embeddings.dtype == torch.float16:
             embeddings = embeddings.float()
 
-        self.index.add(embeddings)
+        self.embeddings.add(embeddings)
 
         # save parameters for saving/loading
         self.index_type = index_type
         self.metric = metric
 
-        return self.index
+        # clear the embeddings to free up memory
+        embeddings = None
+
+        return self.embeddings
 
     @torch.no_grad()
     @torch.inference_mode()
@@ -147,9 +148,10 @@ class FaissIndexer(BaseIndexer):
         max_length: Optional[int] = None,
         collate_fn: Optional[Callable] = None,
         encoder_precision: Optional[Union[str, int]] = None,
-        precision: Optional[Union[str, int]] = None,
         compute_on_cpu: bool = False,
         force_reindex: bool = False,
+        *args,
+        **kwargs,
     ) -> torch.Tensor:
         """
         Index the documents using the encoder.
@@ -221,7 +223,7 @@ class FaissIndexer(BaseIndexer):
         device_type_for_autocast = str(encoder_device).split(":")[0]
         # autocast doesn't work with CPU and stuff different from bfloat16
         autocast_pssg_mngr = (
-            contextlib.nullpassage()
+            contextlib.nullcontext()
             if device_type_for_autocast == "cpu"
             else (
                 torch.autocast(
@@ -251,36 +253,35 @@ class FaissIndexer(BaseIndexer):
         passage_embeddings: torch.Tensor = torch.stack(passage_embeddings, dim=0)
         # convert to float32 for faiss
         passage_embeddings.to(PRECISION_MAP["float32"])
-        self.embeddings = passage_embeddings
-
-        # free up memory from the unused variable
-        del passage_embeddings
 
         # index the embeddings
-        self._build_faiss_index(
-            embeddings=self.embeddings,
+        self.embeddings = self._build_faiss_index(
+            embeddings=passage_embeddings,
             index_type=self.index_type,
             normalize=self.normalize,
             metric=self.metric,
         )
+        # free up memory from the unused variable
+        del passage_embeddings
+
         return self.embeddings
 
     @torch.no_grad()
     @torch.inference_mode()
     def search(self, query: torch.Tensor, k: int = 1) -> List[RetrievedSample]:
-        k = min(k, self.index.ntotal)
+        k = min(k, self.embeddings.ntotal)
 
         if self.normalize:
             faiss.normalize_L2(query)
-        if isinstance(query, torch.Tensor) and not self.use_gpu:
+        if isinstance(query, torch.Tensor) and self.device == "cpu":
             query = query.detach().cpu()
         # Retrieve the indices of the top k passage embeddings
-        retriever_out = self.index.search(query, k)
+        retriever_out = self.embeddings.search(query, k)
 
-        # get int values
-        batch_top_k: List[List[int]] = retriever_out.indices.detach().cpu().tolist()
-        # get float values
-        batch_scores: List[List[float]] = retriever_out.values.detach().cpu().tolist()
+        # get int values (second element of the tuple)
+        batch_top_k: List[List[int]] = retriever_out[1].detach().cpu().tolist()
+        # get float values (first element of the tuple)
+        batch_scores: List[List[float]] = retriever_out[0].detach().cpu().tolist()
         # Retrieve the passages corresponding to the indices
         batch_passages = [
             [self.documents.get_label_from_index(i) for i in indices]
@@ -308,9 +309,9 @@ class FaissIndexer(BaseIndexer):
         """
         saving_dir = Path(saving_dir)
         # save the passage embeddings
-        embedding_path = saving_dir / self.EMBEDDING_FILE_NAME
-        logger.info(f"Saving passage embeddings to {embedding_path}")
-        faiss.write_index(self.index, str(embedding_path))
+        index_path = saving_dir / self.INDEX_FILE_NAME
+        logger.info(f"Saving passage embeddings to {index_path}")
+        faiss.write_index(self.embeddings, str(index_path))
         # save the passage index
         documents_path = saving_dir / self.DOCUMENTS_FILE_NAME
         logger.info(f"Saving passage index to {documents_path}")
@@ -323,12 +324,14 @@ class FaissIndexer(BaseIndexer):
         device: str = "cpu",
         document_file_name: Optional[str] = None,
         embedding_file_name: Optional[str] = None,
+        index_file_name: Optional[str] = None,
         **kwargs,
-    ) -> "FaissIndexer":
+    ) -> "FaissDocumentIndex":
         loading_dir = Path(loading_dir)
 
         document_file_name = document_file_name or cls.DOCUMENTS_FILE_NAME
-        embedding_file_name = embedding_file_name or cls.EMBEDDING_FILE_NAME
+        embedding_file_name = embedding_file_name or cls.EMBEDDINGS_FILE_NAME
+        index_file_name = index_file_name or cls.INDEX_FILE_NAME
 
         # load the documents
         documents_path = loading_dir / document_file_name
@@ -338,15 +341,31 @@ class FaissIndexer(BaseIndexer):
         logger.info(f"Loading documents from {documents_path}")
         documents = Labels.from_file(documents_path)
 
-        # load the passage embeddings
-        embedding_path = loading_dir / embedding_file_name
-        # run some checks
-        if not embedding_path.exists():
-            raise ValueError(f"Index file `{embedding_path}` does not exist.")
-        logger.info(f"Loading index from {embedding_path}")
-        index = faiss.read_index(str(embedding_path))
+        index = None
+        embeddings = None
+        # try to load the index directly
+        index_path = loading_dir / index_file_name
+        if not index_path.exists():
+            # try to load the embeddings
+            embedding_path = loading_dir / embedding_file_name
+            # run some checks
+            if embedding_path.exists():
+                logger.info(f"Loading embeddings from {embedding_path}")
+                embeddings = torch.load(embedding_path, map_location="cpu")
+            logger.warning(
+                f"Index file `{index_path}` and embedding file `{embedding_path}` do not exist."
+            )
+        else:
+            logger.info(f"Loading index from {index_path}")
+            index = faiss.read_index(str(embedding_path))
 
-        return cls(documents=documents, index=index, device=device, **kwargs)
+        return cls(
+            documents=documents,
+            embeddings=embeddings,
+            index=index,
+            device=device,
+            **kwargs,
+        )
 
     def get_embeddings_from_index(
         self, index: int
@@ -361,12 +380,12 @@ class FaissIndexer(BaseIndexer):
         Returns:
             `torch.Tensor`: The document vector.
         """
-        if self.index is None:
+        if self.embeddings is None:
             raise ValueError(
                 "The documents must be indexed before they can be retrieved."
             )
-        if index >= self.index.ntotal:
+        if index >= self.embeddings.ntotal:
             raise ValueError(
-                f"The index {index} is out of bounds. The maximum index is {self.index.ntotal}."
+                f"The index {index} is out of bounds. The maximum index is {self.embeddings.ntotal}."
             )
-        return self.index.reconstruct(index)
+        return self.embeddings.reconstruct(index)

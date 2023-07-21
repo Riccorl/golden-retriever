@@ -463,3 +463,42 @@ def from_cache(
     os.remove(lock_path)
 
     return Path(output_path_extracted)
+
+
+def is_str_a_path(maybe_path: str) -> bool:
+    """
+    Check if a string is a path.
+
+    Args:
+        maybe_path (`str`): The string to check.
+
+    Returns:
+        `bool`: `True` if the string is a path, `False` otherwise.
+    """
+    # first check if it is a path
+    if Path(maybe_path).exists():
+        return True
+    # check if it is a relative path
+    if Path(os.path.join(os.getcwd(), maybe_path)).exists():
+        return True
+    # otherwise it is not a path
+    return False
+
+
+def relative_to_absolute_path(path: str) -> os.PathLike:
+    """
+    Convert a relative path to an absolute path.
+
+    Args:
+        path (`str`): The relative path to convert.
+
+    Returns:
+        `os.PathLike`: The absolute path.
+    """
+    if not is_str_a_path(path):
+        raise ValueError(f"{path} is not a path")
+    if Path(path).exists():
+        return Path(path).absolute()
+    if Path(os.path.join(os.getcwd(), path)).exists():
+        return Path(os.path.join(os.getcwd(), path)).absolute()
+    raise ValueError(f"{path} is not a path")

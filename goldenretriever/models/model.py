@@ -29,7 +29,10 @@ from goldenretriever.common.utils import (
 )
 from goldenretriever.data.base.datasets import BaseDataset
 from goldenretriever.data.labels import Labels
+from goldenretriever.models import RetrievedSample
 from goldenretriever.models.faiss_indexer import FaissIndexer, FaissOutput
+from goldenretriever.models.indexers.base import BaseDocumentIndex
+from goldenretriever.models.indexers.inmemory import InMemoryDocumentIndex
 
 # check if ORT is available
 if is_package_available("onnxruntime"):
@@ -66,17 +69,6 @@ class GoldenRetrieverOutput(tr.file_utils.ModelOutput):
     loss: Optional[torch.FloatTensor] = None
     question_encodings: Optional[torch.FloatTensor] = None
     passages_encodings: Optional[torch.FloatTensor] = None
-
-
-@dataclass
-class RetrievedSample:
-    """
-    Dataclass for the output of the GoldenRetriever model.
-    """
-
-    score: float
-    index: int
-    label: str
 
 
 class SentenceEncoder(torch.nn.Module):
@@ -229,7 +221,7 @@ class GoldenRetriever(torch.nn.Module):
         question_encoder: SentenceEncoder,
         loss_type: Optional[torch.nn.Module] = None,
         passage_encoder: Optional[SentenceEncoder] = None,
-        passage_index: Optional[Labels] = None,
+        document_index: Optional[BaseDocumentIndex] = None,
         *args,
         **kwargs,
     ):
@@ -250,10 +242,8 @@ class GoldenRetriever(torch.nn.Module):
         # loss function
         self.loss_type = loss_type
 
-        # indexer stuff, lazy loaded
-        self._passage_index: Optional[Labels] = passage_index
-        self._passage_embeddings: Optional[torch.Tensor] = None
-        self._faiss_indexer: Optional[FaissIndexer] = None
+        # indexer stuff
+        self.document_index = document_index
 
         # lazy load the tokenizer for inference
         self._question_tokenizer: Optional[tr.PreTrainedTokenizer] = None
@@ -357,15 +347,14 @@ class GoldenRetriever(torch.nn.Module):
     @torch.inference_mode()
     def index(
         self,
-        passages: List[str],
+        # passages: List[str],
         batch_size: int = 32,
         num_workers: int = 4,
-        passage_max_length: Optional[int] = None,
+        max_length: Optional[int] = None,
         collate_fn: Optional[Callable] = None,
         force_reindex: bool = False,
-        use_faiss: bool = False,
         use_ort: bool = False,
-        move_index_to_cpu: bool = False,
+        compute_on_cpu: bool = False,
         precision: Optional[Union[str, int]] = None,
         index_precision: Optional[Union[str, int]] = None,
     ):
@@ -373,20 +362,16 @@ class GoldenRetriever(torch.nn.Module):
         Index the passages for later retrieval.
 
         Args:
-            passages (`List[str]`):
-                The passages to index.
             batch_size (`int`):
                 The batch size to use for the indexing.
             num_workers (`int`):
                 The number of workers to use for the indexing.
-            passage_max_length (`Optional[int]`):
+            max_length (`Optional[int]`):
                 The maximum length of the passages.
             collate_fn (`Callable`):
                 The collate function to use for the indexing.
             force_reindex (`bool`):
                 Whether to force reindexing even if the passages are already indexed.
-            use_faiss (`bool`):
-                Whether to use faiss for the indexing.
             use_ort (`bool`):
                 Whether to use onnxruntime for the indexing.
             move_index_to_cpu (`bool`):
@@ -396,96 +381,21 @@ class GoldenRetriever(torch.nn.Module):
             index_precision (`Optional[Union[str, int]]`):
                 The precision to use for the index.
         """
-        if self._passage_embeddings is not None and not force_reindex:
-            return
-
-        if self._faiss_indexer is not None and not force_reindex and use_faiss:
-            return
-
-        # release the memory
-        if collate_fn is None:
-            tokenizer = self.passage_tokenizer
-            collate_fn = lambda x: ModelInputs(
-                tokenizer(
-                    x,
-                    padding=True,
-                    return_tensors="pt",
-                    truncation=True,
-                    max_length=passage_max_length or tokenizer.model_max_length,
-                )
+        if self.document_index is None:
+            raise ValueError(
+                "The retriever must be initialized with an indexer to index the passages within the retriever."
             )
-        dataloader = DataLoader(
-            BaseDataset(name="passage", data=passages),
+        return self.document_index.index(
+            retriever=self,
             batch_size=batch_size,
-            shuffle=False,
             num_workers=num_workers,
-            pin_memory=False,
+            max_length=max_length,
             collate_fn=collate_fn,
+            encoder_precision=precision,
+            precision=index_precision,
+            compute_on_cpu=compute_on_cpu,
+            force_reindex=force_reindex,
         )
-        # we can use the onnx runtime optimized encoder for the indexing
-        if not use_ort:
-            passage_encoder = self.passage_encoder
-        else:
-            passage_encoder = self._load_ort_optimized_encoder(self.passage_encoder)
-        # Create empty lists to store the passage embeddings and passage index
-        passage_embeddings: List[torch.Tensor] = []
-
-        # fucking autocast only wants pure strings like 'cpu' or 'cuda'
-        # we need to convert the model device to that
-        device_type_for_autocast = str(self.device).split(":")[0]
-        # autocast doesn't work with CPU and stuff different from bfloat16
-        autocast_pssg_mngr = (
-            contextlib.nullpassage()
-            if device_type_for_autocast == "cpu"
-            else (
-                torch.autocast(
-                    device_type=device_type_for_autocast,
-                    dtype=PRECISION_MAP[precision],
-                )
-            )
-        )
-        with autocast_pssg_mngr:
-            # Iterate through each batch in the dataloader
-            for batch in tqdm(dataloader, desc="Indexing"):
-                # Move the batch to the device
-                batch: ModelInputs = batch.to(self.device)
-                # Compute the passage embeddings
-                passage_outs = passage_encoder(**batch)
-                # Append the passage embeddings to the list
-                if move_index_to_cpu:
-                    passage_embeddings.extend([c.detach().cpu() for c in passage_outs])
-                else:
-                    passage_embeddings.extend([c for c in passage_outs])
-
-        # move the passage embeddings to the CPU if not already done
-        # the move to cpu and then to gpu is needed to avoid OOM when using mixed precision
-        if not move_index_to_cpu:
-            passage_embeddings = [c.detach().cpu() for c in passage_embeddings]
-        # stack it
-        passage_embeddings: torch.Tensor = torch.stack(passage_embeddings, dim=0)
-        # move the passage embeddings to the gpu if needed
-        if not move_index_to_cpu:
-            if index_precision:
-                passage_embeddings = passage_embeddings.to(
-                    PRECISION_MAP[index_precision]
-                )
-            passage_embeddings = passage_embeddings.to(self.device)
-        self._passage_embeddings = passage_embeddings
-
-        # free up memory from the unused variable
-        del passage_embeddings
-
-        # Create a dictionary mapping the passage index to the passage
-        self._passage_index = Labels()
-        self._passage_index.add_labels(
-            {passage: i for i, passage in enumerate(passages)}
-        )
-        if use_faiss and (self._faiss_indexer is None or force_reindex):
-            self._faiss_indexer = FaissIndexer(
-                embeddings=self._passage_embeddings, use_gpu=bool(not move_index_to_cpu)
-            )
-            # free up memory
-            self._passage_embeddings = None
 
     @torch.no_grad()
     @torch.inference_mode()
@@ -524,17 +434,14 @@ class GoldenRetriever(torch.nn.Module):
         Returns:
             `List[List[RetrievedSample]]`: The retrieved passages and their indices.
         """
-        if self._passage_embeddings is None and self._faiss_indexer is None:
+        if self.document_index is None:
             raise ValueError(
-                "The passages must be indexed before they can be retrieved."
+                "The indexer must be indexed before it can be used within the retriever."
             )
         if text is None and input_ids is None:
             raise ValueError(
                 "Either `text` or `input_ids` must be provided to retrieve the passages."
             )
-
-        if k is None:
-            k = self._passage_embeddings.size(0)
 
         if text is not None:
             if isinstance(text, str):
@@ -561,75 +468,24 @@ class GoldenRetriever(torch.nn.Module):
 
         model_inputs.to(self.device)
 
-        if self._faiss_indexer is not None:
-            faiss_outs: FaissOutput = self._faiss_indexer.search(
-                self.question_encoder(**model_inputs), k=k
-            )
-            batch_top_k: torch.Tensor = faiss_outs.indices
-            batch_scores: torch.Tensor = faiss_outs.distances
-        else:
-            # fucking autocast only wants pure strings like 'cpu' or 'cuda'
-            # we need to convert the model device to that
-            device_type_for_autocast = str(self.device).split(":")[0]
-            # autocast doesn't work with CPU and stuff different from bfloat16
-            autocast_pssg_mngr = (
-                contextlib.nullpassage()
-                if device_type_for_autocast == "cpu"
-                else (
-                    torch.autocast(
-                        device_type=device_type_for_autocast,
-                        dtype=PRECISION_MAP[precision],
-                    )
+        # fucking autocast only wants pure strings like 'cpu' or 'cuda'
+        # we need to convert the model device to that
+        device_type_for_autocast = str(self.device).split(":")[0]
+        # autocast doesn't work with CPU and stuff different from bfloat16
+        autocast_pssg_mngr = (
+            contextlib.nullcontext()
+            if device_type_for_autocast == "cpu"
+            else (
+                torch.autocast(
+                    device_type=device_type_for_autocast,
+                    dtype=PRECISION_MAP[precision],
                 )
             )
-            with autocast_pssg_mngr:
-                # check if the device of the passage embeddings is the same
-                # as the device of the input ids
-                if self._passage_embeddings.device != model_inputs.input_ids.device:
-                    self._passage_embeddings = self._passage_embeddings.to(
-                        model_inputs.input_ids.device
-                    )
-                model_inputs = dict(
-                    questions=model_inputs,
-                    passages_encodings=self._passage_embeddings,
-                )
-                # check that the device of the question encoder is the same as
-                # the device of the passage embeddings
-                past_device = self.device
-                if past_device != self._passage_embeddings:
-                    self.to(self._passage_embeddings.device)
-                # Compute the similarity between the questions and the passages
-                similarity = self(**model_inputs)["logits"]
-                # move the model back to the original device
-                if past_device != self.device:
-                    self.to(past_device)
-                # Retrieve the indices of the top k passage embeddings
-                retriever_out: Tuple = torch.topk(
-                    similarity, k=min(k, similarity.shape[-1]), dim=1
-                )
-                batch_top_k: torch.Tensor = retriever_out.indices
-                batch_scores: torch.Tensor = retriever_out.values
-        # get int values
-        batch_top_k: List[List[int]] = batch_top_k.detach().cpu().tolist()
-        # get float values
-        batch_scores: List[List[float]] = batch_scores.detach().cpu().tolist()
-        # Retrieve the passages corresponding to the indices
-        batch_passages = [
-            [self._passage_index.get_label_from_index(i) for i in indices]
-            for indices in batch_top_k
-        ]
-        # build the output object
-        batch_retrieved_samples = [
-            [
-                RetrievedSample(label=passage, index=index, score=score)
-                for passage, index, score in zip(passages, indices, scores)
-            ]
-            for passages, indices, scores in zip(
-                batch_passages, batch_top_k, batch_scores
-            )
-        ]
-        # return
-        return batch_retrieved_samples
+        )
+        with autocast_pssg_mngr:
+            question_encodings = self.question_encoder(**model_inputs)
+
+        return self.document_index.search(question_encodings, k)
 
     def get_index_from_passage(self, passage: str) -> int:
         """
@@ -642,11 +498,11 @@ class GoldenRetriever(torch.nn.Module):
         Returns:
             `int`: The index of the passage.
         """
-        if self._passage_embeddings is None and self._faiss_indexer is None:
+        if self.document_index is None:
             raise ValueError(
                 "The passages must be indexed before they can be retrieved."
             )
-        return self._passage_index.get_index_from_label(passage)
+        return self.document_index.get_index_from_passage(passage)
 
     def get_passage_from_index(self, index: int) -> str:
         """
@@ -659,11 +515,11 @@ class GoldenRetriever(torch.nn.Module):
         Returns:
             `str`: The passage.
         """
-        if self._passage_embeddings is None and self._faiss_indexer is None:
+        if self.document_index is None:
             raise ValueError(
                 "The passages must be indexed before they can be retrieved."
             )
-        return self._passage_index.get_label_from_index(index)
+        return self.document_index.get_passage_from_index(index)
 
     def get_vector_from_index(self, index: int) -> torch.Tensor:
         """
@@ -676,13 +532,11 @@ class GoldenRetriever(torch.nn.Module):
         Returns:
             `torch.Tensor`: The passage vector.
         """
-        if self._passage_embeddings is None and self._faiss_indexer is None:
+        if self.document_index is None:
             raise ValueError(
                 "The passages must be indexed before they can be retrieved."
             )
-        if self._passage_embeddings is None:
-            return self._faiss_indexer.reconstruct(index)
-        return self._passage_embeddings[index]
+        return self.document_index.get_embeddings_from_index(index)
 
     def get_vector_from_passage(self, passage: str) -> torch.Tensor:
         """
@@ -695,11 +549,11 @@ class GoldenRetriever(torch.nn.Module):
         Returns:
             `torch.Tensor`: The passage vector.
         """
-        if self._passage_embeddings is None and self._faiss_indexer is None:
+        if self.document_index is None:
             raise ValueError(
                 "The passages must be indexed before they can be retrieved."
             )
-        return self.get_vector_from_index(self.get_index_from_passage(passage))
+        return self.document_index.get_embeddings_from_passage(passage)
 
     @property
     def question_tokenizer(self) -> tr.PreTrainedTokenizer:
@@ -816,6 +670,7 @@ class GoldenRetriever(torch.nn.Module):
         Returns:
             `Dict[str, Any]`: The configuration of the retriever.
         """
+        print("Passage encoder is question encoder: ", self.passage_encoder_is_question_encoder)
         return dict(
             _target_=f"{self.__class__.__module__}.{self.__class__.__name__}",
             question_encoder=self.question_encoder.config,
@@ -825,8 +680,6 @@ class GoldenRetriever(torch.nn.Module):
             loss_type=dict(
                 _target_=f"{self.loss_type.__class__.__module__}.{self.loss_type.__class__.__name__}"
             ),
-            # passage_index is not saved because it might be too large
-            passage_index=None,
         )
 
     def save_pretrained(
@@ -866,22 +719,12 @@ class GoldenRetriever(torch.nn.Module):
         # save the config using OmegaConf
         OmegaConf.save(config, output_dir / CONFIG_NAME)
 
-        if self._passage_embeddings is None or self._passage_index is None:
-            raise ValueError("The passages must be indexed before they can be saved.")
-
         # save the current state of the retriever
         logger.info(f"Saving retriever state to {output_dir / WEIGHTS_NAME}")
         torch.save(self.state_dict(), output_dir / WEIGHTS_NAME)
-        # save the passage embeddings
-        logger.info(f"Saving passage embeddings to {output_dir / INDEX_VECTOR_NAME}")
-        torch.save(self._passage_embeddings, output_dir / INDEX_VECTOR_NAME)
-        # save the passage index
-        logger.info(f"Saving passage index to {output_dir / INDEX_NAME}")
-        self._passage_index.save(output_dir / INDEX_NAME)
-        # save the faiss indexer
-        # if self._faiss_indexer is not None:
-        #     logger.log(f"Saving faiss index to {output_dir / FAISS_INDEX_NAME}")
-        #     self._faiss_indexer.save(output_dir)
+        if self.document_index is not None:
+            # save the indexer
+            self.document_index.save(output_dir)
 
         logger.info("Saving retriever to disk done.")
 
@@ -891,10 +734,10 @@ class GoldenRetriever(torch.nn.Module):
         model_name_or_dir: Union[str, Path],
         strict: bool = True,
         device: str = "cpu",
-        index_device: str = "cpu",
+        index_device: Optional[str] = None,
         index_precision: Optional[str] = None,
-        load_faiss_index: bool = False,
         load_index_vector: bool = True,
+        index_type: BaseDocumentIndex = InMemoryDocumentIndex,
         compile: bool = False,
         filenames: Optional[List[str]] = None,
         *args,
@@ -978,16 +821,11 @@ class GoldenRetriever(torch.nn.Module):
         config = OmegaConf.load(config_path)
         pprint(OmegaConf.to_container(config), console=console_logger, expand_all=True)
 
-        # load the index vocabulary
-        passage_index = Labels.from_file(model_dir / INDEX_NAME)
-
         weights_path = model_dir / WEIGHTS_NAME
 
         # load model from config
         logger.info("Loading model")
-        model = hydra.utils.instantiate(
-            config, passage_index=passage_index, *args, **kwargs
-        )
+        model = hydra.utils.instantiate(config, *args, **kwargs)
         # load model weights
         model_state = torch.load(weights_path, map_location=device)
         missing_keys, unexpected_keys = model.load_state_dict(
@@ -1001,43 +839,10 @@ class GoldenRetriever(torch.nn.Module):
             )
 
         if load_index_vector:
-            # run some checks
-            index_vectors = model_dir / INDEX_VECTOR_NAME
-            faiss_index_vectors = model_dir / FAISS_INDEX_NAME
-            if load_faiss_index and not faiss_index_vectors.exists():
-                logger.info(
-                    f"{FAISS_INDEX_NAME} does not exist. Trying to convert from dense index."
-                )
-            if not index_vectors.exists():
-                raise ValueError(f"Index vectors `{index_vectors}` does not exist.")
-            if not (model_dir / INDEX_NAME).exists():
-                raise ValueError(f"Index `{model_dir / INDEX_NAME}` does not exist.")
-
-            # select between faiss and dense index
-            logger.info("Loading index vectors")
-            embeddings = torch.load(index_vectors, map_location="cpu")
-            if index_precision and embeddings.dtype != PRECISION_MAP[index_precision]:
-                logger.info(
-                    f"Index vectors are of type {embeddings.dtype}. "
-                    f"Converting to {PRECISION_MAP[index_precision]}."
-                )
-                embeddings = embeddings.to(PRECISION_MAP[index_precision])
-
-            if load_faiss_index:
-                faiss_kwargs = {
-                    "use_gpu": bool(index_device == "cuda"),
-                }
-                if not faiss_index_vectors.exists():
-                    faiss_kwargs.update({"embeddings": embeddings})
-                    model._faiss_indexer = FaissIndexer(**faiss_kwargs)
-                    del embeddings
-                else:
-                    faiss_kwargs.update({"loading_dir": model_dir})
-                    model._faiss_indexer = FaissIndexer.load(**faiss_kwargs)
-            else:
-                if device == "cuda":
-                    embeddings = embeddings.to(device)
-                model._passage_embeddings = embeddings
+            index_device = index_device or device
+            model.indexer = index_type.load(
+                model_dir, device=index_device, precision=index_precision
+            )
 
         # move model to device
         model.to(device)
