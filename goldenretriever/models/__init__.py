@@ -16,6 +16,7 @@ PRECISION_MAP = {
     "fp32": torch.float32,
 }
 
+
 @dataclass
 class RetrievedSample:
     """

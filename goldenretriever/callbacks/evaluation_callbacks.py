@@ -29,6 +29,7 @@ class RecallAtKEvaluationCallback(NLPTemplateCallback):
         prog_bar (`bool`, `optional`, defaults to `True`):
             Whether to log the metrics to the progress bar.
     """
+
     def __init__(
         self,
         k: int = 100,
@@ -63,7 +64,7 @@ class RecallAtKEvaluationCallback(NLPTemplateCallback):
                 The lightning module.
             predictions (:obj:`Dict`):
                 The predictions.
-        
+
         Returns:
             :obj:`Dict`: The computed metrics.
         """

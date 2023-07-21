@@ -25,7 +25,7 @@ class GoldenRetrieverPLModule(pl.LightningModule):
             self.model = hydra.utils.instantiate(model, labels=labels)
         else:
             self.model = model
-        
+
         self.optimizer_config = optimizer
 
     def forward(self, **kwargs) -> dict:
@@ -98,7 +98,7 @@ class GoldenRetrieverPLModule(pl.LightningModule):
             ]
         else:
             optimizer_grouped_parameters = self.parameters()
-        
+
         if isinstance(self.optimizer_config, DictConfig):
             optimizer = hydra.utils.instantiate(
                 self.optimizer_config,
@@ -107,7 +107,7 @@ class GoldenRetrieverPLModule(pl.LightningModule):
             )
         else:
             optimizer = self.optimizer_config
-        
+
         if "lr_scheduler" not in self.hparams or not self.hparams.lr_scheduler:
             return optimizer
 
