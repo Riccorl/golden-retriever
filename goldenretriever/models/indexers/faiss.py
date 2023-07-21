@@ -246,8 +246,6 @@ class FaissDocumentIndex(BaseDocumentIndex):
                     passage_embeddings.extend([c for c in passage_outs])
 
         # move the passage embeddings to the CPU if not already done
-        # the move to cpu and then to gpu is needed to avoid OOM when using mixed precision
-        # if self.device == "cpu":
         passage_embeddings = [c.detach().cpu() for c in passage_embeddings]
         # stack it
         passage_embeddings: torch.Tensor = torch.stack(passage_embeddings, dim=0)

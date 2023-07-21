@@ -670,7 +670,6 @@ class GoldenRetriever(torch.nn.Module):
         Returns:
             `Dict[str, Any]`: The configuration of the retriever.
         """
-        print("Passage encoder is question encoder: ", self.passage_encoder_is_question_encoder)
         return dict(
             _target_=f"{self.__class__.__module__}.{self.__class__.__name__}",
             question_encoder=self.question_encoder.config,
