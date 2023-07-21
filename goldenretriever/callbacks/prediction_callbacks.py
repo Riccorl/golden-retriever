@@ -75,13 +75,6 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                 f"Stage `{stage}` not supported, only {self.stages} are supported"
             )
 
-        # get the tokenizer
-        # tokenizer = trainer.datamodule.tokenizer
-
-        # if datasets is not None or dataloaders is not None:
-        #     self.datasets = datasets
-        #     self.dataloaders = dataloaders
-
         self.datasets, self.dataloaders = self._get_datasets_and_dataloaders(
             datasets,
             dataloaders,
@@ -104,10 +97,10 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         # compute the passage embeddings index for each dataloader
         for dataloader_idx, dataloader in enumerate(self.dataloaders):
             current_dataset: GoldenRetrieverDataset = self.datasets[dataloader_idx]
-            #     logger.info(
-            #         f"Computing passage embeddings for dataset {current_dataset.name}"
-            #     )
-            #     passages = self._get_passages_dataloader(current_dataset, trainer)
+            logger.info(
+                f"Computing passage embeddings for dataset {current_dataset.name}"
+            )
+            # passages = self._get_passages_dataloader(current_dataset, trainer)
 
             tokenizer = current_dataset.tokenizer
             collate_fn = lambda x: ModelInputs(
@@ -151,18 +144,6 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                 force_reindex=force_reindex,
             )
 
-            # retriever.index(
-            #     passages,
-            #     batch_size=self.batch_size,
-            #     num_workers=self.num_workers,
-            #     collate_fn=collate_fn,
-            #     force_reindex=force_reindex,
-            #     use_faiss=self.use_faiss,
-            #     move_index_to_cpu=self.move_index_to_cpu,
-            #     precision=self.precision,
-            #     index_precision=self.index_precision,
-            # )
-
             pl_module_original_device = pl_module.device
             if (
                 not self.use_faiss
@@ -172,7 +153,6 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                 pl_module.to("cpu")
 
             # now compute the question embeddings and compute the top-k accuracy
-            # logger.info(f"Computing predictions for dataset {current_dataset.name}")
             predictions = []
             start = time.time()
             for batch in tqdm(
