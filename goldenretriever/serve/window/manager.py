@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
+
 from goldenretriever.serve.tokenizers.base_tokenizer import BaseTokenizer
 
 

@@ -4,7 +4,7 @@ import os
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
 import hydra
 import psutil
@@ -13,9 +13,6 @@ import torch.nn.functional as F
 import transformers as tr
 from omegaconf import OmegaConf
 from rich.pretty import pprint
-from torch.utils.data import DataLoader
-from tqdm import tqdm
-from transformers.activations import GELUActivation
 
 from goldenretriever.common.log import get_console_logger, get_logger
 from goldenretriever.common.model_inputs import ModelInputs
@@ -27,15 +24,13 @@ from goldenretriever.common.utils import (
     is_remote_url,
     sapienzanlp_model_urls,
 )
-from goldenretriever.data.base.datasets import BaseDataset
 from goldenretriever.data.labels import Labels
 from goldenretriever.retriever import RetrievedSample
-from goldenretriever.retriever.modules.encoder.hf import (
-    GoldenRetrieverConfig,
-    GoldenRetrieverModel,
-)
 from goldenretriever.retriever.indexers.base import BaseDocumentIndex
 from goldenretriever.retriever.indexers.inmemory import InMemoryDocumentIndex
+from goldenretriever.retriever.modules.encoder.hf import (
+    GoldenRetrieverModel,
+)
 from goldenretriever.retriever.modules.encoder.torch import SentenceEncoder
 
 # check if ORT is available

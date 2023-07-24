@@ -1,18 +1,14 @@
-import os
-from functools import partial
 from typing import Any, Union, List, Optional, Sequence
 
 import hydra
 import pytorch_lightning as pl
 import torch
-import transformers as tr
 from omegaconf import DictConfig
 from pytorch_lightning.utilities.types import EVAL_DATALOADERS
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader
 
-from goldenretriever.data.datasets import GoldenRetrieverDataset
 from goldenretriever.common.log import get_logger
-from goldenretriever.data.labels import Labels
+from goldenretriever.data.datasets import GoldenRetrieverDataset
 
 logger = get_logger()
 

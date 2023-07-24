@@ -16,6 +16,7 @@ from pytorch_lightning.callbacks import (
 )
 from pytorch_lightning.loggers import WandbLogger
 from rich.pretty import pprint
+
 from goldenretriever.callbacks.evaluation_callbacks import (
     AvgRankingEvaluationCallback,
     RecallAtKEvaluationCallback,
@@ -29,15 +30,14 @@ from goldenretriever.callbacks.utils_callbacks import (
     SavePredictionsCallback,
     SaveRetrieverCallback,
 )
-
-from goldenretriever.data.datasets import GoldenRetrieverDataset
-from goldenretriever.retriever.indexers.base import BaseDocumentIndex
-from goldenretriever.retriever.golden_retriever import GoldenRetriever
 from goldenretriever.common.log import get_console_logger
+from goldenretriever.data.datasets import GoldenRetrieverDataset
 from goldenretriever.lightning_modules.pl_data_modules import (
     GoldenRetrieverPLDataModule,
 )
 from goldenretriever.lightning_modules.pl_modules import GoldenRetrieverPLModule
+from goldenretriever.retriever.golden_retriever import GoldenRetriever
+from goldenretriever.retriever.indexers.base import BaseDocumentIndex
 
 logger = get_console_logger()
 

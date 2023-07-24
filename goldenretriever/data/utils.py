@@ -1,11 +1,10 @@
-from typing import Any, Iterable, List, Optional, Union
-
-import numpy as np
-
-from collections import defaultdict
 import json
 import os
+from collections import defaultdict
+from typing import Any, Iterable, Optional
 from typing import Dict, List, Union
+
+import numpy as np
 import transformers as tr
 from tqdm import tqdm
 

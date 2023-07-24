@@ -1,5 +1,4 @@
 import os
-import random
 from copy import deepcopy
 from enum import Enum
 from functools import partial
@@ -17,7 +16,6 @@ from tqdm import tqdm
 from goldenretriever.common.log import get_console_logger, get_logger
 from goldenretriever.common.model_inputs import ModelInputs
 from goldenretriever.data.base.datasets import BaseDataset, IterableBaseDataset
-from goldenretriever.data.labels import PassageManager
 from goldenretriever.data.utils import HardNegativesManager
 
 console_logger = get_console_logger()

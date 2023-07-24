@@ -1,20 +1,15 @@
-import contextlib
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Union
+
 import hydra
-
 import numpy
-from omegaconf import OmegaConf
 import torch
-from torch.utils.data import DataLoader
-import tqdm
-
+from omegaconf import OmegaConf
 from rich.pretty import pprint
 
 from goldenretriever.common.log import get_console_logger, get_logger
-from goldenretriever.common.model_inputs import ModelInputs
 from goldenretriever.common.utils import (
     from_cache,
     is_remote_url,
@@ -22,9 +17,7 @@ from goldenretriever.common.utils import (
     relative_to_absolute_path,
     sapienzanlp_model_urls,
 )
-from goldenretriever.data.base.datasets import BaseDataset
 from goldenretriever.data.labels import Labels
-from goldenretriever.retriever import PRECISION_MAP
 
 # from goldenretriever.models.model import GoldenRetriever, RetrievedSample
 

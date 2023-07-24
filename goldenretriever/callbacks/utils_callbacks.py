@@ -3,7 +3,6 @@ import logging
 import os
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
-import hydra
 
 import pytorch_lightning as pl
 import torch
@@ -11,7 +10,6 @@ from pytorch_lightning.trainer.states import RunningStage
 
 from goldenretriever.callbacks.base import NLPTemplateCallback, PredictionCallback
 from goldenretriever.common.log import get_console_logger, get_logger
-from goldenretriever.lightning_modules.pl_modules import GoldenRetrieverPLModule
 
 console_logger = get_console_logger()
 logger = get_logger(__name__, level=logging.INFO)

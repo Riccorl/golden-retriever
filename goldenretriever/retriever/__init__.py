@@ -1,6 +1,6 @@
 from dataclasses import dataclass
-import torch
 
+import torch
 
 PRECISION_MAP = {
     None: torch.float32,

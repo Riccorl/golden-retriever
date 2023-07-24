@@ -1,4 +1,4 @@
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, Optional, Union
 
 import torch
 import transformers as tr
@@ -6,8 +6,7 @@ from transformers.activations import GELUActivation
 
 # check if ORT is available
 if is_package_available("onnxruntime"):
-    from optimum.onnxruntime import ORTModelForFeatureExtraction, ORTOptimizer
-    from optimum.onnxruntime.configuration import AutoOptimizationConfig
+    from optimum.onnxruntime import ORTModelForFeatureExtraction
 
 
 class SentenceEncoder(torch.nn.Module):

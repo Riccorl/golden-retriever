@@ -13,14 +13,10 @@ from urllib.parse import urlparse
 from zipfile import ZipFile, is_zipfile
 
 import huggingface_hub
-from huggingface_hub import hf_hub_download
-
-from transformers.utils.hub import download_url as hf_hub_download_url
-from transformers.utils.hub import cached_file as hf_cached_file
-
 import requests
 import tqdm
 from filelock import FileLock
+from transformers.utils.hub import cached_file as hf_cached_file
 
 from goldenretriever.common.log import get_logger
 

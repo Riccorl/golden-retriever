@@ -1,19 +1,16 @@
 import contextlib
 import logging
 import os
-from dataclasses import dataclass
-from pathlib import Path
 from typing import Callable, List, Optional, Tuple, Union
 
-import numpy
 import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from goldenretriever.common.log import get_console_logger, get_logger
+from goldenretriever.common.log import get_logger
 from goldenretriever.common.model_inputs import ModelInputs
 from goldenretriever.data.base.datasets import BaseDataset
-from goldenretriever.data.labels import Labels, PassageManager
+from goldenretriever.data.labels import Labels
 from goldenretriever.retriever import PRECISION_MAP, RetrievedSample
 from goldenretriever.retriever.indexers.base import BaseDocumentIndex
 

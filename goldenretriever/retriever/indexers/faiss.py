@@ -1,27 +1,22 @@
 import contextlib
-import json
 import logging
 import math
-import os
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Callable, List, Optional, Tuple, Union
+from typing import Callable, List, Optional, Union
 
 import numpy
 import torch
 import tqdm
-from omegaconf import OmegaConf
-from rich.pretty import pprint
 from torch.utils.data import DataLoader
 
-from goldenretriever.common.log import get_console_logger, get_logger
+from goldenretriever.common.log import get_logger
 from goldenretriever.common.model_inputs import ModelInputs
 from goldenretriever.common.utils import is_package_available
 from goldenretriever.data.base.datasets import BaseDataset
 from goldenretriever.data.labels import Labels
 from goldenretriever.retriever import PRECISION_MAP
-from goldenretriever.retriever.indexers.base import BaseDocumentIndex
 from goldenretriever.retriever.golden_retriever import GoldenRetriever, RetrievedSample
+from goldenretriever.retriever.indexers.base import BaseDocumentIndex
 
 if is_package_available("faiss"):
     import faiss
