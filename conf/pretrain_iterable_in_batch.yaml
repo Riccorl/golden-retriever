@@ -3,6 +3,9 @@ hydra:
   run:
     dir: ./experiments/${model_name}/${now:%Y-%m-%d}/${now:%H-%M-%S}
 
+model_name: ${model.language_model} # used to name the model in wandb
+project_name: golden-retriever # used to name the project in wandb
+
 defaults:
   - _self_
   - model: golden_retriever
@@ -14,9 +17,6 @@ defaults:
   - logging: wandb_logging
   - override hydra/job_logging: colorlog
   - override hydra/hydra_logging: colorlog
-
-model_name: ${model.language_model} # used to name the model in wandb
-project_name: golden-retriever # used to name the project in wandb
 
 train:
   # reproducibility
@@ -46,7 +46,7 @@ train:
     val_check_interval: 1.0 # you can specify an int "n" here => validation every "n" steps
     check_val_every_n_epoch: 1
     max_epochs: 0
-    max_steps: 200_000
+    max_steps: 100_000
     deterministic: True
     fast_dev_run: False
     precision: 16

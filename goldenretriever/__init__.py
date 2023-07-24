@@ -1,1 +1,1 @@
-from goldenretriever.models.model import GoldenRetriever
+from goldenretriever.retriever.golden_retriever import GoldenRetriever

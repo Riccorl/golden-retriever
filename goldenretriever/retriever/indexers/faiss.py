@@ -19,9 +19,9 @@ from goldenretriever.common.model_inputs import ModelInputs
 from goldenretriever.common.utils import is_package_available
 from goldenretriever.data.base.datasets import BaseDataset
 from goldenretriever.data.labels import Labels
-from goldenretriever.models import PRECISION_MAP
-from goldenretriever.models.indexers.base import BaseDocumentIndex
-from goldenretriever.models.model import GoldenRetriever, RetrievedSample
+from goldenretriever.retriever import PRECISION_MAP
+from goldenretriever.retriever.indexers.base import BaseDocumentIndex
+from goldenretriever.retriever.golden_retriever import GoldenRetriever, RetrievedSample
 
 if is_package_available("faiss"):
     import faiss
@@ -297,73 +297,73 @@ class FaissDocumentIndex(BaseDocumentIndex):
         ]
         return batch_retrieved_samples
 
-    def save(self, saving_dir: Union[str, os.PathLike]):
-        """
-        Save the indexer to the disk.
+    # def save(self, saving_dir: Union[str, os.PathLike]):
+    #     """
+    #     Save the indexer to the disk.
 
-        Args:
-            saving_dir (:obj:`Union[str, os.PathLike]`):
-                The directory where the indexer will be saved.
-        """
-        saving_dir = Path(saving_dir)
-        # save the passage embeddings
-        index_path = saving_dir / self.INDEX_FILE_NAME
-        logger.info(f"Saving passage embeddings to {index_path}")
-        faiss.write_index(self.embeddings, str(index_path))
-        # save the passage index
-        documents_path = saving_dir / self.DOCUMENTS_FILE_NAME
-        logger.info(f"Saving passage index to {documents_path}")
-        self.documents.save(documents_path)
+    #     Args:
+    #         saving_dir (:obj:`Union[str, os.PathLike]`):
+    #             The directory where the indexer will be saved.
+    #     """
+    #     saving_dir = Path(saving_dir)
+    #     # save the passage embeddings
+    #     index_path = saving_dir / self.INDEX_FILE_NAME
+    #     logger.info(f"Saving passage embeddings to {index_path}")
+    #     faiss.write_index(self.embeddings, str(index_path))
+    #     # save the passage index
+    #     documents_path = saving_dir / self.DOCUMENTS_FILE_NAME
+    #     logger.info(f"Saving passage index to {documents_path}")
+    #     self.documents.save(documents_path)
 
-    @classmethod
-    def load(
-        cls,
-        loading_dir: Union[str, os.PathLike],
-        device: str = "cpu",
-        document_file_name: Optional[str] = None,
-        embedding_file_name: Optional[str] = None,
-        index_file_name: Optional[str] = None,
-        **kwargs,
-    ) -> "FaissDocumentIndex":
-        loading_dir = Path(loading_dir)
+    # @classmethod
+    # def load(
+    #     cls,
+    #     loading_dir: Union[str, os.PathLike],
+    #     device: str = "cpu",
+    #     document_file_name: Optional[str] = None,
+    #     embedding_file_name: Optional[str] = None,
+    #     index_file_name: Optional[str] = None,
+    #     **kwargs,
+    # ) -> "FaissDocumentIndex":
+    #     loading_dir = Path(loading_dir)
 
-        document_file_name = document_file_name or cls.DOCUMENTS_FILE_NAME
-        embedding_file_name = embedding_file_name or cls.EMBEDDINGS_FILE_NAME
-        index_file_name = index_file_name or cls.INDEX_FILE_NAME
+    #     document_file_name = document_file_name or cls.DOCUMENTS_FILE_NAME
+    #     embedding_file_name = embedding_file_name or cls.EMBEDDINGS_FILE_NAME
+    #     index_file_name = index_file_name or cls.INDEX_FILE_NAME
 
-        # load the documents
-        documents_path = loading_dir / document_file_name
+    #     # load the documents
+    #     documents_path = loading_dir / document_file_name
 
-        if not documents_path.exists():
-            raise ValueError(f"Document file `{documents_path}` does not exist.")
-        logger.info(f"Loading documents from {documents_path}")
-        documents = Labels.from_file(documents_path)
+    #     if not documents_path.exists():
+    #         raise ValueError(f"Document file `{documents_path}` does not exist.")
+    #     logger.info(f"Loading documents from {documents_path}")
+    #     documents = Labels.from_file(documents_path)
 
-        index = None
-        embeddings = None
-        # try to load the index directly
-        index_path = loading_dir / index_file_name
-        if not index_path.exists():
-            # try to load the embeddings
-            embedding_path = loading_dir / embedding_file_name
-            # run some checks
-            if embedding_path.exists():
-                logger.info(f"Loading embeddings from {embedding_path}")
-                embeddings = torch.load(embedding_path, map_location="cpu")
-            logger.warning(
-                f"Index file `{index_path}` and embedding file `{embedding_path}` do not exist."
-            )
-        else:
-            logger.info(f"Loading index from {index_path}")
-            index = faiss.read_index(str(embedding_path))
+    #     index = None
+    #     embeddings = None
+    #     # try to load the index directly
+    #     index_path = loading_dir / index_file_name
+    #     if not index_path.exists():
+    #         # try to load the embeddings
+    #         embedding_path = loading_dir / embedding_file_name
+    #         # run some checks
+    #         if embedding_path.exists():
+    #             logger.info(f"Loading embeddings from {embedding_path}")
+    #             embeddings = torch.load(embedding_path, map_location="cpu")
+    #         logger.warning(
+    #             f"Index file `{index_path}` and embedding file `{embedding_path}` do not exist."
+    #         )
+    #     else:
+    #         logger.info(f"Loading index from {index_path}")
+    #         index = faiss.read_index(str(embedding_path))
 
-        return cls(
-            documents=documents,
-            embeddings=embeddings,
-            index=index,
-            device=device,
-            **kwargs,
-        )
+    #     return cls(
+    #         documents=documents,
+    #         embeddings=embeddings,
+    #         index=index,
+    #         device=device,
+    #         **kwargs,
+    #     )
 
     def get_embeddings_from_index(
         self, index: int

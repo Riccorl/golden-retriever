@@ -31,8 +31,8 @@ from goldenretriever.callbacks.utils_callbacks import (
 )
 
 from goldenretriever.data.datasets import GoldenRetrieverDataset
-from goldenretriever.models.indexers.base import BaseDocumentIndex
-from goldenretriever.models.model import GoldenRetriever
+from goldenretriever.retriever.indexers.base import BaseDocumentIndex
+from goldenretriever.retriever.golden_retriever import GoldenRetriever
 from goldenretriever.common.log import get_console_logger
 from goldenretriever.lightning_modules.pl_data_modules import (
     GoldenRetrieverPLDataModule,
@@ -465,7 +465,9 @@ def train(conf: omegaconf.DictConfig) -> None:
             # callback can be a list of callbacks or a single callback
             if isinstance(callback, omegaconf.listconfig.ListConfig):
                 for cb in callback:
-                    callbacks_store.append(hydra.utils.instantiate(cb, _recursive_=False))
+                    callbacks_store.append(
+                        hydra.utils.instantiate(cb, _recursive_=False)
+                    )
             else:
                 callbacks_store.append(hydra.utils.instantiate(callback))
 

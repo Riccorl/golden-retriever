@@ -18,8 +18,8 @@ from goldenretriever.common.model_inputs import ModelInputs
 from goldenretriever.data.base.datasets import BaseDataset
 from goldenretriever.data.datasets import GoldenRetrieverDataset
 from goldenretriever.data.utils import HardNegativesManager
-from goldenretriever.models.indexers.base import BaseDocumentIndex
-from goldenretriever.models.model import GoldenRetriever
+from goldenretriever.retriever.indexers.base import BaseDocumentIndex
+from goldenretriever.retriever.golden_retriever import GoldenRetriever
 
 console_logger = get_console_logger()
 logger = get_logger(__name__, level=logging.INFO)

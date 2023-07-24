@@ -1,8 +1,8 @@
 import re
-from goldenretriever.models.indexers.faiss import FaissDocumentIndex
+from goldenretriever.retriever.indexers.faiss import FaissDocumentIndex
 
-from goldenretriever.models.indexers.inmemory import InMemoryDocumentIndex
-from goldenretriever.models.model import GoldenRetriever
+from goldenretriever.retriever.indexers.inmemory import InMemoryDocumentIndex
+from goldenretriever.retriever.golden_retriever import GoldenRetriever
 
 
 def clean_and_extract_spans(text):

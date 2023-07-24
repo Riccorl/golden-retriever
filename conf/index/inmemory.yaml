@@ -1,4 +1,4 @@
-_target_: goldenretriever.models.indexers.inmemory.InMemoryDocumentIndex
+_target_: goldenretriever.retriever.indexers.inmemory.InMemoryDocumentIndex
 documents: ${data.shared_params.passages_path}
 device: cuda
 precision: 16

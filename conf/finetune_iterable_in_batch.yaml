@@ -112,6 +112,6 @@ train:
     utils_callbacks:
       - _target_: goldenretriever.callbacks.utils_callbacks.SaveRetrieverCallback
       - _target_: goldenretriever.callbacks.utils_callbacks.FreeUpIndexerVRAMCallback
-      - _target_: goldenretriever.callbacks.utils_callbacks.ResetModelCallback
-        conf: ${train.pretrain_ckpt_path}
+      # - _target_: goldenretriever.callbacks.utils_callbacks.ResetModelCallback
+      #   conf: ${train.pretrain_ckpt_path}
   
