@@ -33,7 +33,7 @@ class IndexerOutput:
 
 
 class BaseDocumentIndex:
-    CONFIG_NAME = "config.json"
+    CONFIG_NAME = "config.yaml"
     DOCUMENTS_FILE_NAME = "documents.json"
     EMBEDDINGS_FILE_NAME = "embeddings.pt"
 
@@ -258,7 +258,7 @@ class BaseDocumentIndex:
             # raise ValueError(f"Providing a model id is not supported yet.")
             model_archive = sapienzanlp_model_urls(model_name_or_dir_)
 
-        config_file_name = config_file_name or cls.EMBEDDINGS_FILE_NAME
+        config_file_name = config_file_name or cls.CONFIG_NAME
         document_file_name = document_file_name or cls.DOCUMENTS_FILE_NAME
         embedding_file_name = embedding_file_name or cls.EMBEDDINGS_FILE_NAME
 
@@ -274,6 +274,7 @@ class BaseDocumentIndex:
             raise FileNotFoundError(
                 f"Model configuration file not found at {config_path}."
             )
+        
         config = OmegaConf.load(config_path)
         pprint(OmegaConf.to_container(config), console=console_logger, expand_all=True)
 

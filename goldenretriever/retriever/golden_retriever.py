@@ -519,13 +519,17 @@ class GoldenRetrieverHF(torch.nn.Module):
         logger.info(
             f"Saving question encoder state to {output_dir / question_encoder_name}"
         )
+        self.question_encoder.register_for_auto_class()
         self.question_encoder.save_pretrained(output_dir / question_encoder_name)
+        self.question_tokenizer.register_for_auto_class()
         self.question_tokenizer.save_pretrained(output_dir / question_encoder_name)
-        if self.passage_encoder is not None:
+        if not self.passage_encoder_is_question_encoder:
             logger.info(
                 f"Saving passage encoder state to {output_dir / passage_encoder_name}"
             )
+            self.passage_encoder.register_for_auto_class()
             self.passage_encoder.save_pretrained(output_dir / passage_encoder_name)
+            self.passage_tokenizer.register_for_auto_class()
             self.passage_tokenizer.save_pretrained(output_dir / passage_encoder_name)
 
         if self.document_index is not None:
