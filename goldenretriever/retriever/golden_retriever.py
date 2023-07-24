@@ -210,13 +210,11 @@ class GoldenRetrieverHF(torch.nn.Module):
     @torch.inference_mode()
     def index(
         self,
-        # passages: List[str],
         batch_size: int = 32,
         num_workers: int = 4,
         max_length: Optional[int] = None,
         collate_fn: Optional[Callable] = None,
         force_reindex: bool = False,
-        use_ort: bool = False,
         compute_on_cpu: bool = False,
         precision: Optional[Union[str, int]] = None,
     ):
@@ -234,8 +232,6 @@ class GoldenRetrieverHF(torch.nn.Module):
                 The collate function to use for the indexing.
             force_reindex (`bool`):
                 Whether to force reindexing even if the passages are already indexed.
-            use_ort (`bool`):
-                Whether to use onnxruntime for the indexing.
             move_index_to_cpu (`bool`):
                 Whether to move the index to the CPU after the indexing.
             precision (`Optional[Union[str, int]]`):
@@ -501,9 +497,14 @@ class GoldenRetrieverHF(torch.nn.Module):
         Args:
             output_dir (`str`):
                 The directory to save the retriever to.
-            config (`Optional[Dict[str, Any]]`, `optional`):
-                The configuration to save. If `None`, the current configuration of the retriever will be
-                saved. Defaults to `None`.
+            question_encoder_name (`Optional[str]`):
+                The name of the question encoder.
+            passage_encoder_name (`Optional[str]`):
+                The name of the passage encoder.
+            document_index_name (`Optional[str]`):
+                The name of the document index.
+            push_to_hub (`bool`):
+                Whether to push the model to the hub.
         """
 
         # create the output directory

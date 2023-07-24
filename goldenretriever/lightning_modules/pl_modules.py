@@ -14,6 +14,7 @@ class GoldenRetrieverPLModule(pl.LightningModule):
         self,
         model: Union[torch.nn.Module, DictConfig],
         optimizer: Union[torch.optim.Optimizer, DictConfig],
+        lr_scheduler: Union[torch.optim.lr_scheduler.LRScheduler, DictConfig] = None,
         labels: Labels = None,
         *args,
         **kwargs,
@@ -27,6 +28,7 @@ class GoldenRetrieverPLModule(pl.LightningModule):
             self.model = model
 
         self.optimizer_config = optimizer
+        self.lr_scheduler_config = lr_scheduler
 
     def forward(self, **kwargs) -> dict:
         """
@@ -108,13 +110,19 @@ class GoldenRetrieverPLModule(pl.LightningModule):
         else:
             optimizer = self.optimizer_config
 
-        if "lr_scheduler" not in self.hparams or not self.hparams.lr_scheduler:
+        if self.lr_scheduler_config is None:
             return optimizer
 
+        if isinstance(self.lr_scheduler_config, DictConfig):
+            lr_scheduler = hydra.utils.instantiate(
+                self.lr_scheduler_config, optimizer=optimizer
+            )
+
+        # if "lr_scheduler" not in self.hparams or not self.hparams.lr_scheduler:
+        #     return optimizer
+
         lr_scheduler_config = {
-            "scheduler": hydra.utils.instantiate(
-                self.hparams.lr_scheduler, optimizer=optimizer
-            ),
+            "scheduler": lr_scheduler,
             "interval": "step",
             "frequency": 1,
         }

@@ -38,6 +38,11 @@ from goldenretriever.lightning_modules.pl_data_modules import (
 from goldenretriever.lightning_modules.pl_modules import GoldenRetrieverPLModule
 from goldenretriever.retriever.golden_retriever import GoldenRetriever
 from goldenretriever.retriever.indexers.base import BaseDocumentIndex
+from goldenretriever.retriever.modules.optim import RAdamW
+
+import transformers
+
+from goldenretriever.retriever.modules.scheduler import LinearSchedulerWithWarmup
 
 logger = get_console_logger()
 
@@ -52,11 +57,11 @@ class Trainer:
         test_dataset: Optional[
             Union[GoldenRetrieverDataset, list[GoldenRetrieverDataset]]
         ] = None,
-        optimizer: str = "radamw",
+        optimizer: torch.optim.Optimizer = RAdamW,
         lr: float = 1e-5,
         weight_decay: float = 0.01,
+        lr_scheduler: torch.optim.lr_scheduler.LRScheduler = LinearSchedulerWithWarmup,
         num_warmup_steps: int = 0,
-        lr_scheduler: str = "linear",
         callbacks: Optional[list] = None,
         num_workers: int = 4,
         accelerator: str = "auto",
@@ -103,6 +108,18 @@ class Trainer:
         seed: int = 42,
         float32_matmul_precision: str = "medium",
     ):
+        if max_epochs is None and max_steps is None:
+            raise ValueError(
+                "Either `max_epochs` or `max_steps` should be specified in the trainer configuration"
+            )
+
+        if max_epochs is not None and max_steps is not None:
+            logger.log(
+                f"Both `max_epochs` and `max_steps` are specified in the trainer configuration. "
+                f"Will use `max_epochs` for the number of training steps"
+            )
+            max_steps = None
+
         # reproducibility
         pl.seed_everything(seed)
         # set the precision of matmul operations
@@ -126,11 +143,40 @@ class Trainer:
             num_workers=num_workers,
         )
 
+        if max_epochs is not None:
+            logger.log(f"Number of training epochs: {max_epochs}")
+            max_steps = len(self.lightining_datamodule.train_dataloader()) * max_epochs
+
+        # Optimizer declaration
+        # check if it is the class or the instance
+        if isinstance(optimizer, type):
+            self.optimizer = optimizer(
+                params=retriever.parameters(), lr=lr, weight_decay=weight_decay
+            )
+        else:
+            self.optimizer = optimizer
+
+        # LR Scheduler declaration
+        # check if it is the class, the instance or a function
+        self.lr_scheduler: Optional[torch.optim.lr_scheduler.LRScheduler] = None
+        if lr_scheduler is not None:
+            if isinstance(lr_scheduler, type):
+                self.lr_scheduler = lr_scheduler(
+                    optimizer=optimizer,
+                    num_warmup_steps=num_warmup_steps,
+                    num_training_steps=max_steps,
+                )
+            else:
+                self.lr_scheduler = lr_scheduler
+
         # lightning module declaration
-        self.lightining_module = GoldenRetrieverPLModule(model=retriever)
+        self.lightining_module = GoldenRetrieverPLModule(
+            model=retriever, optimizer=self.optimizer, lr_scheduler=self.lr_scheduler
+        )
 
         # callbacks declaration
-        self.callbacks_store = [ModelSummary(max_depth=2)]
+        self.callbacks_store = callbacks or []
+        self.callbacks_store.append(ModelSummary(max_depth=2))
 
         # metric to monitor
         if isinstance(top_ks, int):
@@ -218,7 +264,7 @@ class Trainer:
         self.prediction_callback = GoldenRetrieverPredictionCallback(
             k=top_k,
             batch_size=prediction_batch_size,
-            precision=16,
+            precision=precision,
             other_callbacks=other_callbacks_for_prediction,
         )
         self.callbacks_store.append(self.prediction_callback)
@@ -232,7 +278,7 @@ class Trainer:
             self.hard_negatives_callback = NegativeAugmentationCallback(
                 k=top_k,
                 batch_size=prediction_batch_size,
-                precision=16,
+                precision=precision,
                 stages=["validate"],
                 metrics_to_monitor=metrics_to_monitor,
                 threshold=hard_negatives_threshold,
@@ -248,6 +294,24 @@ class Trainer:
         # utils callback
         self.callbacks_store.append(
             SaveRetrieverCallback(), FreeUpIndexerVRAMCallback()
+        )
+
+        logger.log(f"Instantiating the Trainer")
+        self.trainer = pl.Trainer(
+            accelerator=accelerator,
+            devices=devices,
+            num_nodes=num_nodes,
+            strategy=strategy,
+            accumulate_grad_batches=accumulate_grad_batches,
+            gradient_clip_val=gradient_clip_val,
+            val_check_interval=val_check_interval,
+            check_val_every_n_epoch=check_val_every_n_epoch,
+            deterministic=deterministic,
+            fast_dev_run=fast_dev_run,
+            precision=precision,
+            reload_dataloaders_every_n_epochs=reload_dataloaders_every_n_epochs,
+            callbacks=self.callbacks_store,
+            logger=self.wandb_logger,
         )
 
     def train(self):
