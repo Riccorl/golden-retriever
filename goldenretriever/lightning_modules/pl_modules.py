@@ -69,37 +69,25 @@ class GoldenRetrieverPLModule(pl.LightningModule):
         )
 
     def configure_optimizers(self):
-        if "grouped_parameters" in self.hparams and self.hparams.grouped_parameters:
-            param_optimizer = list(self.named_parameters())
-            no_decay = ["bias", "LayerNorm.bias", "LayerNorm.weight"]
-            optimizer_grouped_parameters = [
-                # TODO: parametrize this stuff
-                {
-                    "params": [
-                        p for n, p in param_optimizer if "language_model" not in n
-                    ],
-                    "weight_decay": self.hparams.optimizer.weight_decay,
-                    "lr": 1e-4,
-                },
-                {
-                    "params": [
-                        p
-                        for n, p in param_optimizer
-                        if "language_model" in n and not any(nd in n for nd in no_decay)
-                    ],
-                    "weight_decay": self.hparams.optimizer.weight_decay,
-                },
-                {
-                    "params": [
-                        p
-                        for n, p in param_optimizer
-                        if "language_model" in n and any(nd in n for nd in no_decay)
-                    ],
-                    "weight_decay": 0.0,
-                },
-            ]
-        else:
-            optimizer_grouped_parameters = self.parameters()
+        no_decay = ["bias", "LayerNorm.bias", "LayerNorm.weight"]
+        optimizer_grouped_parameters = [
+            {
+                "params": [
+                    p
+                    for n, p in self.model.named_parameters()
+                    if not any(nd in n for nd in no_decay)
+                ],
+                "weight_decay": self.hparams.optimizer.weight_decay,
+            },
+            {
+                "params": [
+                    p
+                    for n, p in self.model.named_parameters()
+                    if any(nd in n for nd in no_decay)
+                ],
+                "weight_decay": 0.0,
+            },
+        ]
 
         if isinstance(self.optimizer_config, DictConfig):
             optimizer = hydra.utils.instantiate(
@@ -117,9 +105,6 @@ class GoldenRetrieverPLModule(pl.LightningModule):
             lr_scheduler = hydra.utils.instantiate(
                 self.lr_scheduler_config, optimizer=optimizer
             )
-
-        # if "lr_scheduler" not in self.hparams or not self.hparams.lr_scheduler:
-        #     return optimizer
 
         lr_scheduler_config = {
             "scheduler": lr_scheduler,

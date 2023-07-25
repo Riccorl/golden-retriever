@@ -4,6 +4,8 @@ import torch
 import transformers as tr
 from transformers.activations import GELUActivation
 
+from goldenretriever.common.utils import is_package_available
+
 # check if ORT is available
 if is_package_available("onnxruntime"):
     from optimum.onnxruntime import ORTModelForFeatureExtraction

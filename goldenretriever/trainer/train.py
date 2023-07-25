@@ -315,70 +315,7 @@ class Trainer:
         )
 
     def train(self):
-        self.pl_datamodule.setup("fit")
-
-        # count the number of training steps
-        if max_epochs is not None and max_epochs > 0:
-            num_training_steps = len(self.pl_datamodule.train_dataloader()) * max_epochs
-            if max_steps is not None and max_steps > 0:
-                logger.log(
-                    f"Both `max_epochs` and `max_steps` are specified in the trainer configuration. "
-                    f"Will use `max_epochs` for the number of training steps"
-                )
-                max_steps = None
-        elif max_steps is not None and max_steps > 0:
-            num_training_steps = max_steps
-            max_epochs = None
-        else:
-            raise ValueError(
-                "Either `max_epochs` or `max_steps` should be specified in the trainer configuration"
-            )
-        logger.log(f"Expected number of training steps: {num_training_steps}")
-
-        if self.lr_scheduler:
-            # set the number of warmup steps as x% of the total number of training steps
-            if self.lr_scheduler.num_warmup_steps is None:
-                if warmup_steps_ratio is not None:
-                    self.lr_scheduler.num_warmup_steps = int(
-                        self.lr_scheduler.num_training_steps * warmup_steps_ratio
-                    )
-                else:
-                    self.lr_scheduler.num_warmup_steps = 0
-            logger.log(f"Number of warmup steps: {self.lr_scheduler.num_warmup_steps}")
-
-        logger.log(f"Instantiating the Model")
-        if pl_module is None and self.pl_module is None:
-            raise ValueError(
-                "Either `pl_module` or `self.pl_module` should be provided"
-            )
-        pl_module: GoldenRetrieverPLModule = pl_module or self.pl_module
-        if pretrain_ckpt_path is not None:
-            logger.log(f"Loading pretrained checkpoint from {pretrain_ckpt_path}")
-            pl_module.load_state_dict(torch.load(pretrain_ckpt_path)["state_dict"])
-
-        if compile:
-            try:
-                pl_module = torch.compile(pl_module, backend="inductor")
-            except Exception as e:
-                logger.log(
-                    f"Failed to compile the model, you may need to install PyTorch 2.0"
-                )
-
-        experiment_logger: Optional[WandbLogger] = None
-        experiment_path: Optional[Path] = None
-        if conf.logging.log:
-            logger.log(f"Instantiating Wandb Logger")
-            experiment_logger = hydra.utils.instantiate(conf.logging.wandb_arg)
-            if pl_module is not None:
-                # it may happen that the model is not instantiated if we are only testing
-                # in that case, we don't need to watch the model
-                experiment_logger.watch(pl_module, **conf.logging.watch)
-            experiment_path = Path(experiment_logger.experiment.dir)
-            # Store the YaML config separately into the wandb dir
-            yaml_conf: str = OmegaConf.to_yaml(cfg=conf)
-            (experiment_path / "hparams.yaml").write_text(yaml_conf)
-            # Add a Learning Rate Monitor callback to log the learning rate
-            callbacks_store.append(LearningRateMonitor(logging_interval="step"))
+        pass
 
     def test():
         pass

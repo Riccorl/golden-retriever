@@ -161,9 +161,9 @@ class GoldenRetrieverHF(torch.nn.Module):
             )
 
         if question_encodings is None:
-            question_encodings = self.question_encoder(**questions)
+            question_encodings = self.question_encoder(**questions).pooler_output
         if passages_encodings is None:
-            passages_encodings = self.passage_encoder(**passages)
+            passages_encodings = self.passage_encoder(**passages).pooler_output
 
         if passages_per_question is not None:
             # multiply each question encoding with a passages_per_question encodings
@@ -340,7 +340,7 @@ class GoldenRetrieverHF(torch.nn.Module):
             )
         )
         with autocast_pssg_mngr:
-            question_encodings = self.question_encoder(**model_inputs)
+            question_encodings = self.question_encoder(**model_inputs).pooler_output
 
         return self.document_index.search(question_encodings, k)
 
@@ -522,7 +522,6 @@ class GoldenRetrieverHF(torch.nn.Module):
         )
         self.question_encoder.register_for_auto_class()
         self.question_encoder.save_pretrained(output_dir / question_encoder_name)
-        self.question_tokenizer.register_for_auto_class()
         self.question_tokenizer.save_pretrained(output_dir / question_encoder_name)
         if not self.passage_encoder_is_question_encoder:
             logger.info(
@@ -530,7 +529,6 @@ class GoldenRetrieverHF(torch.nn.Module):
             )
             self.passage_encoder.register_for_auto_class()
             self.passage_encoder.save_pretrained(output_dir / passage_encoder_name)
-            self.passage_tokenizer.register_for_auto_class()
             self.passage_tokenizer.save_pretrained(output_dir / passage_encoder_name)
 
         if self.document_index is not None:

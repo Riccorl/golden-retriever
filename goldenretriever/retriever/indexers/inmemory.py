@@ -175,7 +175,7 @@ class InMemoryDocumentIndex(BaseDocumentIndex):
                 # Move the batch to the device
                 batch: ModelInputs = batch.to(encoder_device)
                 # Compute the passage embeddings
-                passage_outs = encoder(**batch)
+                passage_outs = encoder(**batch).pooler_output
                 # Append the passage embeddings to the list
                 if self.device == "cpu":
                     passage_embeddings.extend([c.detach().cpu() for c in passage_outs])
