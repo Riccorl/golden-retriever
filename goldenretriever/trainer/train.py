@@ -105,6 +105,7 @@ class Trainer:
         hard_negatives_threshold: float = 0.0,
         metrics_to_monitor_for_hard_negatives: Optional[str] = None,
         mine_hard_negatives_with_probability: float = 1.0,
+        # other parameters
         seed: int = 42,
         float32_matmul_precision: str = "medium",
     ):
@@ -315,10 +316,46 @@ class Trainer:
         )
 
     def train(self):
-        pass
+        self.trainer.fit(self.lightining_module, datamodule=self.lightining_datamodule)
 
-    def test():
-        pass
+    def test(
+        self,
+        lightining_module: Optional[GoldenRetrieverPLModule] = None,
+        checkpoint_path: Optional[Union[str, os.PathLike]] = None,
+        lightining_datamodule: Optional[GoldenRetrieverPLDataModule] = None,
+    ):
+        if lightining_module is not None:
+            self.lightining_module = lightining_module
+        else:
+            if self.fast_dev_run:
+                best_lightining_module = self.lightining_module
+            else:
+                # load best model for testing
+                if checkpoint_path is not None:
+                    best_model_path = checkpoint_path
+                elif self.checkpoint_path:
+                    best_model_path = self.checkpoint_path
+                elif self.model_checkpoint_callback:
+                    best_model_path = self.model_checkpoint_callback.best_model_path
+                else:
+                    raise ValueError(
+                        "Either `checkpoint_path` or `model_checkpoint_callback` should "
+                        "be provided to the trainer"
+                    )
+                logger.log(f"Loading best model from {best_model_path}")
+
+                try:
+                    best_lightining_module = (
+                        GoldenRetrieverPLModule.load_from_checkpoint(best_model_path)
+                    )
+                except Exception as e:
+                    logger.log(f"Failed to load the model from checkpoint: {e}")
+                    logger.log(f"Using last model instead")
+                    best_lightining_module = self.lightining_module
+
+        lightining_datamodule = lightining_datamodule or self.lightining_datamodule
+        # module test
+        self.trainer.test(best_lightining_module, datamodule=lightining_datamodule)
 
 
 def train(conf: omegaconf.DictConfig) -> None:

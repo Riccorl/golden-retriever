@@ -135,27 +135,6 @@ class GoldenRetrieverDataset:
         else:
             self.data: Dataset = data
 
-        # create a manager for the passages
-        # self.passage_manager = PassageManager()
-        # if passages is not None:
-        #     if isinstance(passages, list):
-        #         passage_to_add = passages
-        #     else:
-        #         # read passages from file if provided
-        #         logger.info(f"Reading passages from {passages}")
-        #         with open(self.project_folder / passages, "r") as f:
-        #             passage_to_add = [line.strip() for line in f.readlines()]
-        #     self.passage_manager.add_passages(passage_to_add)
-
-        # # passage_batch_size cannot be greater than the number of passages
-        # if self.passage_batch_size > len(self.passage_manager):
-        #     logger.info(
-        #         f"Your passage_batch_size ({passage_batch_size}) "
-        #         f"is greater than the number of passages ({len(self.passage_manager)}). "
-        #         f"Setting passage_batch_size to {len(self.passage_manager)}."
-        #     )
-        #     self.passage_batch_size = len(self.passage_manager)
-
         self.hn_manager: Optional[HardNegativesManager] = None
 
         # keep track of how many times the dataset has been iterated over
@@ -394,12 +373,6 @@ class GoldenRetrieverDataset:
 
     def shuffle_data(self, seed: int = 42):
         self.data = self.data.shuffle(seed=seed)
-
-    # @property
-    # def passages(self):
-    #     if self.passage_manager is None:
-    #         return []
-    #     return list(self.passage_manager.get_passages().keys())
 
 
 class InBatchNegativesDataset(GoldenRetrieverDataset):
