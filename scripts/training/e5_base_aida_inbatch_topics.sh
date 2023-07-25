@@ -7,7 +7,7 @@ bash scripts/train.sh \
     --wandb golden-retriever-aida \
     -m 24000 \
     "data=aida_dataset" \
-    "model_name=e5-base-aida-inbatch-topics-from-blink-hf" \
+    "model_name=e5-base-aida-inbatch-topics-dual-from-blink-hf" \
     "data.shared_params.use_topics=True" \
     "data.shared_params.passage_batch_size=400" \
     "data.shared_params.passages_path=/home/ric/projects/golden-retriever-v2/data/dpr-like/el/definitions.txt" \

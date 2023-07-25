@@ -466,6 +466,7 @@ class GoldenRetriever(torch.nn.Module):
         passage_encoder_name: Optional[str] = None,
         document_index_name: Optional[str] = None,
         push_to_hub: bool = False,
+        **kwargs,
     ):
         """
         Save the retriever to a directory.
@@ -488,7 +489,7 @@ class GoldenRetriever(torch.nn.Module):
         output_dir.mkdir(parents=True, exist_ok=True)
 
         logger.info(f"Saving retriever to {output_dir}")
-
+        
         question_encoder_name = question_encoder_name or "question_encoder"
         passage_encoder_name = passage_encoder_name or "passage_encoder"
         document_index_name = document_index_name or "document_index"
@@ -496,19 +497,29 @@ class GoldenRetriever(torch.nn.Module):
         logger.info(
             f"Saving question encoder state to {output_dir / question_encoder_name}"
         )
+        # self.question_encoder.config._name_or_path = question_encoder_name
         self.question_encoder.register_for_auto_class()
-        self.question_encoder.save_pretrained(output_dir / question_encoder_name)
-        self.question_tokenizer.save_pretrained(output_dir / question_encoder_name)
+        self.question_encoder.save_pretrained(
+            output_dir / question_encoder_name, push_to_hub=push_to_hub, **kwargs
+        )
+        self.question_tokenizer.save_pretrained(
+            output_dir / question_encoder_name, push_to_hub=push_to_hub, **kwargs
+        )
         if not self.passage_encoder_is_question_encoder:
             logger.info(
                 f"Saving passage encoder state to {output_dir / passage_encoder_name}"
             )
+            # self.passage_encoder.config._name_or_path = passage_encoder_name
             self.passage_encoder.register_for_auto_class()
-            self.passage_encoder.save_pretrained(output_dir / passage_encoder_name)
-            self.passage_tokenizer.save_pretrained(output_dir / passage_encoder_name)
+            self.passage_encoder.save_pretrained(
+                output_dir / passage_encoder_name, push_to_hub=push_to_hub, **kwargs
+            )
+            self.passage_tokenizer.save_pretrained(
+                output_dir / passage_encoder_name, push_to_hub=push_to_hub, **kwargs
+            )
 
         if self.document_index is not None:
             # save the indexer
-            self.document_index.save_pretrained(output_dir / document_index_name)
+            self.document_index.save_pretrained(output_dir / document_index_name, **kwargs)
 
         logger.info("Saving retriever to disk done.")

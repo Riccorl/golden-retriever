@@ -57,13 +57,13 @@ class Trainer:
         test_dataset: Optional[
             Union[GoldenRetrieverDataset, list[GoldenRetrieverDataset]]
         ] = None,
+        num_workers: int = 4,
         optimizer: torch.optim.Optimizer = RAdamW,
         lr: float = 1e-5,
         weight_decay: float = 0.01,
         lr_scheduler: torch.optim.lr_scheduler.LRScheduler = LinearSchedulerWithWarmup,
         num_warmup_steps: int = 0,
         callbacks: Optional[list] = None,
-        num_workers: int = 4,
         accelerator: str = "auto",
         devices: int = 1,
         num_nodes: int = 1,
@@ -108,118 +108,224 @@ class Trainer:
         # other parameters
         seed: int = 42,
         float32_matmul_precision: str = "medium",
+        **kwargs,
     ):
-        if max_epochs is None and max_steps is None:
+        # put all the parameters in the class
+        self.retriever = retriever
+        self.index = index
+        # datasets
+        self.train_dataset = train_dataset
+        self.val_dataset = val_dataset
+        self.test_dataset = test_dataset
+        self.num_workers = num_workers
+        # trainer parameters
+        self.optimizer = optimizer
+        self.lr = lr
+        self.weight_decay = weight_decay
+        self.lr_scheduler = lr_scheduler
+        self.num_warmup_steps = num_warmup_steps
+        self.callbacks = callbacks
+        self.accelerator = accelerator
+        self.devices = devices
+        self.num_nodes = num_nodes
+        self.strategy = strategy
+        self.accumulate_grad_batches = accumulate_grad_batches
+        self.gradient_clip_val = gradient_clip_val
+        self.val_check_interval = val_check_interval
+        self.check_val_every_n_epoch = check_val_every_n_epoch
+        self.max_steps = max_steps
+        self.max_epochs = max_epochs
+        # self.checkpoint_path = checkpoint_path
+        self.deterministic = deterministic
+        self.fast_dev_run = fast_dev_run
+        self.precision = precision
+        self.reload_dataloaders_every_n_epochs = reload_dataloaders_every_n_epochs
+        self.top_ks = top_ks
+        # early stopping parameters
+        self.early_stopping = early_stopping
+        self.early_stopping_patience = early_stopping_patience
+        # wandb logger parameters
+        self.log_to_wandb = log_to_wandb
+        self.wandb_entity = wandb_entity
+        self.wandb_experiment_name = wandb_experiment_name
+        self.wandb_project_name = wandb_project_name
+        self.wandb_save_dir = wandb_save_dir
+        self.wandb_log_model = wandb_log_model
+        self.wandb_offline_mode = wandb_offline_mode
+        self.wandb_watch = wandb_watch
+        # checkpoint parameters
+        self.model_checkpointing = model_checkpointing
+        self.chekpoint_dir = chekpoint_dir
+        self.checkpoint_filename = checkpoint_filename
+        self.save_top_k = save_top_k
+        self.save_last = save_last
+        # prediction callback parameters
+        self.prediction_batch_size = prediction_batch_size
+        # hard negatives callback parameters
+        self.max_hard_negatives_to_mine = max_hard_negatives_to_mine
+        self.hard_negatives_threshold = hard_negatives_threshold
+        self.metrics_to_monitor_for_hard_negatives = (
+            metrics_to_monitor_for_hard_negatives
+        )
+        self.mine_hard_negatives_with_probability = mine_hard_negatives_with_probability
+        # other parameters
+        self.seed = seed
+        self.float32_matmul_precision = float32_matmul_precision
+
+        if self.max_epochs is None and self.max_steps is None:
             raise ValueError(
                 "Either `max_epochs` or `max_steps` should be specified in the trainer configuration"
             )
 
-        if max_epochs is not None and max_steps is not None:
+        if self.max_epochs is not None and self.max_steps is not None:
             logger.log(
                 f"Both `max_epochs` and `max_steps` are specified in the trainer configuration. "
                 f"Will use `max_epochs` for the number of training steps"
             )
-            max_steps = None
+            self.max_steps = None
 
         # reproducibility
-        pl.seed_everything(seed)
+        pl.seed_everything(self.seed)
         # set the precision of matmul operations
-        torch.set_float32_matmul_precision(float32_matmul_precision)
+        torch.set_float32_matmul_precision(self.float32_matmul_precision)
 
         # lightning data module declaration
-        if isinstance(val_dataset, GoldenRetrieverDataset):
-            val_dataset = [val_dataset]
-        if test_dataset is not None and isinstance(
-            test_dataset, GoldenRetrieverDataset
-        ):
-            test_dataset = [test_dataset]
+        self.lightining_datamodule = self.configure_lightning_datamodule()
 
-        # and to the retriever
-        retriever.index = index
+        if self.max_epochs is not None:
+            logger.log(f"Number of training epochs: {self.max_epochs}")
+            self.max_steps = (
+                len(self.lightining_datamodule.train_dataloader()) * self.max_epochs
+            )
 
-        self.lightining_datamodule = GoldenRetrieverPLDataModule(
-            train_dataset=train_dataset,
-            val_datasets=val_dataset,
-            test_datasets=test_dataset,
-            num_workers=num_workers,
+        # optimizer declaration
+        self.optimizer, self.lr_scheduler = self.configure_optimizers()
+
+        # lightning module declaration
+        self.lightining_module = self.configure_lightning_module()
+
+        # callbacks declaration
+        self.callbacks_store: List[pl.Callback] = self.configure_callbacks()
+
+        logger.log(f"Instantiating the Trainer")
+        self.trainer = pl.Trainer(
+            accelerator=self.accelerator,
+            devices=self.devices,
+            num_nodes=self.num_nodes,
+            strategy=self.strategy,
+            accumulate_grad_batches=self.accumulate_grad_batches,
+            gradient_clip_val=self.gradient_clip_val,
+            val_check_interval=self.val_check_interval,
+            check_val_every_n_epoch=self.check_val_every_n_epoch,
+            deterministic=self.deterministic,
+            fast_dev_run=self.fast_dev_run,
+            precision=self.precision,
+            reload_dataloaders_every_n_epochs=self.reload_dataloaders_every_n_epochs,
+            callbacks=self.callbacks_store,
+            logger=self.wandb_logger,
         )
 
-        if max_epochs is not None:
-            logger.log(f"Number of training epochs: {max_epochs}")
-            max_steps = len(self.lightining_datamodule.train_dataloader()) * max_epochs
+    def configure_lightning_datamodule(self, *args, **kwargs):
+        # lightning data module declaration
+        if isinstance(self.val_dataset, GoldenRetrieverDataset):
+            self.val_dataset = [self.val_dataset]
+        if self.test_dataset is not None and isinstance(
+            self.test_dataset, GoldenRetrieverDataset
+        ):
+            self.test_dataset = [self.test_dataset]
 
-        # Optimizer declaration
-        # check if it is the class or the instance
-        if isinstance(optimizer, type):
-            self.optimizer = optimizer(
-                params=retriever.parameters(), lr=lr, weight_decay=weight_decay
-            )
-        else:
-            self.optimizer = optimizer
+        self.lightining_datamodule = GoldenRetrieverPLDataModule(
+            train_dataset=self.train_dataset,
+            val_datasets=self.val_dataset,
+            test_datasets=self.test_dataset,
+            num_workers=self.num_workers,
+        )
+        return self.lightining_datamodule
 
-        # LR Scheduler declaration
-        # check if it is the class, the instance or a function
-        self.lr_scheduler: Optional[torch.optim.lr_scheduler.LRScheduler] = None
-        if lr_scheduler is not None:
-            if isinstance(lr_scheduler, type):
-                self.lr_scheduler = lr_scheduler(
-                    optimizer=optimizer,
-                    num_warmup_steps=num_warmup_steps,
-                    num_training_steps=max_steps,
-                )
-            else:
-                self.lr_scheduler = lr_scheduler
+    def configure_lightning_module(self, *args, **kwargs):
+        # and to the retriever
+        self.retriever.index = self.index
 
         # lightning module declaration
         self.lightining_module = GoldenRetrieverPLModule(
-            model=retriever, optimizer=self.optimizer, lr_scheduler=self.lr_scheduler
+            model=self.retriever,
+            optimizer=self.optimizer,
+            lr_scheduler=self.lr_scheduler,
         )
 
+        return self.lightining_module
+
+    def configure_optimizers(self, *args, **kwargs):
+        # check if it is the class or the instance
+        if isinstance(self.optimizer, type):
+            self.optimizer = self.optimizer(
+                params=self.retriever.parameters(),
+                lr=self.lr,
+                weight_decay=self.weight_decay,
+            )
+        else:
+            self.optimizer = self.optimizer
+
+        # LR Scheduler declaration
+        # check if it is the class, the instance or a function
+        if self.lr_scheduler is not None:
+            if isinstance(self.lr_scheduler, type):
+                self.lr_scheduler = self.lr_scheduler(
+                    optimizer=self.optimizer,
+                    num_warmup_steps=self.num_warmup_steps,
+                    num_training_steps=self.max_steps,
+                )
+
+        return self.optimizer, self.lr_scheduler
+
+    def configure_callbacks(self, *args, **kwargs):
         # callbacks declaration
-        self.callbacks_store = callbacks or []
+        self.callbacks_store = self.callbacks or []
         self.callbacks_store.append(ModelSummary(max_depth=2))
 
         # metric to monitor
-        if isinstance(top_ks, int):
-            top_ks = [top_ks]
+        if isinstance(self.top_ks, int):
+            self.top_ks = [self.top_ks]
         # order the top_ks in descending order
-        top_ks = sorted(top_ks, reverse=True)
+        self.top_ks = sorted(self.top_ks, reverse=True)
         # get the max top_k to monitor
-        top_k = top_ks[0]
-        metric_to_monitor = f"validate_recall@{top_k}"
-        monitor_mode = "max"
+        self.top_k = self.top_ks[0]
+        self.metric_to_monitor = f"validate_recall@{self.top_k}"
+        self.monitor_mode = "max"
 
         # early stopping callback if specified
         self.early_stopping_callback: Optional[EarlyStopping] = None
-        if early_stopping:
-            logger.log(f"Eanbling Early Stopping, patience: {early_stopping_patience}")
+        if self.early_stopping:
+            logger.log(
+                f"Eanbling Early Stopping, patience: {self.early_stopping_patience}"
+            )
             self.early_stopping_callback = EarlyStopping(
-                monitor=metric_to_monitor,
-                mode=monitor_mode,
-                patience=early_stopping_patience,
+                monitor=self.metric_to_monitor,
+                mode=self.monitor_mode,
+                patience=self.early_stopping_patience,
             )
             self.callbacks_store.append(self.early_stopping_callback)
 
         # wandb logger if specified
         self.wandb_logger: Optional[WandbLogger] = None
         self.experiment_path: Optional[Path] = None
-        if log_to_wandb:
+        if self.log_to_wandb:
             # define some default values for the wandb logger
-            if wandb_project_name is None:
-                wandb_project_name = "goldenretriever"
-            if wandb_save_dir is None:
-                wandb_save_dir = "./"
+            if self.wandb_project_name is None:
+                self.wandb_project_name = "goldenretriever"
+            if self.wandb_save_dir is None:
+                self.wandb_save_dir = "./"
             logger.log(f"Instantiating Wandb Logger")
             self.wandb_logger = WandbLogger(
-                entity=wandb_entity,
-                project=wandb_project_name,
-                name=wandb_experiment_name,
-                save_dir=wandb_save_dir,
-                log_model=wandb_log_model,
-                mode="offline" if wandb_offline_mode else "online",
+                entity=self.wandb_entity,
+                project=self.wandb_project_name,
+                name=self.wandb_experiment_name,
+                save_dir=self.wandb_save_dir,
+                log_model=self.wandb_log_model,
+                mode="offline" if self.wandb_offline_mode else "online",
             )
-            self.wandb_logger.watch(self.lightining_module, log=wandb_watch)
-            experiment_path = Path(self.wandb_logger.experiment.dir)
+            self.wandb_logger.watch(self.lightining_module, log=self.wandb_watch)
+            self.experiment_path = Path(self.wandb_logger.experiment.dir)
             # Store the YaML config separately into the wandb dir
             # yaml_conf: str = OmegaConf.to_yaml(cfg=conf)
             # (experiment_path / "hparams.yaml").write_text(yaml_conf)
@@ -228,66 +334,71 @@ class Trainer:
 
         # model checkpoint callback if specified
         self.model_checkpoint_callback: Optional[ModelCheckpoint] = None
-        if model_checkpointing:
+        if self.model_checkpointing:
             logger.log(f"Enabling Model Checkpointing")
-            if chekpoint_dir is None:
-                chekpoint_dir = (
-                    experiment_path / "checkpoints" if experiment_path else None
+            if self.chekpoint_dir is None:
+                self.chekpoint_dir = (
+                    self.experiment_path / "checkpoints"
+                    if self.experiment_path
+                    else None
                 )
             if checkpoint_filename is None:
                 checkpoint_filename = (
                     "checkpoint-validate_recall@"
-                    + top_k
+                    + self.top_k
                     + "_{validate_recall@"
-                    + top_k
+                    + self.top_k
                     + ":.4f}-epoch_{epoch:02d}"
                 )
             self.model_checkpoint_callback = ModelCheckpoint(
-                monitor=metric_to_monitor,
-                mode=monitor_mode,
+                monitor=self.metric_to_monitor,
+                mode=self.monitor_mode,
                 verbose=True,
-                save_top_k=save_top_k,
-                save_last=save_last,
-                filename=checkpoint_filename,
-                dirpath=chekpoint_dir,
+                save_top_k=self.save_top_k,
+                save_last=self.save_last,
+                filename=self.checkpoint_filename,
+                dirpath=self.chekpoint_dir,
                 auto_insert_metric_name=False,
             )
             self.callbacks_store.append(self.model_checkpoint_callback)
 
         # prediction callback
-        other_callbacks_for_prediction = [
-            RecallAtKEvaluationCallback(k) for k in top_ks
+        self.other_callbacks_for_prediction = [
+            RecallAtKEvaluationCallback(k) for k in self.top_ks
         ]
-        other_callbacks_for_prediction += [
-            AvgRankingEvaluationCallback(k=top_k, verbose=True, prefix="train"),
+        self.other_callbacks_for_prediction += [
+            AvgRankingEvaluationCallback(k=self.top_k, verbose=True, prefix="train"),
             SavePredictionsCallback(),
         ]
         self.prediction_callback = GoldenRetrieverPredictionCallback(
-            k=top_k,
-            batch_size=prediction_batch_size,
-            precision=precision,
-            other_callbacks=other_callbacks_for_prediction,
+            k=self.top_k,
+            batch_size=self.prediction_batch_size,
+            precision=self.precision,
+            other_callbacks=self.other_callbacks_for_prediction,
         )
         self.callbacks_store.append(self.prediction_callback)
 
         # hard negative mining callback
         self.hard_negatives_callback: Optional[NegativeAugmentationCallback] = None
-        if max_hard_negatives_to_mine > 0:
-            metrics_to_monitor = (
-                metrics_to_monitor_for_hard_negatives or f"validate_recall@{top_k}"
+        if self.max_hard_negatives_to_mine > 0:
+            self.metrics_to_monitor = (
+                self.metrics_to_monitor_for_hard_negatives
+                or f"validate_recall@{self.top_k}"
             )
             self.hard_negatives_callback = NegativeAugmentationCallback(
-                k=top_k,
-                batch_size=prediction_batch_size,
-                precision=precision,
+                k=self.top_k,
+                batch_size=self.prediction_batch_size,
+                precision=self.precision,
                 stages=["validate"],
-                metrics_to_monitor=metrics_to_monitor,
-                threshold=hard_negatives_threshold,
-                max_negatives=max_hard_negatives_to_mine,
-                add_with_probability=mine_hard_negatives_with_probability,
+                metrics_to_monitor=self.metrics_to_monitor,
+                threshold=self.hard_negatives_threshold,
+                max_negatives=self.max_hard_negatives_to_mine,
+                add_with_probability=self.mine_hard_negatives_with_probability,
                 refresh_every_n_epochs=1,
                 other_callbacks=[
-                    AvgRankingEvaluationCallback(k=top_k, verbose=True, prefix="train")
+                    AvgRankingEvaluationCallback(
+                        k=self.top_k, verbose=True, prefix="train"
+                    )
                 ],
             )
             self.callbacks_store.append(self.hard_negatives_callback)
@@ -295,24 +406,6 @@ class Trainer:
         # utils callback
         self.callbacks_store.append(
             SaveRetrieverCallback(), FreeUpIndexerVRAMCallback()
-        )
-
-        logger.log(f"Instantiating the Trainer")
-        self.trainer = pl.Trainer(
-            accelerator=accelerator,
-            devices=devices,
-            num_nodes=num_nodes,
-            strategy=strategy,
-            accumulate_grad_batches=accumulate_grad_batches,
-            gradient_clip_val=gradient_clip_val,
-            val_check_interval=val_check_interval,
-            check_val_every_n_epoch=check_val_every_n_epoch,
-            deterministic=deterministic,
-            fast_dev_run=fast_dev_run,
-            precision=precision,
-            reload_dataloaders_every_n_epochs=reload_dataloaders_every_n_epochs,
-            callbacks=self.callbacks_store,
-            logger=self.wandb_logger,
         )
 
     def train(self):

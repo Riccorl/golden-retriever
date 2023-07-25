@@ -187,6 +187,7 @@ class BaseDocumentIndex:
         config_file_name: Optional[str] = None,
         document_file_name: Optional[str] = None,
         embedding_file_name: Optional[str] = None,
+        **kwargs
     ):
         """
         Save the retriever to a directory.
