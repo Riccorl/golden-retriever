@@ -55,6 +55,9 @@ class GoldenRetriever(torch.nn.Module):
         document_index: Optional[Union[str, BaseDocumentIndex]] = None,
         question_tokenizer: Optional[Union[str, tr.PreTrainedTokenizer]] = None,
         passage_tokenizer: Optional[Union[str, tr.PreTrainedTokenizer]] = None,
+        device: Optional[Union[str, torch.device]] = None,
+        index_precision: Optional[Union[str, int]] = None,
+        index_device: Optional[Union[str, torch.device]] = None,
         *args,
         **kwargs,
     ):
@@ -63,7 +66,9 @@ class GoldenRetriever(torch.nn.Module):
         self.passage_encoder_is_question_encoder = False
         # question encoder model
         if isinstance(question_encoder, str):
-            question_encoder = GoldenRetrieverModel.from_pretrained(question_encoder)
+            question_encoder = GoldenRetrieverModel.from_pretrained(
+                question_encoder, **kwargs
+            )
         self.question_encoder = question_encoder
         if passage_encoder is None:
             # if no passage encoder is provided,
@@ -72,7 +77,9 @@ class GoldenRetriever(torch.nn.Module):
             # keep track of the fact that the passage encoder is the same as the question encoder
             self.passage_encoder_is_question_encoder = True
         if isinstance(passage_encoder, str):
-            passage_encoder = GoldenRetrieverModel.from_pretrained(passage_encoder)
+            passage_encoder = GoldenRetrieverModel.from_pretrained(
+                passage_encoder, **kwargs
+            )
         # passage encoder model
         self.passage_encoder = passage_encoder
 
@@ -81,12 +88,17 @@ class GoldenRetriever(torch.nn.Module):
 
         # indexer stuff
         if isinstance(document_index, str):
-            document_index = BaseDocumentIndex.from_pretrained(document_index)
+            document_index = BaseDocumentIndex.from_pretrained(
+                document_index, device=index_device, precision=index_precision, **kwargs
+            )
         self.document_index = document_index
 
         # lazy load the tokenizer for inference
         self._question_tokenizer = question_tokenizer
         self._passage_tokenizer = passage_tokenizer
+
+        # move the model to the device
+        self.to(device or torch.device("cpu"))
 
     def forward(
         self,
@@ -489,7 +501,7 @@ class GoldenRetriever(torch.nn.Module):
         output_dir.mkdir(parents=True, exist_ok=True)
 
         logger.info(f"Saving retriever to {output_dir}")
-        
+
         question_encoder_name = question_encoder_name or "question_encoder"
         passage_encoder_name = passage_encoder_name or "passage_encoder"
         document_index_name = document_index_name or "document_index"
@@ -520,6 +532,8 @@ class GoldenRetriever(torch.nn.Module):
 
         if self.document_index is not None:
             # save the indexer
-            self.document_index.save_pretrained(output_dir / document_index_name, **kwargs)
+            self.document_index.save_pretrained(
+                output_dir / document_index_name, **kwargs
+            )
 
         logger.info("Saving retriever to disk done.")

@@ -4,17 +4,14 @@ from pathlib import Path
 from typing import List, Optional, Union
 
 from fastapi import FastAPI, HTTPException
+from ray import serve
 
 from goldenretriever import GoldenRetriever
 from goldenretriever.common.log import get_logger
 from goldenretriever.data.utils import batch_generator
-from goldenretriever.serve.tokenizers import (
-    SpacyTokenizer,
-    WhitespaceTokenizer,
-)
+from goldenretriever.serve.tokenizers import SpacyTokenizer, WhitespaceTokenizer
 from goldenretriever.serve.utils import RayParameterManager, ServerParameterManager
 from goldenretriever.serve.window.manager import WindowManager
-from ray import serve
 
 logger = get_logger(__name__, level=logging.INFO)
 
@@ -46,7 +43,9 @@ app = FastAPI(
 class GoldenRetrieverServer:
     def __init__(
         self,
-        model_name_or_path: str,
+        question_encoder: str,
+        document_index: str,
+        passage_encoder: Optional[str] = None,
         top_k: int = 100,
         device: str = "cpu",
         index_device: Optional[str] = None,
@@ -59,7 +58,9 @@ class GoldenRetrieverServer:
         split_on_spaces: bool = False,
     ):
         # parameters
-        self.model_name_or_path = model_name_or_path
+        self.question_encoder = question_encoder
+        self.passage_encoder = passage_encoder
+        self.document_index = document_index
         self.top_k = top_k
         self.device = device
         self.index_device = index_device or device
@@ -72,30 +73,32 @@ class GoldenRetrieverServer:
         self.split_on_spaces = split_on_spaces
 
         # check that the model exists
-        if not os.path.exists(self.model_name_or_path):
-            raise ValueError(
-                f"Model {self.model_name_or_path} does not exist. Please specify a valid path."
-            )
+        # if not os.path.exists(self.model_name_or_path):
+        #     raise ValueError(
+        #         f"Model {self.model_name_or_path} does not exist. Please specify a valid path."
+        #     )
 
         # log stuff for debugging
         logger.info("Initializing GoldenRetrieverServer with parameters:")
-        logger.info(f"MODEL_NAME_OR_PATH: {self.model_name_or_path}")
+        logger.info(f"QUESTION_ENCODER: {self.question_encoder}")
+        logger.info(f"PASSAGE_ENCODER: {self.passage_encoder}")
+        logger.info(f"DOCUMENT_INDEX: {self.document_index}")
         logger.info(f"TOP_K: {self.top_k}")
         logger.info(f"DEVICE: {self.device}")
         logger.info(f"INDEX_DEVICE: {self.index_device}")
         logger.info(f"PRECISION: {self.precision}")
         logger.info(f"INDEX_PRECISION: {self.index_precision}")
-        logger.info(f"USE_FAISS: {self.use_faiss}")
         logger.info(f"WINDOW_BATCH_SIZE: {self.window_batch_size}")
         logger.info(f"SPLIT_ON_SPACES: {self.split_on_spaces}")
         logger.info(f"SPLIT_ON_SPACES: {self.split_on_spaces}")
 
-        self.retriever = GoldenRetriever.from_pretrained(
-            self.model_name_or_path,
+        self.retriever = GoldenRetriever(
+            question_encoder=self.question_encoder,
+            passage_encoder=self.passage_encoder,
+            document_index=self.document_index,
             device=self.device,
             index_device=self.index_device,
             index_precision=self.index_precision,
-            load_faiss_index=self.use_faiss,
         )
         self.retriever.eval()
 
