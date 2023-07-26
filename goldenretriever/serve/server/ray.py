@@ -72,12 +72,6 @@ class GoldenRetrieverServer:
         self.window_stride = window_stride
         self.split_on_spaces = split_on_spaces
 
-        # check that the model exists
-        # if not os.path.exists(self.model_name_or_path):
-        #     raise ValueError(
-        #         f"Model {self.model_name_or_path} does not exist. Please specify a valid path."
-        #     )
-
         # log stuff for debugging
         logger.info("Initializing GoldenRetrieverServer with parameters:")
         logger.info(f"QUESTION_ENCODER: {self.question_encoder}")
@@ -89,7 +83,6 @@ class GoldenRetrieverServer:
         logger.info(f"PRECISION: {self.precision}")
         logger.info(f"INDEX_PRECISION: {self.index_precision}")
         logger.info(f"WINDOW_BATCH_SIZE: {self.window_batch_size}")
-        logger.info(f"SPLIT_ON_SPACES: {self.split_on_spaces}")
         logger.info(f"SPLIT_ON_SPACES: {self.split_on_spaces}")
 
         self.retriever = GoldenRetriever(
