@@ -10,6 +10,7 @@ from pytorch_lightning.trainer.states import RunningStage
 
 from goldenretriever.callbacks.base import NLPTemplateCallback, PredictionCallback
 from goldenretriever.common.log import get_console_logger, get_logger
+from goldenretriever.retriever.modules.hf import GoldenRetrieverModel
 
 console_logger = get_console_logger()
 logger = get_logger(__name__, level=logging.INFO)
@@ -76,9 +77,15 @@ class SavePredictionsCallback(NLPTemplateCallback):
 
 
 class ResetModelCallback(pl.Callback):
-    def __init__(self, conf, verbose: bool = True) -> None:
+    def __init__(
+        self,
+        question_encoder: str,
+        passage_encoder: Optional[str] = None,
+        verbose: bool = True,
+    ) -> None:
         super().__init__()
-        self.conf = conf
+        self.question_encoder = question_encoder
+        self.passage_encoder = passage_encoder
         self.verbose = verbose
 
     def on_train_epoch_start(
@@ -92,7 +99,14 @@ class ResetModelCallback(pl.Callback):
         if self.verbose:
             logger.info("Resetting model, optimizer and lr scheduler")
         # reload model from scratch
-        trainer.model.load_state_dict(torch.load(self.conf)["state_dict"])
+        trainer.model.model.question_encoder = GoldenRetrieverModel.from_pretrained(
+            self.question_encoder
+        )
+        if self.passages_encoder is not None:
+            trainer.model.model.passage_encoder = GoldenRetrieverModel.from_pretrained(
+                self.passage_encoder
+            )
+        # trainer.model.load_state_dict(torch.load(self.conf)["state_dict"])
         # trainer.strategy._lightning_module = hydra.utils.instantiate(self.conf, _recursive_=False)
         # trainer.strategy._lightning_module.trainer = trainer
         # # links data to the trainer

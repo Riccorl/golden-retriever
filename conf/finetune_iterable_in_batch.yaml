@@ -12,7 +12,7 @@ defaults:
   - index: inmemory
   - loss: nce_loss
   - optimizer: radamw
-  - scheduler: linear_scheduler
+  - scheduler: none
   - data: dataset_v2 # iterable_in_batch_negatives #dataset_v2
   - logging: wandb_logging
   - override hydra/job_logging: colorlog
@@ -46,18 +46,18 @@ train:
     val_check_interval: 1.0 # you can specify an int "n" here => validation every "n" steps
     check_val_every_n_epoch: 1
     max_epochs: 0
-    max_steps: 25_000
+    max_steps: 15_000
     deterministic: True
     fast_dev_run: False
     precision: 16
     reload_dataloaders_every_n_epochs: 1
 
   early_stopping_callback:
-    null
-    #  _target_: pytorch_lightning.callbacks.EarlyStopping
-    #  monitor: validate_recall@${train.top_k}
-    #  mode: max
-    #  patience: 15
+    # null
+    _target_: pytorch_lightning.callbacks.EarlyStopping
+    monitor: validate_recall@${train.top_k}
+    mode: max
+    patience: 6
 
   model_checkpoint_callback:
     _target_: pytorch_lightning.callbacks.ModelCheckpoint
@@ -112,6 +112,6 @@ train:
     utils_callbacks:
       - _target_: goldenretriever.callbacks.utils_callbacks.SaveRetrieverCallback
       - _target_: goldenretriever.callbacks.utils_callbacks.FreeUpIndexerVRAMCallback
-      # - _target_: goldenretriever.callbacks.utils_callbacks.ResetModelCallback
-      #   conf: ${train.pretrain_ckpt_path}
-  
+      - _target_: goldenretriever.callbacks.utils_callbacks.ResetModelCallback
+        question_encoder: ${model.pl_module.model.question_encoder}
+        passage_encoder: ${model.pl_module.model.passage_encoder}

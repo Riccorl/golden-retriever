@@ -6,11 +6,12 @@ bash scripts/train.sh \
     --print \
     --wandb golden-retriever-aida \
     -m 24000 \
+    -o \
     "data=aida_dataset" \
-    "model_name=e5-base-aida-inbatch-topics-dual-from-blink-hf" \
+    "model_name=e5-base-aida-inbatch-topics-dual-from-blink-hf-reset" \
     "data.shared_params.use_topics=True" \
     "data.shared_params.passage_batch_size=400" \
-    "data.shared_params.passages_path=/home/ric/projects/golden-retriever-v2/data/dpr-like/el/definitions.txt" \
+    "data.shared_params.passages_path=/home/ric/projects/golden-retriever-v2/data/dpr-like/el/definitions_only_data.txt" \
     "data.datamodule.datasets.train.path=['data/dpr-like/el/aida_32_tokens_topic/train.jsonl']" \
     "data.datamodule.datasets.val.0.path=['data/dpr-like/el/aida_32_tokens_topic/val.jsonl']" \
     "data.datamodule.datasets.test.0.path=['data/dpr-like/el/aida_32_tokens_topic/test.jsonl']"

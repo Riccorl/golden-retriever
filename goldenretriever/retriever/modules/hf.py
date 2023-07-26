@@ -51,7 +51,7 @@ class GoldenRetrieverConfig(PretrainedConfig):
 class GoldenRetrieverModel(BertModel):
     config_class = GoldenRetrieverConfig
 
-    def __init__(self, config):
+    def __init__(self, config, *args, **kwargs):
         super().__init__(config)
         self.layer_norm_layer = torch.nn.LayerNorm(
             config.hidden_size, eps=config.layer_norm_eps

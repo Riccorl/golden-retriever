@@ -6,7 +6,6 @@ import torch
 from omegaconf import DictConfig
 
 from goldenretriever.common.model_inputs import ModelInputs
-from goldenretriever.data.labels import Labels
 
 
 class GoldenRetrieverPLModule(pl.LightningModule):
@@ -15,15 +14,13 @@ class GoldenRetrieverPLModule(pl.LightningModule):
         model: Union[torch.nn.Module, DictConfig],
         optimizer: Union[torch.optim.Optimizer, DictConfig],
         lr_scheduler: Union[torch.optim.lr_scheduler.LRScheduler, DictConfig] = None,
-        labels: Labels = None,
         *args,
         **kwargs,
     ) -> None:
         super().__init__()
         self.save_hyperparameters()
-        self.labels = labels
         if isinstance(model, DictConfig):
-            self.model = hydra.utils.instantiate(model, labels=labels)
+            self.model = hydra.utils.instantiate(model)
         else:
             self.model = model
 
@@ -69,25 +66,6 @@ class GoldenRetrieverPLModule(pl.LightningModule):
         )
 
     def configure_optimizers(self):
-        # no_decay = ["bias", "LayerNorm.bias", "LayerNorm.weight"]
-        # optimizer_grouped_parameters = [
-        #     {
-        #         "params": [
-        #             p
-        #             for n, p in self.model.named_parameters()
-        #             if not any(nd in n for nd in no_decay)
-        #         ],
-        #         "weight_decay": self.hparams.optimizer.weight_decay,
-        #     },
-        #     {
-        #         "params": [
-        #             p
-        #             for n, p in self.model.named_parameters()
-        #             if any(nd in n for nd in no_decay)
-        #         ],
-        #         "weight_decay": 0.0,
-        #     },
-        # ]
 
         if isinstance(self.optimizer_config, DictConfig):
             optimizer = hydra.utils.instantiate(
@@ -98,8 +76,8 @@ class GoldenRetrieverPLModule(pl.LightningModule):
         else:
             optimizer = self.optimizer_config
 
-        if self.lr_scheduler_config is None:
-            return optimizer
+        # if self.lr_scheduler_config is None:
+        return optimizer
 
         if isinstance(self.lr_scheduler_config, DictConfig):
             lr_scheduler = hydra.utils.instantiate(
