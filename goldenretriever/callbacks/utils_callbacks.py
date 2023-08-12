@@ -1,3 +1,4 @@
+import collections
 import json
 import logging
 import os
@@ -99,13 +100,21 @@ class ResetModelCallback(pl.Callback):
         if self.verbose:
             logger.info("Resetting model, optimizer and lr scheduler")
         # reload model from scratch
+        previous_device = pl_module.device
         trainer.model.model.question_encoder = GoldenRetrieverModel.from_pretrained(
             self.question_encoder
         )
-        if self.passages_encoder is not None:
+        trainer.model.model.question_encoder.to(previous_device)
+        if self.passage_encoder is not None:
             trainer.model.model.passage_encoder = GoldenRetrieverModel.from_pretrained(
                 self.passage_encoder
             )
+            trainer.model.model.passage_encoder.to(previous_device)
+
+        trainer.strategy.setup_optimizers(trainer)
+        # for optimizer in trainer.optimizers:
+        #     optimizer.state = collections.defaultdict(dict)
+
         # trainer.model.load_state_dict(torch.load(self.conf)["state_dict"])
         # trainer.strategy._lightning_module = hydra.utils.instantiate(self.conf, _recursive_=False)
         # trainer.strategy._lightning_module.trainer = trainer

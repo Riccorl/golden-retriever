@@ -38,6 +38,6 @@ datamodule:
         passage_batch_size: ${data.shared_params.passage_batch_size}
 
   num_workers:
-    train: 4
-    val: 4
-    test: 4
+    train: 0
+    val: 0
+    test: 0

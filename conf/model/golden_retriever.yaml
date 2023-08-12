@@ -5,7 +5,7 @@ pl_module:
   model:
     _target_: goldenretriever.retriever.golden_retriever.GoldenRetriever
     question_encoder: ${model.language_model}
-    passage_encoder: ${model.language_model}
+    passage_encoder: null
     document_index: ${index}
     loss_type: ${loss}
   optimizer: ${optimizer}

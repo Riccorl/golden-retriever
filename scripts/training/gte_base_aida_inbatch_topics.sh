@@ -2,12 +2,12 @@
 
 bash scripts/train.sh \
     --config-path conf/finetune_iterable_in_batch.yaml \
-    -l riccorl/golden-retriever-base-blink-before-hf \
+    -l /home/ric/projects/golden-retriever-v2/experiments/gte-base-blink-inbatch-first1M-random-hnprob-0.2-hf/2023-08-06/21-16-54/wandb/run-20230806_211707-letlyhpl/files/retriever/question_encoder \
     --print \
     --wandb golden-retriever-aida \
     -m 24000 \
     "data=aida_dataset" \
-    "model_name=e5-base-aida-inbatch-topics-from-blink-before-hf-wd0.01" \
+    "model_name=gte-base-aida-inbatch-topics-from-blink-hf" \
     "data.shared_params.use_topics=True" \
     "data.shared_params.passage_batch_size=400" \
     "data.shared_params.passages_path=/home/ric/projects/golden-retriever-v2/data/dpr-like/el/definitions.txt" \

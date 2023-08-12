@@ -67,17 +67,45 @@ class GoldenRetrieverPLModule(pl.LightningModule):
 
     def configure_optimizers(self):
 
+        param_optimizer = list(self.named_parameters())
+        no_decay = ["bias", "LayerNorm.bias", "LayerNorm.weight"]
+        optimizer_grouped_parameters = [
+            {
+                "params": [
+                    p for n, p in param_optimizer if "layer_norm_layer" in n
+                ],
+                "weight_decay": self.hparams.optimizer.weight_decay,
+                "lr": 1e-4,
+            },
+            {
+                "params": [
+                    p
+                    for n, p in param_optimizer
+                    if all(nd not in n for nd in no_decay) and "layer_norm_layer" not in n
+                ],
+                "weight_decay": self.hparams.optimizer.weight_decay,
+            },
+            {
+                "params": [
+                    p
+                    for n, p in param_optimizer
+                    if "layer_norm_layer" not in n and any(nd in n for nd in no_decay)
+                ],
+                "weight_decay": 0.0,
+            },
+        ]
         if isinstance(self.optimizer_config, DictConfig):
             optimizer = hydra.utils.instantiate(
                 self.optimizer_config,
-                params=self.parameters(),
+                # params=self.parameters(),
+                params=optimizer_grouped_parameters,
                 _convert_="partial",
             )
         else:
             optimizer = self.optimizer_config
 
-        # if self.lr_scheduler_config is None:
-        return optimizer
+        if self.lr_scheduler_config is None:
+            return optimizer
 
         if isinstance(self.lr_scheduler_config, DictConfig):
             lr_scheduler = hydra.utils.instantiate(

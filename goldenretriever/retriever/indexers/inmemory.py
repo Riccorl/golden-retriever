@@ -126,7 +126,6 @@ class InMemoryDocumentIndex(BaseDocumentIndex):
             )
             return self
 
-        # release the memory
         if collate_fn is None:
             tokenizer = retriever.passage_tokenizer
             collate_fn = lambda x: ModelInputs(
@@ -254,61 +253,3 @@ class InMemoryDocumentIndex(BaseDocumentIndex):
             )
         ]
         return batch_retrieved_samples
-
-    # def save(self, saving_dir: Union[str, os.PathLike]):
-    #     """
-    #     Save the indexer to the disk.
-
-    #     Args:
-    #         saving_dir (:obj:`Union[str, os.PathLike]`):
-    #             The directory where the indexer will be saved.
-    #     """
-    #     saving_dir = Path(saving_dir)
-    #     # save the passage embeddings
-    #     embedding_path = saving_dir / self.EMBEDDINGS_FILE_NAME
-    #     logger.info(f"Saving passage embeddings to {embedding_path}")
-    #     torch.save(self.embeddings, embedding_path)
-    #     # save the passage index
-    #     documents_path = saving_dir / self.DOCUMENTS_FILE_NAME
-    #     logger.info(f"Saving passage index to {documents_path}")
-    #     self.documents.save(documents_path)
-
-    # @classmethod
-    # def load(
-    #     cls,
-    #     loading_dir: Union[str, os.PathLike],
-    #     precision: Optional[str] = None,
-    #     device: str = "cpu",
-    #     document_file_name: Optional[str] = None,
-    #     embedding_file_name: Optional[str] = None,
-    #     **kwargs,
-    # ) -> "InMemoryDocumentIndex":
-    #     loading_dir = Path(loading_dir)
-
-    #     document_file_name = document_file_name or cls.DOCUMENTS_FILE_NAME
-    #     embedding_file_name = embedding_file_name or cls.EMBEDDINGS_FILE_NAME
-
-    #     # load the documents
-    #     documents_path = loading_dir / document_file_name
-
-    #     if not documents_path.exists():
-    #         raise ValueError(f"Document file `{documents_path}` does not exist.")
-    #     logger.info(f"Loading documents from {documents_path}")
-    #     documents = Labels.from_file(documents_path)
-
-    #     # load the passage embeddings
-    #     embedding_path = loading_dir / embedding_file_name
-    #     # run some checks
-    #     if embedding_path.exists():
-    #         logger.info(f"Loading embeddings from {embedding_path}")
-    #         embeddings = torch.load(embedding_path, map_location="cpu")
-    #     else:
-    #         logger.warning(f"Embedding file `{embedding_path}` does not exist.")
-
-    #     return cls(
-    #         documents=documents,
-    #         embeddings=embeddings,
-    #         device=device,
-    #         precision=precision,
-    #         **kwargs,
-    #     )
