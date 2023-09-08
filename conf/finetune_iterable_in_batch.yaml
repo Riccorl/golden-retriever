@@ -57,7 +57,7 @@ train:
     _target_: pytorch_lightning.callbacks.EarlyStopping
     monitor: validate_recall@${train.top_k}
     mode: max
-    patience: 6
+    patience: 3
 
   model_checkpoint_callback:
     _target_: pytorch_lightning.callbacks.ModelCheckpoint

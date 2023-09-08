@@ -163,6 +163,11 @@ class FreeUpIndexerVRAMCallback(pl.Callback):
     ) -> None:
         return self(pl_module)
 
+    def on_test_epoch_start(
+        self, trainer: pl.Trainer, pl_module: pl.LightningModule, *args, **kwargs
+    ) -> None:
+        return self(pl_module)
+
 
 class ShuffleTrainDatasetCallback(pl.Callback):
     def __init__(self, seed: int = 42, verbose: bool = True) -> None:
