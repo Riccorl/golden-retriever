@@ -7,7 +7,8 @@ bash scripts/train.sh \
     --wandb golden-retriever-aida-abl \
     -m 24000 \
     "data=aida_dataset" \
-    "model_name=e5-base-aida-inbatch-topics-hf-dualencoder-20hardneg-from-blink-beforehf" \
+    "model.pl_module.model.question_encoder=intfloat/e5-base-v2" \
+    "model_name=e5-base-aida-inbatch-topics-hf-dualencoder-passage-from-blink-beforehf" \
     "data.shared_params.use_topics=True" \
     "data.shared_params.passage_batch_size=400" \
     "data.shared_params.passages_path=/root/golden-retriever-v2/data/dpr-like/el/definitions.txt" \

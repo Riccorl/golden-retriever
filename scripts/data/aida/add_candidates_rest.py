@@ -24,7 +24,8 @@ def compute_retriever_stats(dataset, recall_at: int = 100) -> None:
             total += 1
 
     recall = correct / total
-    print(f"Recall@{recall_at}:", recall)
+    return recall
+    # print(f"Recall@{recall_at}:", recall)
 
 
 def batch_generation(samples, batch_size):
@@ -75,8 +76,9 @@ def add_candidates(
             f.write(json.dumps(sample) + "\n")
 
     # measure some metrics
-    compute_retriever_stats(output_data, recall_at=100)
-    compute_retriever_stats(output_data, recall_at=50)
+    r_at_100 = compute_retriever_stats(output_data, recall_at=100)
+    r_at_50 = compute_retriever_stats(output_data, recall_at=50)
+    print("Recall@100 / Recall@50:", r_at_100, " ", r_at_50)
 
 
 if __name__ == "__main__":

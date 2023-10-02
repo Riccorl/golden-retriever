@@ -596,11 +596,13 @@ def train(conf: omegaconf.DictConfig) -> None:
             # callback can be a list of callbacks or a single callback
             if isinstance(callback, omegaconf.listconfig.ListConfig):
                 for cb in callback:
-                    callbacks_store.append(
-                        hydra.utils.instantiate(cb, _recursive_=False)
-                    )
+                    if cb is not None:
+                        callbacks_store.append(
+                            hydra.utils.instantiate(cb, _recursive_=False)
+                        )
             else:
-                callbacks_store.append(hydra.utils.instantiate(callback))
+                if callback is not None:
+                    callbacks_store.append(hydra.utils.instantiate(callback))
 
     # trainer
     logger.log(f"Instantiating the Trainer")

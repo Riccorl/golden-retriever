@@ -56,6 +56,8 @@ class InMemoryDocumentIndex(BaseDocumentIndex):
 
         # embeddings of the documents
         self.embeddings = embeddings
+        # does this do anything?
+        del embeddings
         # convert the embeddings to the desired precision
         if precision is not None:
             if (
@@ -63,13 +65,13 @@ class InMemoryDocumentIndex(BaseDocumentIndex):
                 and self.embeddings.dtype != PRECISION_MAP[precision]
             ):
                 logger.info(
-                    f"Index vectors are of type {embeddings.dtype}. "
+                    f"Index vectors are of type {self.embeddings.dtype}. "
                     f"Converting to {PRECISION_MAP[precision]}."
                 )
                 self.embeddings = self.embeddings.to(PRECISION_MAP[precision])
         # move the embeddings to the desired device
         if self.embeddings is not None and not self.embeddings.device == device:
-            self.embeddings = embeddings.to(device)
+            self.embeddings = self.embeddings.to(device)
 
         # device to store the embeddings
         self.device = device

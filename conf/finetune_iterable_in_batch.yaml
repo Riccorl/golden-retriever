@@ -100,7 +100,7 @@ train:
         validate_recall@${train.top_k}
         # - sanity_check_recall@${train.top_k}
       threshold: 0.0
-      max_negatives: 15
+      max_negatives: 20
       add_with_probability: 1.0
       refresh_every_n_epochs: 1
       other_callbacks:
