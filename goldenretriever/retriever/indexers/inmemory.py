@@ -11,11 +11,9 @@ from goldenretriever.common.log import get_logger
 from goldenretriever.common.model_inputs import ModelInputs
 from goldenretriever.data.base.datasets import BaseDataset
 from goldenretriever.data.labels import Labels
-from goldenretriever.retriever import PRECISION_MAP, RetrievedSample
+from goldenretriever.retriever import PRECISION_MAP
 from goldenretriever.retriever.indexers.base import BaseDocumentIndex
-
-# from goldenretriever.models.model import GoldenRetriever
-
+from retriever import RetrievedSample
 
 logger = get_logger(__name__, level=logging.INFO)
 
@@ -95,7 +93,7 @@ class InMemoryDocumentIndex(BaseDocumentIndex):
         Index the documents using the encoder.
 
         Args:
-            encoder (:obj:`torch.nn.Module`):
+            retriever (:obj:`torch.nn.Module`):
                 The encoder to be used for indexing.
             batch_size (:obj:`int`, `optional`, defaults to 32):
                 The batch size to be used for indexing.
@@ -107,16 +105,10 @@ class InMemoryDocumentIndex(BaseDocumentIndex):
                 The collate function to be used for batching.
             encoder_precision (:obj:`Union[str, int]`, `optional`, defaults to None):
                 The precision to be used for the encoder.
-            precision (:obj:`Union[str, int]`, `optional`, defaults to None):
-                The precision to be used for the embeddings.
             compute_on_cpu (:obj:`bool`, `optional`, defaults to False):
                 Whether to compute the embeddings on CPU.
             force_reindex (:obj:`bool`, `optional`, defaults to False):
                 Whether to force reindexing.
-            update_existing (:obj:`bool`, `optional`, defaults to False):
-                Whether to update the existing embeddings.
-            duplicate_strategy (:obj:`str`, `optional`, defaults to "overwrite"):
-                The strategy to be used for duplicate embeddings. Can be one of "overwrite" or "ignore".
 
         Returns:
             :obj:`InMemoryIndexer`: The indexer object.
@@ -198,11 +190,11 @@ class InMemoryDocumentIndex(BaseDocumentIndex):
         # free up memory from the unused variable
         del passage_embeddings
 
-        return self.embeddings
+        return self
 
     @torch.no_grad()
     @torch.inference_mode()
-    def search(self, query: torch.Tensor, k: int = 1) -> List[RetrievedSample]:
+    def search(self, query: torch.Tensor, k: int = 1) -> list[list[RetrievedSample]]:
         """
         Search the documents using the query.
 

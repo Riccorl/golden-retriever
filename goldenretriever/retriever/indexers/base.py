@@ -121,7 +121,7 @@ class BaseDocumentIndex:
         Get the index of the passage.
 
         Args:
-            passage (`str`):
+            document (`str`):
                 The document to get the index for.
 
         Returns:
@@ -198,6 +198,12 @@ class BaseDocumentIndex:
             config (`Optional[Dict[str, Any]]`, `optional`):
                 The configuration to save. If `None`, the current configuration of the retriever will be
                 saved. Defaults to `None`.
+            config_file_name (`Optional[str]`, `optional`):
+                The name of the configuration file. Defaults to `config.yaml`.
+            document_file_name (`Optional[str]`, `optional`):
+                The name of the document file. Defaults to `documents.json`.
+            embedding_file_name (`Optional[str]`, `optional`):
+                The name of the embedding file. Defaults to `embeddings.pt`.
         """
         if config is None:
             # create a default config
@@ -290,6 +296,7 @@ class BaseDocumentIndex:
         # load the passage embeddings
         embedding_path = model_dir / embedding_file_name
         # run some checks
+        embeddings = None
         if embedding_path.exists():
             logger.info(f"Loading embeddings from {embedding_path}")
             embeddings = torch.load(embedding_path, map_location="cpu")
@@ -307,10 +314,4 @@ class BaseDocumentIndex:
         )
 
         return document_index
-        # return cls(
-        #     documents=documents,
-        #     embeddings=embeddings,
-        #     device=device,
-        #     precision=precision,
-        #     **kwargs,
-        # )
+

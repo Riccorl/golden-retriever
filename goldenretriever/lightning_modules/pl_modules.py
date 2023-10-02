@@ -71,9 +71,7 @@ class GoldenRetrieverPLModule(pl.LightningModule):
         no_decay = ["bias", "LayerNorm.bias", "LayerNorm.weight"]
         optimizer_grouped_parameters = [
             {
-                "params": [
-                    p for n, p in param_optimizer if "layer_norm_layer" in n
-                ],
+                "params": [p for n, p in param_optimizer if "layer_norm_layer" in n],
                 "weight_decay": self.hparams.optimizer.weight_decay,
                 "lr": 1e-4,
             },
@@ -81,7 +79,8 @@ class GoldenRetrieverPLModule(pl.LightningModule):
                 "params": [
                     p
                     for n, p in param_optimizer
-                    if all(nd not in n for nd in no_decay) and "layer_norm_layer" not in n
+                    if all(nd not in n for nd in no_decay)
+                    and "layer_norm_layer" not in n
                 ],
                 "weight_decay": self.hparams.optimizer.weight_decay,
             },

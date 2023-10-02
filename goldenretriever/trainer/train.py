@@ -39,9 +39,6 @@ from goldenretriever.lightning_modules.pl_modules import GoldenRetrieverPLModule
 from goldenretriever.retriever.golden_retriever import GoldenRetriever
 from goldenretriever.retriever.indexers.base import BaseDocumentIndex
 from goldenretriever.retriever.modules.optim import RAdamW
-
-import transformers
-
 from goldenretriever.retriever.modules.scheduler import LinearSchedulerWithWarmup
 
 logger = get_console_logger()

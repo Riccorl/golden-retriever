@@ -6,8 +6,8 @@ from typing import Callable, List, Optional, Union
 
 import numpy
 import torch
-import tqdm
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 from goldenretriever.common.log import get_logger
 from goldenretriever.common.model_inputs import ModelInputs
@@ -15,8 +15,9 @@ from goldenretriever.common.utils import is_package_available
 from goldenretriever.data.base.datasets import BaseDataset
 from goldenretriever.data.labels import Labels
 from goldenretriever.retriever import PRECISION_MAP
-from goldenretriever.retriever.golden_retriever import GoldenRetriever, RetrievedSample
+from goldenretriever.retriever.golden_retriever import GoldenRetriever
 from goldenretriever.retriever.indexers.base import BaseDocumentIndex
+from retriever import RetrievedSample
 
 if is_package_available("faiss"):
     import faiss
@@ -147,12 +148,12 @@ class FaissDocumentIndex(BaseDocumentIndex):
         force_reindex: bool = False,
         *args,
         **kwargs,
-    ) -> torch.Tensor:
+    ) -> "FaissDocumentIndex":
         """
         Index the documents using the encoder.
 
         Args:
-            encoder (:obj:`torch.nn.Module`):
+            retriever (:obj:`torch.nn.Module`):
                 The encoder to be used for indexing.
             batch_size (:obj:`int`, `optional`, defaults to 32):
                 The batch size to be used for indexing.
@@ -164,16 +165,10 @@ class FaissDocumentIndex(BaseDocumentIndex):
                 The collate function to be used for batching.
             encoder_precision (:obj:`Union[str, int]`, `optional`, defaults to None):
                 The precision to be used for the encoder.
-            precision (:obj:`Union[str, int]`, `optional`, defaults to None):
-                The precision to be used for the embeddings.
             compute_on_cpu (:obj:`bool`, `optional`, defaults to False):
                 Whether to compute the embeddings on CPU.
             force_reindex (:obj:`bool`, `optional`, defaults to False):
                 Whether to force reindexing.
-            update_existing (:obj:`bool`, `optional`, defaults to False):
-                Whether to update the existing embeddings.
-            duplicate_strategy (:obj:`str`, `optional`, defaults to "overwrite"):
-                The strategy to be used for duplicate embeddings. Can be one of "overwrite" or "ignore".
 
         Returns:
             :obj:`InMemoryIndexer`: The indexer object.
@@ -257,11 +252,11 @@ class FaissDocumentIndex(BaseDocumentIndex):
         # free up memory from the unused variable
         del passage_embeddings
 
-        return self.embeddings
+        return self
 
     @torch.no_grad()
     @torch.inference_mode()
-    def search(self, query: torch.Tensor, k: int = 1) -> List[RetrievedSample]:
+    def search(self, query: torch.Tensor, k: int = 1) -> list[list[RetrievedSample]]:
         k = min(k, self.embeddings.ntotal)
 
         if self.normalize:

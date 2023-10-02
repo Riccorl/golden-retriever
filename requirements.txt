@@ -1,25 +1,25 @@
 # Core dependencies
-torch>=1.10,<2.1
-pytorch-lightning>=2.0,<2.1
+torch>=2.0.1,<2.1
+lightning>=2.0,<2.1
 hydra-core>=1.3,<1.4
 hydra_colorlog
 wandb>=0.15,<0.16
 rich>=13.0.0,<14.0.0
-transformers>=4.30,<4.31
-datasets>=2.13,<2.14
+transformers>=4.33,<4.34
+datasets>=2.13,<2.15
 scikit-learn
 black[d]
 
 # Optional dependencies
 # onnx GPU
-optimum[onnxruntime-gpu]>=1.7,<1.8; platform_system == "Linux" # needed by: onnx-gpu
+optimum[onnxruntime-gpu]>=1.7,<1.8; platform_system == "Linux"# needed by: onnx-gpu
 termcolor # needed by: onnx-gpu
 # onnx CPU
-optimum[onnxruntime]>=1.7,<1.8 # needed by: onnx
+optimum[onnxruntime]>=1.13,<1.14 # needed by: onnx
 termcolor # needed by: onnx
 # serve
-fastapi>=0.98,<0.100 # needed by: serve
-uvicorn[standard]==0.21.1 # needed by: serve
-gunicorn==20.1.0 # needed by: serve
-ray[serve]>=2.4,<=2.5 # needed by: serve
+fastapi>=0.103,<0.104 # needed by: serve
+uvicorn[standard]==0.23.2 # needed by: serve
+gunicorn==21.2.0 # needed by: serve
+ray[serve]>=2.7,<=2.8 # needed by: serve
 ipa-core # needed by: serve

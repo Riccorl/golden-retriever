@@ -11,26 +11,10 @@ import transformers as tr
 
 from goldenretriever.common.log import get_console_logger, get_logger
 from goldenretriever.common.model_inputs import ModelInputs
-from goldenretriever.common.utils import is_package_available
 from goldenretriever.data.labels import Labels
-from goldenretriever.retriever import RetrievedSample
+from goldenretriever.retriever import RetrievedSample, PRECISION_MAP
 from goldenretriever.retriever.indexers.base import BaseDocumentIndex
 from goldenretriever.retriever.modules.hf import GoldenRetrieverModel
-
-
-PRECISION_MAP = {
-    None: torch.float32,
-    16: torch.float16,
-    32: torch.float32,
-    "float16": torch.float16,
-    "float32": torch.float32,
-    "half": torch.float16,
-    "float": torch.float32,
-    "16": torch.float16,
-    "32": torch.float32,
-    "fp16": torch.float16,
-    "fp32": torch.float32,
-}
 
 console_logger = get_console_logger()
 logger = get_logger(__name__, level=logging.INFO)
@@ -220,16 +204,15 @@ class GoldenRetriever(torch.nn.Module):
                 The collate function to use for the indexing.
             force_reindex (`bool`):
                 Whether to force reindexing even if the passages are already indexed.
-            move_index_to_cpu (`bool`):
+            compute_on_cpu (`bool`):
                 Whether to move the index to the CPU after the indexing.
             precision (`Optional[Union[str, int]]`):
                 The precision to use for the model.
-            index_precision (`Optional[Union[str, int]]`):
-                The precision to use for the index.
         """
         if self.document_index is None:
             raise ValueError(
-                "The retriever must be initialized with an indexer to index the passages within the retriever."
+                "The retriever must be initialized with an indexer to index "
+                "the passages within the retriever."
             )
         return self.document_index.index(
             retriever=self,
