@@ -36,7 +36,7 @@ train:
 
   # pl_trainer
   pl_trainer:
-    _target_: pytorch_lightning.Trainer
+    _target_: lightning.Trainer
     accelerator: gpu
     devices: 1
     num_nodes: 1
@@ -54,13 +54,13 @@ train:
 
   early_stopping_callback:
     null
-    #  _target_: pytorch_lightning.callbacks.EarlyStopping
+    #  _target_: lightning.callbacks.EarlyStopping
     #  monitor: validate_recall@${train.top_k}
     #  mode: max
     #  patience: 15
 
   model_checkpoint_callback:
-    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    _target_: lightning.callbacks.ModelCheckpoint
     monitor: validate_recall@${train.top_k}
     mode: max
     verbose: True

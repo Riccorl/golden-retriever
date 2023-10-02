@@ -5,10 +5,10 @@ from copy import deepcopy
 from pathlib import Path
 from typing import List, Optional, Set, Union
 
-import pytorch_lightning as pl
+import lightning as pl
 import torch
 from omegaconf import DictConfig
-from pytorch_lightning.trainer.states import RunningStage
+from lightning.trainer.states import RunningStage
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 

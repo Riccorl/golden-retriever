@@ -1,9 +1,9 @@
 import logging
 from typing import Dict, List, Optional
 
-import pytorch_lightning as pl
+import lightning as pl
 import torch
-from pytorch_lightning.trainer.states import RunningStage
+from lightning.trainer.states import RunningStage
 from sklearn.metrics import label_ranking_average_precision_score
 
 from goldenretriever.callbacks.base import DEFAULT_STAGES, NLPTemplateCallback
@@ -58,9 +58,9 @@ class RecallAtKEvaluationCallback(NLPTemplateCallback):
         Computes the recall at k for the predictions.
 
         Args:
-            trainer (:obj:`pytorch_lightning.trainer.trainer.Trainer`):
+            trainer (:obj:`lightning.trainer.trainer.Trainer`):
                 The trainer object.
-            pl_module (:obj:`pytorch_lightning.core.lightning.LightningModule`):
+            pl_module (:obj:`lightning.core.lightning.LightningModule`):
                 The lightning module.
             predictions (:obj:`Dict`):
                 The predictions.
@@ -156,9 +156,9 @@ class AvgRankingEvaluationCallback(NLPTemplateCallback):
         Computes the average ranking of the gold label in the predictions.
 
         Args:
-            trainer (:obj:`pytorch_lightning.trainer.trainer.Trainer`):
+            trainer (:obj:`lightning.trainer.trainer.Trainer`):
                 The trainer object.
-            pl_module (:obj:`pytorch_lightning.core.lightning.LightningModule`):
+            pl_module (:obj:`lightning.core.lightning.LightningModule`):
                 The lightning module.
             predictions (:obj:`Dict`):
                 The predictions.

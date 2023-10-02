@@ -4,17 +4,17 @@ from typing import List, Optional, Union
 
 import hydra
 import omegaconf
-import pytorch_lightning as pl
+import lightning as pl
 import torch
 from omegaconf import OmegaConf
-from pytorch_lightning import Trainer
-from pytorch_lightning.callbacks import (
+from lightning import Trainer
+from lightning.callbacks import (
     EarlyStopping,
     ModelCheckpoint,
     LearningRateMonitor,
     ModelSummary,
 )
-from pytorch_lightning.loggers import WandbLogger
+from lightning.loggers import WandbLogger
 from rich.pretty import pprint
 
 from goldenretriever.callbacks.evaluation_callbacks import (

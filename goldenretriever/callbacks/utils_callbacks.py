@@ -4,9 +4,9 @@ import os
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
 
-import pytorch_lightning as pl
+import lightning as pl
 import torch
-from pytorch_lightning.trainer.states import RunningStage
+from lightning.trainer.states import RunningStage
 
 from goldenretriever.callbacks.base import NLPTemplateCallback, PredictionCallback
 from goldenretriever.common.log import get_console_logger, get_logger
