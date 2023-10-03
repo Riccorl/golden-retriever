@@ -10,4 +10,3 @@ pl_module:
     loss_type: ${loss}
   optimizer: ${optimizer}
   lr_scheduler: ${scheduler}
-  warmup_steps_ratio: 0.1
