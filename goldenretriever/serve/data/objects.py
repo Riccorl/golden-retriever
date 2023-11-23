@@ -1,7 +1,23 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, List
+
+
+@dataclass
+class Window:
+    doc_id: int
+    window_id: int
+    text: str
+    tokens: List[str]
+    words: List[Word]
+    doc_topic: Optional[str]
+    offset: int
+    token2char_start: dict
+    token2char_end: dict
+    char2token_start: dict
+    char2token_end: dict
+    window_candidates: Optional[List[str]] = None
 
 
 @dataclass
@@ -32,9 +48,9 @@ class Word:
     """
 
     text: str
-    index: int
-    start_char: Optional[int] = None
-    end_char: Optional[int] = None
+    i: int
+    idx: Optional[int] = None
+    idx_end: Optional[int] = None
     # preprocessing fields
     lemma: Optional[str] = None
     pos: Optional[str] = None

@@ -1,6 +1,6 @@
 from typing import List, Union
 
-from goldenretriever.serve.tokenizers.word import Word
+from goldenretriever.serve.data.objects import Word
 
 
 class BaseTokenizer:

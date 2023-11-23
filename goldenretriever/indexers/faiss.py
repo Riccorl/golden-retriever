@@ -1,23 +1,23 @@
 import contextlib
 import logging
-import math
+import os
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Union
 
 import numpy
+import psutil
 import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from goldenretriever.common.log import get_logger
-from goldenretriever.common.model_inputs import ModelInputs
-from goldenretriever.common.utils import is_package_available
-from goldenretriever.data.base.datasets import BaseDataset
-from goldenretriever.data.labels import Labels
-from goldenretriever.retriever import PRECISION_MAP
-from goldenretriever.retriever.golden_retriever import GoldenRetriever
-from goldenretriever.retriever.indexers.base import BaseDocumentIndex
-from retriever import RetrievedSample
+from relik.common.log import get_logger
+from relik.common.utils import is_package_available
+from relik.retriever.common.model_inputs import ModelInputs
+from relik.retriever.data.base.datasets import BaseDataset
+from relik.retriever.indexers.base import BaseDocumentIndex
+from relik.retriever.indexers.document import Document, DocumentStore
+from relik.retriever.pytorch_modules import PRECISION_MAP, RetrievedSample
+from relik.retriever.pytorch_modules.model import GoldenRetriever
 
 if is_package_available("faiss"):
     import faiss
@@ -39,27 +39,37 @@ class FaissDocumentIndex(BaseDocumentIndex):
 
     def __init__(
         self,
-        documents: Union[List[str], Labels],
-        embeddings: Optional[Union[torch.Tensor, numpy.ndarray]] = None,
+        documents: str
+        | List[str]
+        | os.PathLike
+        | List[os.PathLike]
+        | DocumentStore
+        | None = None,
+        embeddings: torch.Tensor | numpy.ndarray | None = None,
+        metadata_fields: List[str] | None = None,
+        separator: str = "<def>",
+        name_or_path: str | os.PathLike | None = None,
+        device: str = "cpu",
         index=None,
         index_type: str = "Flat",
+        nprobe: int = 1,
         metric: int = faiss.METRIC_INNER_PRODUCT,
         normalize: bool = False,
-        device: str = "cpu",
         *args,
         **kwargs,
     ) -> None:
-        super().__init__(documents, embeddings)
+        super().__init__(
+            documents, embeddings, metadata_fields, separator, name_or_path, device
+        )
 
         if embeddings is not None and documents is not None:
             logger.info("Both documents and embeddings are provided.")
-            if documents.get_label_size() != embeddings.shape[0]:
+            if len(documents) != embeddings.shape[0]:
                 raise ValueError(
                     "The number of documents and embeddings must be the same."
                 )
 
-        # device to store the embeddings
-        self.device = device
+        faiss.omp_set_num_threads(psutil.cpu_count(logical=False))
 
         # params
         self.index_type = index_type
@@ -81,14 +91,53 @@ class FaissDocumentIndex(BaseDocumentIndex):
                 self.embeddings = self._build_faiss_index(
                     embeddings=embeddings,
                     index_type=index_type,
+                    nprobe=nprobe,
                     normalize=normalize,
                     metric=metric,
                 )
+
+    def to(
+        self, device_or_precision: str | torch.device | torch.dtype
+    ) -> "BaseDocumentIndex":
+        """
+        Move the retriever to the specified device or precision.
+
+        Args:
+            device_or_precision (`str` | `torch.device` | `torch.dtype`):
+                The device or precision to move the retriever to.
+
+        Returns:
+            `BaseDocumentIndex`: The retriever.
+        """
+        if isinstance(device_or_precision, torch.dtype):
+            raise ValueError(
+                "FaissDocumentIndex does not support precision conversion."
+            )
+        if device_or_precision == "cuda" and self.device == "cpu":
+            # use a single GPU
+            faiss_resource = faiss.StandardGpuResources()
+            self.embeddings = faiss.index_cpu_to_gpu(faiss_resource, 0, self.embeddings)
+        elif device_or_precision == "cpu" and self.device == "cuda":
+            # move faiss index to CPU
+            self.embeddings = faiss.index_gpu_to_cpu(self.embeddings)
+        else:
+            logger.warning(
+                f"Provided device `{device_or_precision}` is the same as the current device `{self.device}`."
+            )
+        return self
+
+    @property
+    def device(self):
+        # check if faiss index is on GPU
+        if faiss.get_num_gpus() > 0:
+            return "cuda"
+        return "cpu"
 
     def _build_faiss_index(
         self,
         embeddings: Optional[Union[torch.Tensor, numpy.ndarray]],
         index_type: str,
+        nprobe: int,
         normalize: bool,
         metric: int,
     ):
@@ -101,11 +150,14 @@ class FaissDocumentIndex(BaseDocumentIndex):
         if self.normalize:
             index_type = f"L2norm,{index_type}"
         faiss_vector_size = embeddings.shape[1]
-        if self.device == "cpu":
-            index_type = index_type.replace("x,", "x_HNSW32,")
-        index_type = index_type.replace(
-            "x", str(math.ceil(math.sqrt(faiss_vector_size)) * 4)
-        )
+        # if self.device == "cpu":
+        #     index_type = index_type.replace("x,", "x_HNSW32,")
+        # nlist = math.ceil(math.sqrt(faiss_vector_size)) * 4
+        # # nlist = 8
+        # index_type = index_type.replace(
+        #     "x", str(nlist)
+        # )
+        # print("Current nlist:", nlist)
         self.embeddings = faiss.index_factory(faiss_vector_size, index_type, metric)
 
         # convert to GPU
@@ -119,11 +171,23 @@ class FaissDocumentIndex(BaseDocumentIndex):
                 embeddings.cpu() if isinstance(embeddings, torch.Tensor) else embeddings
             )
 
+        self.embeddings.hnsw.efConstruction = 20
         # convert to float32 if embeddings is a torch.Tensor and is float16
         if isinstance(embeddings, torch.Tensor) and embeddings.dtype == torch.float16:
             embeddings = embeddings.float()
 
+        logger.info("Training the index.")
+        self.embeddings.train(embeddings)
+
+        logger.info("Adding the embeddings to the index.")
         self.embeddings.add(embeddings)
+
+        self.embeddings.nprobe = nprobe
+
+        # self.embeddings.hnsw.efSearch
+        # self.embeddings.hnsw.efSearch = 256
+
+        # self.embeddings.k_factor = 10
 
         # save parameters for saving/loading
         self.index_type = index_type
@@ -139,6 +203,7 @@ class FaissDocumentIndex(BaseDocumentIndex):
     def index(
         self,
         retriever: GoldenRetriever,
+        documents: Optional[List[Document]] = None,
         batch_size: int = 32,
         num_workers: int = 4,
         max_length: Optional[int] = None,
@@ -155,6 +220,8 @@ class FaissDocumentIndex(BaseDocumentIndex):
         Args:
             retriever (:obj:`torch.nn.Module`):
                 The encoder to be used for indexing.
+            documents (:obj:`List[Document]`, `optional`, defaults to None):
+                The documents to be indexed.
             batch_size (:obj:`int`, `optional`, defaults to 32):
                 The batch size to be used for indexing.
             num_workers (:obj:`int`, `optional`, defaults to 4):
@@ -178,22 +245,37 @@ class FaissDocumentIndex(BaseDocumentIndex):
             logger.log(
                 "Embeddings are already present and `force_reindex` is `False`. Skipping indexing."
             )
-            return self
+            if documents is None:
+                return self
 
         # release the memory
         if collate_fn is None:
             tokenizer = retriever.passage_tokenizer
-            collate_fn = lambda x: ModelInputs(
-                tokenizer(
-                    x,
-                    padding=True,
-                    return_tensors="pt",
-                    truncation=True,
-                    max_length=max_length or tokenizer.model_max_length,
+
+            def collate_fn(x):
+                return ModelInputs(
+                    tokenizer(
+                        x,
+                        padding=True,
+                        return_tensors="pt",
+                        truncation=True,
+                        max_length=max_length or tokenizer.model_max_length,
+                    )
                 )
-            )
+
+        if force_reindex:
+            if documents is not None:
+                self.documents.add_document(documents)
+            data = [k for k in self.get_passages()]
+
+        else:
+            if documents is not None:
+                data = [k for k in self.get_passages(DocumentStore(documents))]
+            else:
+                return self
+
         dataloader = DataLoader(
-            BaseDataset(name="passage", data=self.documents.get_passages()),
+            BaseDataset(name="passage", data=data),
             batch_size=batch_size,
             shuffle=False,
             num_workers=num_workers,
@@ -271,19 +353,18 @@ class FaissDocumentIndex(BaseDocumentIndex):
         # get float values (first element of the tuple)
         batch_scores: List[List[float]] = retriever_out[0].detach().cpu().tolist()
         # Retrieve the passages corresponding to the indices
-        batch_passages = [
-            [self.documents.get_label_from_index(i) for i in indices]
+        batch_docs = [
+            [self.documents.get_document_from_id(i) for i in indices if i != -1]
             for indices in batch_top_k
         ]
         # build the output object
+        # build the output object
         batch_retrieved_samples = [
             [
-                RetrievedSample(label=passage, index=index, score=score)
-                for passage, index, score in zip(passages, indices, scores)
+                RetrievedSample(document=doc, score=score)
+                for doc, score in zip(docs, scores)
             ]
-            for passages, indices, scores in zip(
-                batch_passages, batch_top_k, batch_scores
-            )
+            for docs, scores in zip(batch_docs, batch_scores)
         ]
         return batch_retrieved_samples
 

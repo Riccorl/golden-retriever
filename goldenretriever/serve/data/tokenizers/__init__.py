@@ -84,6 +84,6 @@ SPACY_LANGUAGE_MAPPER = {
     "zh_core_web_trf": "zh_core_web_trf",
 }
 
-from goldenretriever.serve.tokenizers.regex_tokenizer import RegexTokenizer
-from goldenretriever.serve.tokenizers.spacy_tokenizer import SpacyTokenizer
-from goldenretriever.serve.tokenizers.whitespace_tokenizer import WhitespaceTokenizer
+from relik.inference.data.tokenizers.regex_tokenizer import RegexTokenizer
+from relik.inference.data.tokenizers.spacy_tokenizer import SpacyTokenizer
+from relik.inference.data.tokenizers.whitespace_tokenizer import WhitespaceTokenizer

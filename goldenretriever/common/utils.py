@@ -218,7 +218,7 @@ def download_and_cache(
     try:
         r = requests.head(url, allow_redirects=False, timeout=10)
         r.raise_for_status()
-    except requests.exceptions.HTTPError as e:
+    except requests.exceptions.HTTPError:
         if r.status_code == 401:
             hf_token = huggingface_hub.HfFolder.get_token()
             if hf_token is None:
@@ -306,7 +306,7 @@ def download_and_cache(
 
 def download_from_hf(
     path_or_repo_id: Union[str, Path],
-    filenames: Optional[List[str]],
+    filenames: List[str],
     cache_dir: Union[str, Path] = None,
     force_download: bool = False,
     resume_download: bool = False,
@@ -315,6 +315,7 @@ def download_from_hf(
     revision: Optional[str] = None,
     local_files_only: bool = False,
     subfolder: str = "",
+    repo_type: str = "model",
 ):
     if isinstance(path_or_repo_id, Path):
         path_or_repo_id = str(path_or_repo_id)
@@ -341,6 +342,35 @@ def download_from_hf(
     return probably_the_folder
 
 
+def model_name_or_path_resolver(model_name_or_dir: Union[str, os.PathLike]) -> str:
+    """
+    Resolve a model name or directory to a model archive name or directory.
+
+    Args:
+        model_name_or_dir (:obj:`str` or :obj:`os.PathLike`):
+            A model name or directory.
+
+    Returns:
+        :obj:`str`: The model archive name or directory.
+    """
+    if is_remote_url(model_name_or_dir):
+        # if model_name_or_dir is a URL
+        # download it and try to load
+        model_archive = model_name_or_dir
+    elif Path(model_name_or_dir).is_dir() or Path(model_name_or_dir).is_file():
+        # if model_name_or_dir is a local directory or
+        # an archive file try to load it
+        model_archive = model_name_or_dir
+    else:
+        # probably model_name_or_dir is a sapienzanlp model id
+        # guess the url and try to download
+        model_name_or_dir_ = model_name_or_dir
+        # raise ValueError(f"Providing a model id is not supported yet.")
+        model_archive = sapienzanlp_model_urls(model_name_or_dir_)
+
+    return model_archive
+
+
 def from_cache(
     url_or_filename: Union[str, Path],
     cache_dir: Union[str, Path] = None,
@@ -354,15 +384,42 @@ def from_cache(
     filenames: Optional[List[str]] = None,
 ) -> Path:
     """
+    Given something that could be either a local path or a URL (or a SapienzaNLP model id),
+    determine which one and return a path to the corresponding file.
 
     Args:
-        url_or_filename:
-        cache_dir:
-        force_download:
+        url_or_filename (:obj:`str` or :obj:`Path`):
+            A path to a local file or a URL (or a SapienzaNLP model id).
+        cache_dir (:obj:`str` or :obj:`Path`, `optional`):
+            Path to a directory in which a downloaded file will be cached.
+        force_download (:obj:`bool`, `optional`, defaults to :obj:`False`):
+            Whether or not to re-download the file even if it already exists.
+        resume_download (:obj:`bool`, `optional`, defaults to :obj:`False`):
+            Whether or not to delete incompletely received files. Attempts to resume the download if such a file
+            exists.
+        proxies (:obj:`Dict[str, str]`, `optional`):
+            A dictionary of proxy servers to use by protocol or endpoint, e.g., :obj:`{'http': 'foo.bar:3128',
+            'http://hostname': 'foo.bar:4012'}.` The proxies are used on each request.
+        use_auth_token (:obj:`Union[bool, str]`, `optional`):
+            Optional string or boolean to use as Bearer token for remote files. If :obj:`True`, will get token from
+            :obj:`~transformers.hf_api.HfApi`. If :obj:`str`, will use that string as token.
+        revision (:obj:`str`, `optional`):
+            The specific model version to use. It can be a branch name, a tag name, or a commit id, since we use a
+            git-based system for storing models and other artifacts on huggingface.co, so ``revision`` can be any
+            identifier allowed by git.
+        local_files_only (:obj:`bool`, `optional`, defaults to :obj:`False`):
+            Whether or not to raise an error if the file to be downloaded is local.
+        subfolder (:obj:`str`, `optional`):
+            In case the relevant file is in a subfolder of the URL, specify it here.
+        filenames (:obj:`List[str]`, `optional`):
+            List of filenames to look for in the directory structure.
 
     Returns:
-
+        :obj:`Path`: Path to the cached file.
     """
+
+    url_or_filename = model_name_or_path_resolver(url_or_filename)
+
     if cache_dir is None:
         cache_dir = SAPIENZANLP_CACHE_DIR
 
@@ -498,3 +555,56 @@ def relative_to_absolute_path(path: str) -> os.PathLike:
     if Path(os.path.join(os.getcwd(), path)).exists():
         return Path(os.path.join(os.getcwd(), path)).absolute()
     raise ValueError(f"{path} is not a path")
+
+
+def to_config(object_to_save: Any) -> Dict[str, Any]:
+    """
+    Convert an object to a dictionary.
+
+    Returns:
+        `Dict[str, Any]`: The dictionary representation of the object.
+    """
+
+    def obj_to_dict(obj):
+        match obj:
+            case dict():
+                data = {}
+                for k, v in obj.items():
+                    data[k] = obj_to_dict(v)
+                return data
+
+            case list() | tuple():
+                return [obj_to_dict(x) for x in obj]
+
+            case object(__dict__=_):
+                data = {
+                    "_target_": f"{obj.__class__.__module__}.{obj.__class__.__name__}",
+                }
+                for k, v in obj.__dict__.items():
+                    if not k.startswith("_"):
+                        data[k] = obj_to_dict(v)
+                return data
+
+            case _:
+                return obj
+
+    return obj_to_dict(object_to_save)
+
+
+def get_callable_from_string(callable_fn: str) -> Any:
+    """
+    Get a callable from a string.
+
+    Args:
+        callable_fn (`str`):
+            The string representation of the callable.
+
+    Returns:
+        `Any`: The callable.
+    """
+    # separate the function name from the module name
+    module_name, function_name = callable_fn.rsplit(".", 1)
+    # import the module
+    module = importlib.import_module(module_name)
+    # get the function
+    return getattr(module, function_name)

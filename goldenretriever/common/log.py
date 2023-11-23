@@ -1,8 +1,12 @@
 import logging
+import os
 import sys
 import threading
-from typing import Optional
+from logging.config import dictConfig
+from typing import Any, Dict, Optional
 
+from art import text2art, tprint
+from colorama import Fore, Style, init
 from rich import get_console
 
 _lock = threading.Lock()
@@ -12,6 +16,68 @@ _default_log_level = logging.WARNING
 
 # fancy logger
 _console = get_console()
+
+
+class ColorfulFormatter(logging.Formatter):
+    """
+    Formatter to add coloring to log messages by log type
+    """
+
+    COLORS = {
+        "WARNING": Fore.YELLOW,
+        "ERROR": Fore.RED,
+        "CRITICAL": Fore.RED + Style.BRIGHT,
+        "DEBUG": Fore.CYAN,
+        # "INFO": Fore.GREEN,
+    }
+
+    def format(self, record):
+        record.rank = int(os.getenv("LOCAL_RANK", "0"))
+        log_message = super().format(record)
+        return self.COLORS.get(record.levelname, "") + log_message + Fore.RESET
+
+
+DEFAULT_LOGGING_CONFIG: Dict[str, Any] = {
+    "version": 1,
+    "formatters": {
+        "simple": {
+            "format": "[%(asctime)s] [%(levelname)s] [%(name)s.%(funcName)s:%(lineno)d] [PID:%(process)d] %(message)s",
+        },
+        "colorful": {
+            "()": ColorfulFormatter,
+            "format": "[%(asctime)s] [%(levelname)s] [%(name)s.%(funcName)s:%(lineno)d] [PID:%(process)d] [RANK:%(rank)d] %(message)s",
+        },
+    },
+    "filters": {},
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "simple",
+            "filters": [],
+            "stream": sys.stdout,
+        },
+        "color_console": {
+            "class": "logging.StreamHandler",
+            "formatter": "colorful",
+            "filters": [],
+            "stream": sys.stdout,
+        },
+    },
+    "root": {"handlers": ["console"], "level": os.getenv("LOG_LEVEL", "INFO")},
+    "loggers": {
+        "relik": {
+            "handlers": ["color_console"],
+            "level": "DEBUG",
+            "propagate": False,
+        },
+    },
+}
+
+
+def configure_logging():
+    """Configure with default logging"""
+    init()  # Initialize colorama
+    dictConfig(DEFAULT_LOGGING_CONFIG)
 
 
 def _get_library_name() -> str:
@@ -76,6 +142,8 @@ def get_logger(
     Return a logger with the specified name.
     """
 
+    configure_logging()
+
     if name is None:
         name = _get_library_name()
 
@@ -95,3 +163,7 @@ def get_logger(
 
 def get_console_logger():
     return _console
+
+
+def print_relik_text_art(text: str = "relik", font: str = "larry3d", **kwargs):
+    tprint(text, font=font, **kwargs)

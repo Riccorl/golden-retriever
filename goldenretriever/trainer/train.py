@@ -3,19 +3,19 @@ from pathlib import Path
 from typing import List, Optional, Union
 
 import hydra
-import omegaconf
 import lightning as pl
+import omegaconf
 import torch
-from omegaconf import OmegaConf
 from lightning import Trainer
-from lightning.callbacks import (
+from lightning.pytorch.callbacks import (
     EarlyStopping,
-    ModelCheckpoint,
     LearningRateMonitor,
+    ModelCheckpoint,
     ModelSummary,
 )
-from lightning.loggers import WandbLogger
-from rich.pretty import pprint
+from lightning.pytorch.loggers import WandbLogger
+from omegaconf import OmegaConf
+from pprintpp import pformat
 
 from goldenretriever.callbacks.evaluation_callbacks import (
     AvgRankingEvaluationCallback,
@@ -30,25 +30,24 @@ from goldenretriever.callbacks.utils_callbacks import (
     SavePredictionsCallback,
     SaveRetrieverCallback,
 )
-from goldenretriever.common.log import get_console_logger
+from goldenretriever.common.log import get_logger
 from goldenretriever.data.datasets import GoldenRetrieverDataset
 from goldenretriever.lightning_modules.pl_data_modules import (
     GoldenRetrieverPLDataModule,
 )
 from goldenretriever.lightning_modules.pl_modules import GoldenRetrieverPLModule
-from goldenretriever.retriever.golden_retriever import GoldenRetriever
-from goldenretriever.retriever.indexers.base import BaseDocumentIndex
-from goldenretriever.retriever.modules.optim import RAdamW
-from goldenretriever.retriever.modules.scheduler import LinearSchedulerWithWarmup
+from goldenretriever.pytorch_modules.loss import MultiLabelNCELoss
+from goldenretriever.pytorch_modules.model import GoldenRetriever
+from goldenretriever.pytorch_modules.optim import RAdamW
+from goldenretriever.pytorch_modules.scheduler import LinearScheduler
 
-logger = get_console_logger()
+logger = get_logger()
 
 
-class Trainer:
+class RetrieverTrainer:
     def __init__(
         self,
         retriever: GoldenRetriever,
-        index: BaseDocumentIndex,
         train_dataset: GoldenRetrieverDataset,
         val_dataset: Union[GoldenRetrieverDataset, list[GoldenRetrieverDataset]],
         test_dataset: Optional[
@@ -58,8 +57,9 @@ class Trainer:
         optimizer: torch.optim.Optimizer = RAdamW,
         lr: float = 1e-5,
         weight_decay: float = 0.01,
-        lr_scheduler: torch.optim.lr_scheduler.LRScheduler = LinearSchedulerWithWarmup,
+        lr_scheduler: torch.optim.lr_scheduler.LRScheduler = LinearScheduler,
         num_warmup_steps: int = 0,
+        loss: torch.nn.Module = MultiLabelNCELoss,
         callbacks: Optional[list] = None,
         accelerator: str = "auto",
         devices: int = 1,
@@ -109,7 +109,6 @@ class Trainer:
     ):
         # put all the parameters in the class
         self.retriever = retriever
-        self.index = index
         # datasets
         self.train_dataset = train_dataset
         self.val_dataset = val_dataset
@@ -121,6 +120,7 @@ class Trainer:
         self.weight_decay = weight_decay
         self.lr_scheduler = lr_scheduler
         self.num_warmup_steps = num_warmup_steps
+        self.loss = loss
         self.callbacks = callbacks
         self.accelerator = accelerator
         self.devices = devices
@@ -175,9 +175,9 @@ class Trainer:
             )
 
         if self.max_epochs is not None and self.max_steps is not None:
-            logger.log(
-                f"Both `max_epochs` and `max_steps` are specified in the trainer configuration. "
-                f"Will use `max_epochs` for the number of training steps"
+            logger.info(
+                "Both `max_epochs` and `max_steps` are specified in the trainer configuration. "
+                "Will use `max_epochs` for the number of training steps"
             )
             self.max_steps = None
 
@@ -190,7 +190,7 @@ class Trainer:
         self.lightining_datamodule = self.configure_lightning_datamodule()
 
         if self.max_epochs is not None:
-            logger.log(f"Number of training epochs: {self.max_epochs}")
+            logger.info(f"Number of training epochs: {self.max_epochs}")
             self.max_steps = (
                 len(self.lightining_datamodule.train_dataloader()) * self.max_epochs
             )
@@ -204,13 +204,15 @@ class Trainer:
         # callbacks declaration
         self.callbacks_store: List[pl.Callback] = self.configure_callbacks()
 
-        logger.log(f"Instantiating the Trainer")
+        logger.info("Instantiating the Trainer")
         self.trainer = pl.Trainer(
             accelerator=self.accelerator,
             devices=self.devices,
             num_nodes=self.num_nodes,
             strategy=self.strategy,
             accumulate_grad_batches=self.accumulate_grad_batches,
+            max_epochs=self.max_epochs,
+            max_steps=self.max_steps,
             gradient_clip_val=self.gradient_clip_val,
             val_check_interval=self.val_check_interval,
             check_val_every_n_epoch=self.check_val_every_n_epoch,
@@ -236,18 +238,23 @@ class Trainer:
             val_datasets=self.val_dataset,
             test_datasets=self.test_dataset,
             num_workers=self.num_workers,
+            *args,
+            **kwargs,
         )
         return self.lightining_datamodule
 
     def configure_lightning_module(self, *args, **kwargs):
-        # and to the retriever
-        self.retriever.index = self.index
+        # add loss object to the retriever
+        if self.retriever.loss_type is None:
+            self.retriever.loss_type = self.loss()
 
         # lightning module declaration
         self.lightining_module = GoldenRetrieverPLModule(
             model=self.retriever,
             optimizer=self.optimizer,
             lr_scheduler=self.lr_scheduler,
+            *args,
+            **kwargs,
         )
 
         return self.lightining_module
@@ -255,10 +262,40 @@ class Trainer:
     def configure_optimizers(self, *args, **kwargs):
         # check if it is the class or the instance
         if isinstance(self.optimizer, type):
+            param_optimizer = list(self.retriever.named_parameters())
+            no_decay = ["bias", "LayerNorm.bias", "LayerNorm.weight"]
+            optimizer_grouped_parameters = [
+                {
+                    "params": [
+                        p for n, p in param_optimizer if "layer_norm_layer" in n
+                    ],
+                    "weight_decay": self.weight_decay,
+                    "lr": 1e-4,
+                },
+                {
+                    "params": [
+                        p
+                        for n, p in param_optimizer
+                        if all(nd not in n for nd in no_decay)
+                        and "layer_norm_layer" not in n
+                    ],
+                    "weight_decay": self.weight_decay,
+                },
+                {
+                    "params": [
+                        p
+                        for n, p in param_optimizer
+                        if "layer_norm_layer" not in n
+                        and any(nd in n for nd in no_decay)
+                    ],
+                    "weight_decay": 0.0,
+                },
+            ]
             self.optimizer = self.optimizer(
-                params=self.retriever.parameters(),
+                # params=self.retriever.parameters(),
+                params=optimizer_grouped_parameters,
                 lr=self.lr,
-                weight_decay=self.weight_decay,
+                # weight_decay=self.weight_decay,
             )
         else:
             self.optimizer = self.optimizer
@@ -284,7 +321,7 @@ class Trainer:
         if isinstance(self.top_ks, int):
             self.top_ks = [self.top_ks]
         # order the top_ks in descending order
-        self.top_ks = sorted(self.top_ks, reverse=True)
+        # self.top_ks = sorted(self.top_ks, reverse=True)
         # get the max top_k to monitor
         self.top_k = self.top_ks[0]
         self.metric_to_monitor = f"validate_recall@{self.top_k}"
@@ -293,7 +330,7 @@ class Trainer:
         # early stopping callback if specified
         self.early_stopping_callback: Optional[EarlyStopping] = None
         if self.early_stopping:
-            logger.log(
+            logger.info(
                 f"Eanbling Early Stopping, patience: {self.early_stopping_patience}"
             )
             self.early_stopping_callback = EarlyStopping(
@@ -309,10 +346,10 @@ class Trainer:
         if self.log_to_wandb:
             # define some default values for the wandb logger
             if self.wandb_project_name is None:
-                self.wandb_project_name = "goldenretriever"
+                self.wandb_project_name = "relik-retriever"
             if self.wandb_save_dir is None:
                 self.wandb_save_dir = "./"
-            logger.log(f"Instantiating Wandb Logger")
+            logger.info("Instantiating Wandb Logger")
             self.wandb_logger = WandbLogger(
                 entity=self.wandb_entity,
                 project=self.wandb_project_name,
@@ -332,19 +369,19 @@ class Trainer:
         # model checkpoint callback if specified
         self.model_checkpoint_callback: Optional[ModelCheckpoint] = None
         if self.model_checkpointing:
-            logger.log(f"Enabling Model Checkpointing")
+            logger.info("Enabling Model Checkpointing")
             if self.chekpoint_dir is None:
                 self.chekpoint_dir = (
                     self.experiment_path / "checkpoints"
                     if self.experiment_path
                     else None
                 )
-            if checkpoint_filename is None:
-                checkpoint_filename = (
+            if self.checkpoint_filename is None:
+                self.checkpoint_filename = (
                     "checkpoint-validate_recall@"
-                    + self.top_k
+                    + str(self.top_k)
                     + "_{validate_recall@"
-                    + self.top_k
+                    + str(self.top_k)
                     + ":.4f}-epoch_{epoch:02d}"
                 )
             self.model_checkpoint_callback = ModelCheckpoint(
@@ -361,7 +398,7 @@ class Trainer:
 
         # prediction callback
         self.other_callbacks_for_prediction = [
-            RecallAtKEvaluationCallback(k) for k in self.top_ks
+            RecallAtKEvaluationCallback(k, verbose=True) for k in self.top_ks
         ]
         self.other_callbacks_for_prediction += [
             AvgRankingEvaluationCallback(k=self.top_k, verbose=True, prefix="train"),
@@ -401,9 +438,10 @@ class Trainer:
             self.callbacks_store.append(self.hard_negatives_callback)
 
         # utils callback
-        self.callbacks_store.append(
-            SaveRetrieverCallback(), FreeUpIndexerVRAMCallback()
+        self.callbacks_store.extend(
+            [SaveRetrieverCallback(), FreeUpIndexerVRAMCallback()]
         )
+        return self.callbacks_store
 
     def train(self):
         self.trainer.fit(self.lightining_module, datamodule=self.lightining_datamodule)
@@ -432,15 +470,15 @@ class Trainer:
                         "Either `checkpoint_path` or `model_checkpoint_callback` should "
                         "be provided to the trainer"
                     )
-                logger.log(f"Loading best model from {best_model_path}")
+                logger.info(f"Loading best model from {best_model_path}")
 
                 try:
                     best_lightining_module = (
                         GoldenRetrieverPLModule.load_from_checkpoint(best_model_path)
                     )
                 except Exception as e:
-                    logger.log(f"Failed to load the model from checkpoint: {e}")
-                    logger.log(f"Using last model instead")
+                    logger.info(f"Failed to load the model from checkpoint: {e}")
+                    logger.info("Using last model instead")
                     best_lightining_module = self.lightining_module
 
         lightining_datamodule = lightining_datamodule or self.lightining_datamodule
@@ -453,9 +491,9 @@ def train(conf: omegaconf.DictConfig) -> None:
     pl.seed_everything(conf.train.seed)
     torch.set_float32_matmul_precision(conf.train.float32_matmul_precision)
 
-    logger.log(f"Starting training for [bold cyan]{conf.model_name}[/bold cyan] model")
+    logger.info(f"Starting training for [bold cyan]{conf.model_name}[/bold cyan] model")
     if conf.train.pl_trainer.fast_dev_run:
-        logger.log(
+        logger.info(
             f"Debug mode {conf.train.pl_trainer.fast_dev_run}. Forcing debugger configuration"
         )
         # Debuggers don't like GPUs nor multiprocessing
@@ -473,10 +511,11 @@ def train(conf: omegaconf.DictConfig) -> None:
         conf.train.model_checkpoint_callback = None
 
     if "print_config" in conf and conf.print_config:
-        pprint(OmegaConf.to_container(conf), console=logger, expand_all=True)
+        # pprint(OmegaConf.to_container(conf), console=logger, expand_all=True)
+        logger.info(pformat(OmegaConf.to_container(conf)))
 
     # data module declaration
-    logger.log(f"Instantiating the Data Module")
+    logger.info("Instantiating the Data Module")
     pl_data_module: GoldenRetrieverPLDataModule = hydra.utils.instantiate(
         conf.data.datamodule, _recursive_=False
     )
@@ -498,9 +537,9 @@ def train(conf: omegaconf.DictConfig) -> None:
                 * conf.train.pl_trainer.max_epochs
             )
             if "max_steps" in conf.train.pl_trainer:
-                logger.log(
-                    f"Both `max_epochs` and `max_steps` are specified in the trainer configuration. "
-                    f"Will use `max_epochs` for the number of training steps"
+                logger.info(
+                    "Both `max_epochs` and `max_steps` are specified in the trainer configuration. "
+                    "Will use `max_epochs` for the number of training steps"
                 )
                 conf.train.pl_trainer.max_steps = None
         elif (
@@ -512,7 +551,7 @@ def train(conf: omegaconf.DictConfig) -> None:
             raise ValueError(
                 "Either `max_epochs` or `max_steps` should be specified in the trainer configuration"
             )
-        logger.log(f"Expected number of training steps: {num_training_steps}")
+        logger.info(f"Expected number of training steps: {num_training_steps}")
 
         if "lr_scheduler" in conf.model.pl_module and conf.model.pl_module.lr_scheduler:
             # set the number of warmup steps as x% of the total number of training steps
@@ -527,11 +566,11 @@ def train(conf: omegaconf.DictConfig) -> None:
                     )
                 else:
                     conf.model.pl_module.lr_scheduler.num_warmup_steps = 0
-            logger.log(
+            logger.info(
                 f"Number of warmup steps: {conf.model.pl_module.lr_scheduler.num_warmup_steps}"
             )
 
-        logger.log(f"Instantiating the Model")
+        logger.info("Instantiating the Model")
         pl_module: GoldenRetrieverPLModule = hydra.utils.instantiate(
             conf.model.pl_module, _recursive_=False
         )
@@ -539,7 +578,7 @@ def train(conf: omegaconf.DictConfig) -> None:
             "pretrain_ckpt_path" in conf.train
             and conf.train.pretrain_ckpt_path is not None
         ):
-            logger.log(
+            logger.info(
                 f"Loading pretrained checkpoint from {conf.train.pretrain_ckpt_path}"
             )
             pl_module.load_state_dict(
@@ -549,9 +588,9 @@ def train(conf: omegaconf.DictConfig) -> None:
         if "compile" in conf.model.pl_module and conf.model.pl_module.compile:
             try:
                 pl_module = torch.compile(pl_module, backend="inductor")
-            except Exception as e:
-                logger.log(
-                    f"Failed to compile the model, you may need to install PyTorch 2.0"
+            except Exception:
+                logger.info(
+                    "Failed to compile the model, you may need to install PyTorch 2.0"
                 )
 
     # callbacks declaration
@@ -560,7 +599,7 @@ def train(conf: omegaconf.DictConfig) -> None:
     experiment_logger: Optional[WandbLogger] = None
     experiment_path: Optional[Path] = None
     if conf.logging.log:
-        logger.log(f"Instantiating Wandb Logger")
+        logger.info("Instantiating Wandb Logger")
         experiment_logger = hydra.utils.instantiate(conf.logging.wandb_arg)
         if pl_module is not None:
             # it may happen that the model is not instantiated if we are only testing
@@ -602,7 +641,7 @@ def train(conf: omegaconf.DictConfig) -> None:
                     callbacks_store.append(hydra.utils.instantiate(callback))
 
     # trainer
-    logger.log(f"Instantiating the Trainer")
+    logger.info("Instantiating the Trainer")
     trainer: Trainer = hydra.utils.instantiate(
         conf.train.pl_trainer, callbacks=callbacks_store, logger=experiment_logger
     )
@@ -624,29 +663,29 @@ def train(conf: omegaconf.DictConfig) -> None:
                 "Either `checkpoint_path` or `model_checkpoint_callback` should "
                 "be specified in the evaluation configuration"
             )
-        logger.log(f"Loading best model from {best_model_path}")
+        logger.info(f"Loading best model from {best_model_path}")
 
         try:
             best_pl_module = GoldenRetrieverPLModule.load_from_checkpoint(
                 best_model_path
             )
         except Exception as e:
-            logger.log(f"Failed to load the model from checkpoint: {e}")
-            logger.log(f"Using last model instead")
+            logger.info(f"Failed to load the model from checkpoint: {e}")
+            logger.info("Using last model instead")
             best_pl_module = pl_module
         if "compile" in conf.model.pl_module and conf.model.pl_module.compile:
             try:
                 best_pl_module = torch.compile(best_pl_module, backend="inductor")
-            except Exception as e:
-                logger.log(
-                    f"Failed to compile the model, you may need to install PyTorch 2.0"
+            except Exception:
+                logger.info(
+                    "Failed to compile the model, you may need to install PyTorch 2.0"
                 )
 
     # module test
     trainer.test(best_pl_module, datamodule=pl_data_module)
 
 
-@hydra.main(config_path="../../conf", config_name="default")
+@hydra.main(config_path="../../conf", config_name="default", version_base="1.3")
 def main(conf: omegaconf.DictConfig):
     train(conf)
 

@@ -1,6 +1,8 @@
 import contextlib
+from functools import partial
 import logging
 import os
+import platform
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Union
@@ -8,15 +10,19 @@ from typing import Callable, Dict, List, Optional, Union
 import torch
 import torch.nn.functional as F
 import transformers as tr
+from torch.utils.data import DataLoader
+from tqdm import tqdm
 
-from goldenretriever.common.log import get_console_logger, get_logger
+from goldenretriever.common.log import get_logger
+from goldenretriever.common.torch_utils import get_autocast_context
 from goldenretriever.common.model_inputs import ModelInputs
+from goldenretriever.data.base.datasets import BaseDataset
 from goldenretriever.data.labels import Labels
-from goldenretriever.retriever import RetrievedSample, PRECISION_MAP
-from goldenretriever.retriever.indexers.base import BaseDocumentIndex
-from goldenretriever.retriever.modules.hf import GoldenRetrieverModel
+from goldenretriever.indexers.base import BaseDocumentIndex
+from goldenretriever.indexers.inmemory import InMemoryDocumentIndex
+from goldenretriever.pytorch_modules import PRECISION_MAP, RetrievedSample
+from goldenretriever.pytorch_modules.hf import GoldenRetrieverModel
 
-console_logger = get_console_logger()
 logger = get_logger(__name__, level=logging.INFO)
 
 
@@ -39,7 +45,8 @@ class GoldenRetriever(torch.nn.Module):
         document_index: Optional[Union[str, BaseDocumentIndex]] = None,
         question_tokenizer: Optional[Union[str, tr.PreTrainedTokenizer]] = None,
         passage_tokenizer: Optional[Union[str, tr.PreTrainedTokenizer]] = None,
-        device: Optional[Union[str, torch.device]] = None,
+        device: Optional[Union[str, torch.device]] = "cpu",
+        precision: Optional[Union[str, int]] = None,
         index_precision: Optional[Union[str, int]] = None,
         index_device: Optional[Union[str, torch.device]] = None,
         *args,
@@ -71,6 +78,13 @@ class GoldenRetriever(torch.nn.Module):
         self.loss_type = loss_type
 
         # indexer stuff
+        index_device = index_device or device
+        index_precision = index_precision or precision
+        if document_index is None:
+            # if no indexer is provided, create a new one
+            document_index = InMemoryDocumentIndex(
+                device=index_device, precision=index_precision, **kwargs
+            )
         if isinstance(document_index, str):
             document_index = BaseDocumentIndex.from_pretrained(
                 document_index, device=index_device, precision=index_precision, **kwargs
@@ -83,6 +97,9 @@ class GoldenRetriever(torch.nn.Module):
 
         # move the model to the device
         self.to(device or torch.device("cpu"))
+
+        # set the precision
+        self.precision = precision
 
     def forward(
         self,
@@ -220,7 +237,7 @@ class GoldenRetriever(torch.nn.Module):
             num_workers=num_workers,
             max_length=max_length,
             collate_fn=collate_fn,
-            encoder_precision=precision,
+            encoder_precision=precision or self.precision,
             compute_on_cpu=compute_on_cpu,
             force_reindex=force_reindex,
         )
@@ -237,6 +254,11 @@ class GoldenRetriever(torch.nn.Module):
         k: Optional[int] = None,
         max_length: Optional[int] = None,
         precision: Optional[Union[str, int]] = None,
+        collate_fn: Optional[Callable] = None,
+        batch_size: int | None = None,
+        num_workers: int = 4,
+        progress_bar: bool = False,
+        **kwargs,
     ) -> List[List[RetrievedSample]]:
         """
         Retrieve the passages for the questions.
@@ -258,6 +280,14 @@ class GoldenRetriever(torch.nn.Module):
                 The maximum length of the questions.
             precision (`Optional[Union[str, int]]`):
                 The precision to use for the model.
+            collate_fn (`Callable`):
+                The collate function to use for the retrieval.
+            batch_size (`int`):
+                The batch size to use for the retrieval.
+            num_workers (`int`):
+                The number of workers to use for the retrieval.
+            progress_bar (`bool`):
+                Whether to show a progress bar.
 
         Returns:
             `List[List[RetrievedSample]]`: The retrieved passages and their indices.
@@ -274,18 +304,25 @@ class GoldenRetriever(torch.nn.Module):
         if text is not None:
             if isinstance(text, str):
                 text = [text]
-            if text_pair is not None and isinstance(text_pair, str):
-                text_pair = [text_pair]
-            tokenizer = self.question_tokenizer
-            model_inputs = ModelInputs(
-                tokenizer(
-                    text,
-                    text_pair=text_pair,
-                    padding=True,
-                    return_tensors="pt",
-                    truncation=True,
-                    max_length=max_length or tokenizer.model_max_length,
+            if text_pair is not None:
+                if isinstance(text_pair, str):
+                    text_pair = [text_pair]
+            else:
+                text_pair = [None] * len(text)
+
+            if collate_fn is None:
+                tokenizer = self.question_tokenizer
+                collate_fn = partial(
+                    self.default_collate_fn, max_length=max_length, tokenizer=tokenizer
                 )
+
+            dataloader = DataLoader(
+                BaseDataset(name="questions", data=list(zip(text, text_pair))),
+                batch_size=batch_size,
+                shuffle=False,
+                num_workers=num_workers,
+                pin_memory=False,
+                collate_fn=collate_fn,
             )
         else:
             model_inputs = ModelInputs(dict(input_ids=input_ids))
@@ -294,26 +331,52 @@ class GoldenRetriever(torch.nn.Module):
             if token_type_ids is not None:
                 model_inputs["token_type_ids"] = token_type_ids
 
-        model_inputs.to(self.device)
+            dataloader = [model_inputs]
 
-        # fucking autocast only wants pure strings like 'cpu' or 'cuda'
-        # we need to convert the model device to that
-        device_type_for_autocast = str(self.device).split(":")[0]
-        # autocast doesn't work with CPU and stuff different from bfloat16
-        autocast_pssg_mngr = (
-            contextlib.nullcontext()
-            if device_type_for_autocast == "cpu"
-            else (
-                torch.autocast(
-                    device_type=device_type_for_autocast,
-                    dtype=PRECISION_MAP[precision],
-                )
+        if progress_bar:
+            dataloader = tqdm(dataloader, desc="Retrieving passages")
+
+        retrieved = []
+        try:
+            with get_autocast_context(self.device, precision):
+                for batch in dataloader:
+                    batch = batch.to(self.device)
+                    question_encodings = self.question_encoder(**batch).pooler_output
+                    retrieved += self.document_index.search(question_encodings, k)
+        except AttributeError as e:
+            # apparently num_workers > 0 gives some issue on MacOS as of now
+            if "mac" in platform.platform().lower():
+                raise ValueError(
+                    "DataLoader with num_workers > 0 is not supported on MacOS. "
+                    "Please set num_workers=0 or try to run on a different machine."
+                ) from e
+            else:
+                raise e
+
+        if progress_bar:
+            dataloader.close()
+
+        return retrieved
+
+    @staticmethod
+    def default_collate_fn(
+        x: tuple, tokenizer: tr.PreTrainedTokenizer, max_length: int | None = None
+    ) -> ModelInputs:
+        # get text and text pair
+        # TODO: check if only retriever is used
+        _text = [sample[0] for sample in x]
+        _text_pair = [sample[1] for sample in x]
+        _text_pair = None if any([t is None for t in _text_pair]) else _text_pair
+        return ModelInputs(
+            tokenizer(
+                _text,
+                text_pair=_text_pair,
+                padding=True,
+                return_tensors="pt",
+                truncation=True,
+                max_length=max_length or tokenizer.model_max_length,
             )
         )
-        with autocast_pssg_mngr:
-            question_encodings = self.question_encoder(**model_inputs).pooler_output
-
-        return self.document_index.search(question_encodings, k)
 
     def get_index_from_passage(self, passage: str) -> int:
         """
@@ -495,10 +558,10 @@ class GoldenRetriever(torch.nn.Module):
         # self.question_encoder.config._name_or_path = question_encoder_name
         self.question_encoder.register_for_auto_class()
         self.question_encoder.save_pretrained(
-            output_dir / question_encoder_name, push_to_hub=push_to_hub, **kwargs
+            str(output_dir / question_encoder_name), push_to_hub=push_to_hub, **kwargs
         )
         self.question_tokenizer.save_pretrained(
-            output_dir / question_encoder_name, push_to_hub=push_to_hub, **kwargs
+            str(output_dir / question_encoder_name), push_to_hub=push_to_hub, **kwargs
         )
         if not self.passage_encoder_is_question_encoder:
             logger.info(
@@ -507,7 +570,9 @@ class GoldenRetriever(torch.nn.Module):
             # self.passage_encoder.config._name_or_path = passage_encoder_name
             self.passage_encoder.register_for_auto_class()
             self.passage_encoder.save_pretrained(
-                output_dir / passage_encoder_name, push_to_hub=push_to_hub, **kwargs
+                str(output_dir / passage_encoder_name),
+                push_to_hub=push_to_hub,
+                **kwargs,
             )
             self.passage_tokenizer.save_pretrained(
                 output_dir / passage_encoder_name, push_to_hub=push_to_hub, **kwargs
@@ -516,7 +581,7 @@ class GoldenRetriever(torch.nn.Module):
         if self.document_index is not None:
             # save the indexer
             self.document_index.save_pretrained(
-                output_dir / document_index_name, **kwargs
+                str(output_dir / document_index_name), push_to_hub=push_to_hub, **kwargs
             )
 
         logger.info("Saving retriever to disk done.")

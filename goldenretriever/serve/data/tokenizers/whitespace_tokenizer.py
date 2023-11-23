@@ -3,8 +3,8 @@ from typing import List, Union
 
 from overrides import overrides
 
-from goldenretriever.serve.tokenizers.base_tokenizer import BaseTokenizer
-from goldenretriever.serve.tokenizers.word import Word
+from goldenretriever.serve.data.objects import Word
+from goldenretriever.serve.data.tokenizers.base_tokenizer import BaseTokenizer
 
 
 class WhitespaceTokenizer(BaseTokenizer):
@@ -62,7 +62,7 @@ class WhitespaceTokenizer(BaseTokenizer):
         if isinstance(text, list):
             text = " ".join(text)
         return [
-            Word(t[0], i, start_char=t[1], end_char=t[2])
+            Word(t[0], i, idx=t[1], idx_end=t[2])
             for i, t in enumerate(
                 (m.group(0), m.start(), m.end())
                 for m in self.whitespace_regex.finditer(text)

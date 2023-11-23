@@ -47,9 +47,21 @@ def zip_run(
     return zip_path
 
 
+def get_logged_in_username():
+    token = huggingface_hub.HfFolder.get_token()
+    if token is None:
+        raise ValueError(
+            "No HuggingFace token found. You need to execute `huggingface-cli login` first!"
+        )
+    api = huggingface_hub.HfApi()
+    user = api.whoami(token=token)
+    return user["name"]
+
+
 def upload(
     model_dir: Union[str, os.PathLike],
     model_name: str,
+    filenames: Optional[list[str]] = None,
     organization: Optional[str] = None,
     repo_name: Optional[str] = None,
     commit: Optional[str] = None,
@@ -57,10 +69,9 @@ def upload(
 ):
     token = huggingface_hub.HfFolder.get_token()
     if token is None:
-        print(
+        raise ValueError(
             "No HuggingFace token found. You need to execute `huggingface-cli login` first!"
         )
-        return
 
     repo_id = repo_name or model_name
     if organization is not None:
@@ -86,7 +97,12 @@ def upload(
             # if the user wants to upload a transformers model, we don't need to zip it
             # we just need to copy the files to the tmpdir
             logger.debug(f"Copying {model_dir} to {tmpdir}")
-            os.system(f"cp -r {model_dir}/* {tmpdir}")
+            # copy only the files that are needed
+            if filenames is not None:
+                for filename in filenames:
+                    os.system(f"cp {model_dir}/{filename} {tmpdir}")
+            else:
+                os.system(f"cp -r {model_dir}/* {tmpdir}")
 
         # this method automatically puts large files (>10MB) into git lfs
         repo.push_to_hub(commit_message=commit or "Automatic push from sapienzanlp")
@@ -113,8 +129,8 @@ def parse_args() -> argparse.Namespace:
         "--archive",
         action="store_true",
         help="""
-            Whether to compress the model directory before uploading it. 
-            If True, the model directory will be zipped and the zip file will be uploaded. 
+            Whether to compress the model directory before uploading it.
+            If True, the model directory will be zipped and the zip file will be uploaded.
             If False, the model directory will be uploaded as is.""",
     )
     return parser.parse_args()

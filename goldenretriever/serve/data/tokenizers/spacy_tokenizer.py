@@ -2,15 +2,15 @@ import logging
 from typing import Dict, List, Tuple, Union
 
 import spacy
-from ipa.common.utils import load_spacy
-from overrides import overrides
+
+# from ipa.common.utils import load_spacy
 from spacy.cli.download import download as spacy_download
 from spacy.tokens import Doc
 
 from goldenretriever.common.log import get_logger
-from goldenretriever.serve.tokenizers import SPACY_LANGUAGE_MAPPER
-from goldenretriever.serve.tokenizers.base_tokenizer import BaseTokenizer
-from goldenretriever.serve.tokenizers.word import Word
+from goldenretriever.serve.data.objects import Word
+from goldenretriever.serve.data.tokenizers import SPACY_LANGUAGE_MAPPER
+from goldenretriever.serve.data.tokenizers.base_tokenizer import BaseTokenizer
 
 logger = get_logger(level=logging.DEBUG)
 
@@ -30,14 +30,19 @@ def load_spacy(
     Download and load spacy model.
 
     Args:
-        language:
-        pos_tags:
-        lemma:
-        parse:
-        split_on_spaces:
+        language (:obj:`str`, defaults to :obj:`en`):
+            Language of the text to tokenize.
+        pos_tags (:obj:`bool`, optional, defaults to :obj:`False`):
+            If :obj:`True`, performs POS tagging with spacy model.
+        lemma (:obj:`bool`, optional, defaults to :obj:`False`):
+            If :obj:`True`, performs lemmatization with spacy model.
+        parse (:obj:`bool`, optional, defaults to :obj:`False`):
+            If :obj:`True`, performs dependency parsing with spacy model.
+        split_on_spaces (:obj:`bool`, optional, defaults to :obj:`False`):
+            If :obj:`True`, will split by spaces without performing tokenization.
 
     Returns:
-        spacy.Language: The spacy tokenizer loaded.
+        :obj:`spacy.Language`: The spacy model loaded.
     """
     exclude = ["vectors", "textcat", "ner"]
     if not pos_tags:
@@ -152,18 +157,17 @@ class SpacyTokenizer(BaseTokenizer):
             tokenized = self.tokenize(texts)
         return tokenized
 
-    @overrides
-    def tokenize(self, text: Union[str, List[str]]) -> List[Word]:
+    def tokenize(self, text: Union[str, List[str]], *args, **kwargs) -> List[Word]:
         if self.split_on_spaces:
             if isinstance(text, str):
                 text = text.split(" ")
             spaces = [True] * len(text)
             text = Doc(self.spacy.vocab, words=text, spaces=spaces)
-        return self._clean_tokens(self.spacy(text))
+        # return self._clean_tokens(self.spacy(text))
+        return self.spacy(text)
 
-    @overrides
     def tokenize_batch(
-        self, texts: Union[List[str], List[List[str]]]
+        self, texts: Union[List[str], List[List[str]]], *args, **kwargs
     ) -> List[List[Word]]:
         if self.split_on_spaces:
             if isinstance(texts[0], str):
@@ -173,7 +177,8 @@ class SpacyTokenizer(BaseTokenizer):
                 Doc(self.spacy.vocab, words=text, spaces=space)
                 for text, space in zip(texts, spaces)
             ]
-        return [self._clean_tokens(tokens) for tokens in self.spacy.pipe(texts)]
+        return list(self.spacy.pipe(texts))
+        # return [self._clean_tokens(tokens) for tokens in self.spacy.pipe(texts)]
 
     @staticmethod
     def _clean_tokens(tokens: Doc) -> List[Word]:

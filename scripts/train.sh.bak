@@ -6,7 +6,7 @@ CHECK_MARK="\033[0;32m\xE2\x9C\x94\033[0m"
 # usage text
 USAGE="$(basename "$0") [-h --help] [-l --language-model LANG_MODEL_NAME] [-d --debug] [-p --precision PRECISION]
 [-c --cpu] [-g --devices DEVICES] [-n --nodes NODES] [-m --gpu-mem GPU_MEM] [-s --strategy STRATEGY]
-[-o --offline] [-t --test] [--config-path CONFIG_PATH] [--checkpoint CHECKPOINT_PATH] OVERRIDES
+[-o --offline] [-t --test] [--config-path CONFIG_PATH] [--checkpoint CHECKPOINT_PATH] [-w --wandb WANDB_PROJECT] OVERRIDES
 
 where:
     -h --help             Show this help text
@@ -22,14 +22,13 @@ where:
     -o --offline          Run the experiment offline
     -v --print            Print the config
     -t --test             Run only the test phase
+    -w --wandb            The wandb project name
     --config-path         Run a specific config file
     --checkpoint          Run a specific checkpoint
     OVERRIDES             Overrides for the experiment, in the form of key=value.
                           For example, 'model_name=bert-base-uncased'.
 Example:
-  ./script/train.sh
-  ./script/train.sh -l bert-base-cased
-  ./script/train.sh -l bert-base-cased -m 10000
+  bash scripts/train.sh --config-path conf/finetune_iterable_in_batch.yaml -l intfloat/e5-base-v2
 "
 
 # Transform long options to short ones
@@ -50,13 +49,14 @@ for arg in "$@"; do
   '--test') set -- "$@" '-t' ;;
   '--config-path') set -- "$@" '-a' ;;
   '--checkpoint') set -- "$@" '-k' ;;
+  '--wandb') set -- "$@" '-w' ;;
   *) set -- "$@" "$arg" ;;
   esac
 done
 
 # check for named params
 #while [ $OPTIND -le "$#" ]; do
-while getopts ":hl:dp:cg:n:m:s:ovta:k:" opt; do
+while getopts ":hl:dp:cg:n:m:s:ovta:k:w:" opt; do
   case $opt in
   h)
     printf "%s$USAGE" && exit 0
@@ -100,6 +100,9 @@ while getopts ":hl:dp:cg:n:m:s:ovta:k:" opt; do
   k)
     CHECKPOINT_PATH="$OPTARG"
     ;;
+  w)
+    WANDB_PROJECT="$OPTARG"
+    ;;
   \?)
     echo "Invalid option -$OPTARG" >&2 && echo "$USAGE" && exit 0
     ;;
@@ -135,7 +138,7 @@ fi
 # if -p is not specified, PRECISION is 16
 if [ -z "$PRECISION" ]; then
   # default value
-  PRECISION=16
+  PRECISION=16-mixed
 fi
 
 # if -c is not specified, USE_CPU is False
@@ -190,6 +193,12 @@ else
   OVERRIDES="$OVERRIDES +evaluation.checkpoint_path=$CHECKPOINT_PATH"
 fi
 
+if [ -z "$WANDB_PROJECT" ]; then
+  WANDB_PROJECT=""
+else
+  OVERRIDES="$OVERRIDES project_name=$WANDB_PROJECT"
+fi
+
 # if -t is not specified, ONLY_TEST is False
 if [ -z "$ONLY_TEST" ]; then
   ONLY_TEST="False"
@@ -238,26 +247,54 @@ else
 fi
 GPU_RAM_MESSAGE=""
 
+# echo "$OVERRIDES" | fold -w 70 -s
+
 cat <<EOF
 
-Configuration:
--------------------------------------------------------------------
-python:                           $(which python)
-Language model name:              $LANG_MODEL_NAME
-Config path:                      $CONFIG_PATH
-Model name:                       $MODEL_NAME
-Run in debug mode:                $DEV_RUN
-Requested VRAM:                   $GPU_MEM MB
-Available VRAM:                   $FREE_MEM MB
-Precision:                        $PRECISION bit
-Number of GPUs:                   $DEVICES
-Number of nodes:                  $NODES
-Use CPU:                          $USE_CPU
-W&B Mode:                         $WANDB
-Hydra Configuration Overrides:    $OVERRIDES
--------------------------------------------------------------------
+.-------------------------------------------------------------------------.
+|                                                                         | 
+|         ██████   ██████  ██      ██████  ███████ ███    ██              |
+|        ██       ██    ██ ██      ██   ██ ██      ████   ██              |
+|        ██   ███ ██    ██ ██      ██   ██ █████   ██ ██  ██              |      
+|        ██    ██ ██    ██ ██      ██   ██ ██      ██  ██ ██              |
+|         ██████   ██████  ███████ ██████  ███████ ██   ████              |                                       
+|                                                                         |  
+|                                                                         |
+|  ██████  ███████ ████████ ██████  ██ ███████ ██    ██ ███████ ██████    |
+|  ██   ██ ██         ██    ██   ██ ██ ██      ██    ██ ██      ██   ██   |
+|  ██████  █████      ██    ██████  ██ █████   ██    ██ █████   ██████    |
+|  ██   ██ ██         ██    ██   ██ ██ ██       ██  ██  ██      ██   ██   |
+|  ██   ██ ███████    ██    ██   ██ ██ ███████   ████   ███████ ██   ██   |
+|                                                                         |       
+'-------------------------------------------------------------------------'    
 
+             ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⣤⣴⣶⣾⠿⠶⢶⣶⣤⣤⣀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀                  
+             ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣠⣴⡿⠟⠋⠉⠀⠀⠀⠀⠀⠀⠈⠉⠉⠻⣧⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀                  
+             ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣠⣾⠟⠉⠀⠀⣠⣤⣶⣷⢀⡀⠀⠀⠀⠀⠀⠀⠈⠻⣦⡀⠀⠀⠀⠀⠀⠀⠀                  
+             ⠀⠀⠀⠀⠀⠀⠀⠀⢀⣼⡟⠁⠀⠀⠀⠘⠛⠁⠀⣀⣼⣿⣦⠀⠀⠀⠀⠀⠙⣦⣮⣹⡆⠀⠀⠀⠀⠀⠀                  
+             ⠀⠀⠀⠀⠀⠀⠀⣠⣾⡿⠀⠀⠀⠀⠀⠀⠀⠰⢿⡿⠿⠟⠛⠉⠀⠀⠀⠀⠀⠈⠙⠛⠳⠶⣤⣄⡀⠀⠀                  
+             ⠀⠀⠀⠀⠀⢀⣾⡿⠛⢀⡀⠀⠀⢀⣠⠄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⡤⠚⣉⣉⣉⣙⣧⠀                  
+             ⠀⠀⠀⠀⠀⣼⠏⠀⠀⠀⣷⠀⣴⡟⠁⠀⠀⠀⠀⠀⠀⠀⠀⢀⠀⠀⣠⠀⠀⠀⣿⠀⢿⣿⣿⣿⣿⣿⠀                  
+             ⠀⠀⠀⠀⢀⡿⠀⠀⠀⠀⣿⣿⡟⠀⠀⠀⠀⠀⠀⠀⢀⣠⣴⣯⣤⡾⠃⠀⠀⠀⠈⠻⠶⣾⣿⣿⣿⣿⠄                  
+             ⠀⠀⠀⠀⣸⡇⠀⠀⠀⢰⣿⣿⠀⡄⠀⠀⠀⠀⠀⠀⠀⠀⠘⠛⠉⠀⠀⠀⠀⠀⠀⠀⠀⠘⣿⣿⣿⡿⠀                  
+             ⠀⠀⠀⣰⡿⠀⠀⠀⠀⠈⢹⣿⡼⠁⠀⠀⠀⠀⠀⢠⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⣤⣾⣿⣿⠟⠁⠀                  
+             ⠀⠀⣰⡿⢡⠂⠀⠀⠀⠀⠀⣿⣇⣰⣂⣠⠀⠀⠀⣟⣀⣀⠀⠀⠀⠀⠀⣠⣤⠶⠿⠿⠿⠛⠿⣧⠀⠀⠀                  
+             ⣰⡿⢠⣏⡔⠀⠀⠀⠀⠀⢿⣿⣿⣿⡇⢠⡀⠀⢿⣿⣿⣿⣍⣙⠛⢻⣏⣤⠾⣦⡀⠀⠀⠀⢹⡇⠀⠀⠀                  
+             ⣿⣷⣿⣿⠀⠀⠀⠀⠀⠀⠘⣿⣿⣿⣿⣿⣧⠀⠈⠻⢿⣿⣿⣿⣿⣿⣿⡿⣶⣾⣿⣶⣦⣴⡟⠁⠀⠀⠀                  
+             ⠹⢿⣿⣿⡇⠀⠀⠀⠀⠀⠀⢹⣿⣿⣿⣿⡏⠀⠀⠀⠀⠈⠉⠉⠉⠙⠿⠟⠁⠈⠙⠛⢻⡿⠀⠀⠀⠀⠀                  
+             ⠀⠀⠀⠙⠻⣧⡀⠀⠀⠀⠀⠀⢸⣿⣿⣿⣿⠋⠀⠀⡴⣾⣿⣷⣶⣤⣤⣤⣤⣤⣶⠤⠶⠛⠀⠀⠀⠀⠀                  
+             ⠀⠀⠀⠀⠀⠙⢿⣶⣤⣤⣤⣴⣿⣿⣿⣿⠃⠀⠀⠀⢰⡟⢿⣿⣿⡿⠻⣿⣿⡿⠁⠀⠀⠀⠀⠀⠀⠀⠀                  
+             ⠀⠀⠀⠀⠀⠀⠀⠉⠙⠛⠛⠋⠁⠙⢿⣿⠀⢠⠄⠀⡼⠀⢸⣿⢹⡇⠀⢹⣿⡇⠀⠀⠀⠀⠀⠀⠀⠀⠀                  
+             ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⣿⣶⡟⣸⠁⠃⠀⣿⣿⡀⠧⠀⣸⣿⠉⠀⠀⠀⠀⠀⠀⠀⠀⠀                  
+             ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣰⣟⣴⣿⠀⠀⠀⣿⠹⡇⠀⢠⣿⡟⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀                  
+             ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣿⠛⣻⡿⢿⣆⢠⣿⠀⠁⢀⣾⡟⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀                  
+             ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠙⠾⠋⠁⢈⣿⣿⣿⡇⠀⣾⡟⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀                  
+             ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣼⡿⠋⠉⢿⣾⡿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀                  
+             ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠋⠀⠀⠀⠈⠿⡇⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀                  
+
+                Golden Retriever Training Script
 EOF
+
 
 # WAITING FOR VRAM STUFF
 chars="/-\|"
@@ -290,7 +327,6 @@ DIRPATH=$(dirname "$(dirname "$(readlink -f "${BASH_SOURCE:-$0}")")")/src
 export PYTHONPATH="$DIRPATH"
 
 export HYDRA_FULL_ERROR=1
-
 
 if [ "$DEV_RUN" = "True" ]; then
   python goldenretriever/trainer/train.py \

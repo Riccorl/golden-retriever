@@ -6,9 +6,9 @@ source "$CONDA_BASE"/etc/profile.d/conda.sh
 
 # create conda env
 read -rp "Enter environment name or prefix: " ENV_NAME
-read -rp "Enter python version (default 3.9): " PYTHON_VERSION
+read -rp "Enter python version (default 3.10): " PYTHON_VERSION
 if [ -z "$PYTHON_VERSION" ]; then
-  PYTHON_VERSION="3.9"
+  PYTHON_VERSION="3.10"
 fi
 
 # check if ENV_NAME is a full path

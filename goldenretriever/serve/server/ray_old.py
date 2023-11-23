@@ -10,7 +10,7 @@ from goldenretriever.data.utils import batch_generator
 from goldenretriever.serve.tokenizers import SpacyTokenizer, WhitespaceTokenizer
 from goldenretriever.serve.utils import RayParameterManager, ServerParameterManager
 from goldenretriever.serve.window.manager import WindowManager
-from ray import serve
+from ray_old import serve
 
 logger = get_logger(__name__, level=logging.INFO)
 

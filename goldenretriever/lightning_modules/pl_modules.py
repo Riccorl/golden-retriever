@@ -66,7 +66,6 @@ class GoldenRetrieverPLModule(pl.LightningModule):
         )
 
     def configure_optimizers(self):
-
         param_optimizer = list(self.named_parameters())
         no_decay = ["bias", "LayerNorm.bias", "LayerNorm.weight"]
         optimizer_grouped_parameters = [
