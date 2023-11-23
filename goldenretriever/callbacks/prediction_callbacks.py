@@ -5,10 +5,10 @@ from copy import deepcopy
 from pathlib import Path
 from typing import List, Optional, Set, Union
 
-import pytorch_lightning as pl
+import lightning as pl
 import torch
 from omegaconf import DictConfig
-from pytorch_lightning.trainer.states import RunningStage
+from lightning.trainer.states import RunningStage
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -18,7 +18,8 @@ from goldenretriever.common.model_inputs import ModelInputs
 from goldenretriever.data.base.datasets import BaseDataset
 from goldenretriever.data.datasets import GoldenRetrieverDataset
 from goldenretriever.data.utils import HardNegativesManager
-from goldenretriever.models.model import GoldenRetriever
+from goldenretriever.retriever.golden_retriever import GoldenRetriever
+from goldenretriever.retriever.indexers.base import BaseDocumentIndex
 
 console_logger = get_console_logger()
 logger = get_logger(__name__, level=logging.INFO)
@@ -30,10 +31,8 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         k: Optional[int] = None,
         batch_size: int = 32,
         num_workers: int = 8,
-        use_faiss: bool = False,
-        move_index_to_cpu: bool = True,
+        document_index: Optional[BaseDocumentIndex] = None,
         precision: Union[str, int] = 32,
-        index_precision: Union[str, int] = 32,
         force_reindex: bool = True,
         retriever_dir: Optional[Path] = None,
         stages: Optional[Set[Union[str, RunningStage]]] = None,
@@ -46,10 +45,8 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         super().__init__(batch_size, stages, other_callbacks, dataset, dataloader)
         self.k = k
         self.num_workers = num_workers
-        self.use_faiss = use_faiss
-        self.move_index_to_cpu = move_index_to_cpu
+        self.document_index = document_index
         self.precision = precision
-        self.index_precision = index_precision
         self.force_reindex = force_reindex
         self.retriever_dir = retriever_dir
 
@@ -71,13 +68,6 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
             raise ValueError(
                 f"Stage `{stage}` not supported, only {self.stages} are supported"
             )
-
-        # get the tokenizer
-        # tokenizer = trainer.datamodule.tokenizer
-
-        # if datasets is not None or dataloaders is not None:
-        #     self.datasets = datasets
-        #     self.dataloaders = dataloaders
 
         self.datasets, self.dataloaders = self._get_datasets_and_dataloaders(
             datasets,
@@ -104,7 +94,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
             logger.info(
                 f"Computing passage embeddings for dataset {current_dataset.name}"
             )
-            passages = self._get_passages_dataloader(current_dataset, trainer)
+            # passages = self._get_passages_dataloader(current_dataset, trainer)
 
             tokenizer = current_dataset.tokenizer
             collate_fn = lambda x: ModelInputs(
@@ -138,27 +128,22 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
             retriever.eval()
 
             retriever.index(
-                passages,
                 batch_size=self.batch_size,
                 num_workers=self.num_workers,
+                max_length=current_dataset.max_passage_length,
                 collate_fn=collate_fn,
-                force_reindex=force_reindex,
-                use_faiss=self.use_faiss,
-                move_index_to_cpu=self.move_index_to_cpu,
                 precision=self.precision,
-                index_precision=self.index_precision,
+                compute_on_cpu=False,
+                force_reindex=force_reindex,
             )
 
-            pl_module_original_device = pl_module.device
-            if (
-                not self.use_faiss
-                and self.move_index_to_cpu
-                and pl_module.device.type == "cuda"
-            ):
-                pl_module.to("cpu")
+            # pl_module_original_device = pl_module.device
+            # if (
+            #     and pl_module.device.type == "cuda"
+            # ):
+            #     pl_module.to("cpu")
 
             # now compute the question embeddings and compute the top-k accuracy
-            # logger.info(f"Computing predictions for dataset {current_dataset.name}")
             predictions = []
             start = time.time()
             for batch in tqdm(
@@ -205,51 +190,55 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
 
             dataloader_predictions[dataloader_idx] = predictions
 
-            if pl_module_original_device != pl_module.device:
-                pl_module.to(pl_module_original_device)
+            # if pl_module_original_device != pl_module.device:
+            #     pl_module.to(pl_module_original_device)
 
         # return the predictions
         return dataloader_predictions
 
-    @staticmethod
-    def _get_passages_dataloader(dataset, trainer):
-        if dataset.passages is None:
-            logger.info(
-                f"passages not found in dataset {dataset.name}, computing them from the dataloaders"
-            )
-            # get the passages from the all the dataloader passage ids
-            passages = set()  # set to avoid duplicates
-            for batch in trainer.train_dataloader:
-                passages.update(
-                    [
-                        " ".join(map(str, [c for c in passage_ids.tolist() if c != 0]))
-                        for passage_ids in batch["passages"]["input_ids"]
-                    ]
-                )
-            for d in trainer.val_dataloaders:
-                for batch in d:
-                    passages.update(
-                        [
-                            " ".join(
-                                map(str, [c for c in passage_ids.tolist() if c != 0])
-                            )
-                            for passage_ids in batch["passages"]["input_ids"]
-                        ]
-                    )
-            for d in trainer.test_dataloaders:
-                for batch in d:
-                    passages.update(
-                        [
-                            " ".join(
-                                map(str, [c for c in passage_ids.tolist() if c != 0])
-                            )
-                            for passage_ids in batch["passages"]["input_ids"]
-                        ]
-                    )
-            passages = list(passages)
-        else:
-            passages = dataset.passages
-        return passages
+    # @staticmethod
+    # def _get_passages_dataloader(
+    #     indexer: Optional[BaseIndexer] = None,
+    #     dataset: Optional[GoldenRetrieverDataset] = None,
+    #     trainer: Optional[pl.Trainer] = None,
+    # ):
+    #     if indexer is None:
+    #         logger.info(
+    #             f"Indexer is None, creating indexer from passages not found in dataset {dataset.name}, computing them from the dataloaders"
+    #         )
+    #         # get the passages from the all the dataloader passage ids
+    #         passages = set()  # set to avoid duplicates
+    #         for batch in trainer.train_dataloader:
+    #             passages.update(
+    #                 [
+    #                     " ".join(map(str, [c for c in passage_ids.tolist() if c != 0]))
+    #                     for passage_ids in batch["passages"]["input_ids"]
+    #                 ]
+    #             )
+    #         for d in trainer.val_dataloaders:
+    #             for batch in d:
+    #                 passages.update(
+    #                     [
+    #                         " ".join(
+    #                             map(str, [c for c in passage_ids.tolist() if c != 0])
+    #                         )
+    #                         for passage_ids in batch["passages"]["input_ids"]
+    #                     ]
+    #                 )
+    #         for d in trainer.test_dataloaders:
+    #             for batch in d:
+    #                 passages.update(
+    #                     [
+    #                         " ".join(
+    #                             map(str, [c for c in passage_ids.tolist() if c != 0])
+    #                         )
+    #                         for passage_ids in batch["passages"]["input_ids"]
+    #                     ]
+    #                 )
+    #         passages = list(passages)
+    #     else:
+    #         passages = dataset.passages
+    #     return passages
 
 
 class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
@@ -265,10 +254,6 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
             The batch size to use for the evaluation.
         num_workers (:obj:`int`, `optional`, defaults to 0):
             The number of workers to use for the evaluation.
-        use_faiss (:obj:`bool`, `optional`, defaults to :obj:`False`):
-            Whether to use faiss for the evaluation.
-        move_index_to_cpu (:obj:`bool`, `optional`, defaults to :obj:`False`):
-            Whether to move the index to the cpu.
         force_reindex (:obj:`bool`, `optional`, defaults to :obj:`False`):
             Whether to force the reindexing of the dataset.
         retriever_dir (:obj:`Path`, `optional`):
@@ -300,8 +285,6 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
         k: int = 100,
         batch_size: int = 32,
         num_workers: int = 0,
-        use_faiss: bool = False,
-        move_index_to_cpu: bool = False,
         force_reindex: bool = False,
         retriever_dir: Optional[Path] = None,
         stages: Set[Union[str, RunningStage]] = None,
@@ -319,8 +302,6 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
             k=k,
             batch_size=batch_size,
             num_workers=num_workers,
-            use_faiss=use_faiss,
-            move_index_to_cpu=move_index_to_cpu,
             force_reindex=force_reindex,
             retriever_dir=retriever_dir,
             stages=stages,

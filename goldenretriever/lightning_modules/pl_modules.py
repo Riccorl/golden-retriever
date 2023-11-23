@@ -1,12 +1,11 @@
 from typing import Any, Union
 
 import hydra
-import pytorch_lightning as pl
+import lightning as pl
 import torch
 from omegaconf import DictConfig
 
 from goldenretriever.common.model_inputs import ModelInputs
-from goldenretriever.data.labels import Labels
 
 
 class GoldenRetrieverPLModule(pl.LightningModule):
@@ -14,19 +13,19 @@ class GoldenRetrieverPLModule(pl.LightningModule):
         self,
         model: Union[torch.nn.Module, DictConfig],
         optimizer: Union[torch.optim.Optimizer, DictConfig],
-        labels: Labels = None,
+        lr_scheduler: Union[torch.optim.lr_scheduler.LRScheduler, DictConfig] = None,
         *args,
         **kwargs,
     ) -> None:
         super().__init__()
         self.save_hyperparameters()
-        self.labels = labels
         if isinstance(model, DictConfig):
-            self.model = hydra.utils.instantiate(model, labels=labels)
+            self.model = hydra.utils.instantiate(model)
         else:
             self.model = model
-        
+
         self.optimizer_config = optimizer
+        self.lr_scheduler_config = lr_scheduler
 
     def forward(self, **kwargs) -> dict:
         """
@@ -67,54 +66,53 @@ class GoldenRetrieverPLModule(pl.LightningModule):
         )
 
     def configure_optimizers(self):
-        if "grouped_parameters" in self.hparams and self.hparams.grouped_parameters:
-            param_optimizer = list(self.named_parameters())
-            no_decay = ["bias", "LayerNorm.bias", "LayerNorm.weight"]
-            optimizer_grouped_parameters = [
-                # TODO: parametrize this stuff
-                {
-                    "params": [
-                        p for n, p in param_optimizer if "language_model" not in n
-                    ],
-                    "weight_decay": self.hparams.optimizer.weight_decay,
-                    "lr": 1e-4,
-                },
-                {
-                    "params": [
-                        p
-                        for n, p in param_optimizer
-                        if "language_model" in n and not any(nd in n for nd in no_decay)
-                    ],
-                    "weight_decay": self.hparams.optimizer.weight_decay,
-                },
-                {
-                    "params": [
-                        p
-                        for n, p in param_optimizer
-                        if "language_model" in n and any(nd in n for nd in no_decay)
-                    ],
-                    "weight_decay": 0.0,
-                },
-            ]
-        else:
-            optimizer_grouped_parameters = self.parameters()
-        
+
+        param_optimizer = list(self.named_parameters())
+        no_decay = ["bias", "LayerNorm.bias", "LayerNorm.weight"]
+        optimizer_grouped_parameters = [
+            {
+                "params": [p for n, p in param_optimizer if "layer_norm_layer" in n],
+                "weight_decay": self.hparams.optimizer.weight_decay,
+                "lr": 1e-4,
+            },
+            {
+                "params": [
+                    p
+                    for n, p in param_optimizer
+                    if all(nd not in n for nd in no_decay)
+                    and "layer_norm_layer" not in n
+                ],
+                "weight_decay": self.hparams.optimizer.weight_decay,
+            },
+            {
+                "params": [
+                    p
+                    for n, p in param_optimizer
+                    if "layer_norm_layer" not in n and any(nd in n for nd in no_decay)
+                ],
+                "weight_decay": 0.0,
+            },
+        ]
         if isinstance(self.optimizer_config, DictConfig):
             optimizer = hydra.utils.instantiate(
                 self.optimizer_config,
+                # params=self.parameters(),
                 params=optimizer_grouped_parameters,
                 _convert_="partial",
             )
         else:
             optimizer = self.optimizer_config
-        
-        if "lr_scheduler" not in self.hparams or not self.hparams.lr_scheduler:
+
+        if self.lr_scheduler_config is None:
             return optimizer
 
+        if isinstance(self.lr_scheduler_config, DictConfig):
+            lr_scheduler = hydra.utils.instantiate(
+                self.lr_scheduler_config, optimizer=optimizer
+            )
+
         lr_scheduler_config = {
-            "scheduler": hydra.utils.instantiate(
-                self.hparams.lr_scheduler, optimizer=optimizer
-            ),
+            "scheduler": lr_scheduler,
             "interval": "step",
             "frequency": 1,
         }

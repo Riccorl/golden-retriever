@@ -2,10 +2,10 @@ from functools import partial
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 import hydra
-import pytorch_lightning as pl
+import lightning as pl
 import torch
 from omegaconf import DictConfig
-from pytorch_lightning.trainer.states import RunningStage
+from lightning.trainer.states import RunningStage
 from torch.utils.data import DataLoader, Dataset
 
 from goldenretriever.common.log import get_logger

@@ -13,7 +13,6 @@ datamodule:
       name: "train"
       path: null
       tokenizer: ${model.language_model}
-      passages: ${data.shared_params.passages_path}
       max_passage_length: ${data.shared_params.max_passage_length}
       question_batch_size: ${data.shared_params.question_batch_size}
       passage_batch_size: ${data.shared_params.passage_batch_size}
@@ -27,7 +26,6 @@ datamodule:
         name: "val"
         path: null
         tokenizer: ${model.language_model}
-        passages: ${data.shared_params.passages_path}
         max_passage_length: ${data.shared_params.max_passage_length}
         question_batch_size: ${data.shared_params.question_batch_size}
         passage_batch_size: ${data.shared_params.passage_batch_size}
@@ -38,7 +36,6 @@ datamodule:
         name: "test"
         path: null
         tokenizer: ${model.language_model}
-        passages: ${data.shared_params.passages_path}
         max_passage_length: ${data.shared_params.max_passage_length}
         question_batch_size: ${data.shared_params.question_batch_size}
         passage_batch_size: ${data.shared_params.passage_batch_size}

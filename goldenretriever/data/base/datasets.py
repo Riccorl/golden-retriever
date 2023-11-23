@@ -4,7 +4,6 @@ from typing import Any, Dict, Iterator, List, Tuple, Union, Optional
 
 import torch
 from torch.utils.data import Dataset, IterableDataset
-from torch.utils.data.dataset import T_co
 
 from goldenretriever.common.log import get_logger
 

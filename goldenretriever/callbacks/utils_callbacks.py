@@ -3,15 +3,14 @@ import logging
 import os
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
-import hydra
 
-import pytorch_lightning as pl
+import lightning as pl
 import torch
-from pytorch_lightning.trainer.states import RunningStage
+from lightning.trainer.states import RunningStage
 
 from goldenretriever.callbacks.base import NLPTemplateCallback, PredictionCallback
 from goldenretriever.common.log import get_console_logger, get_logger
-from goldenretriever.lightning_modules.pl_modules import GoldenRetrieverPLModule
+from goldenretriever.retriever.modules.hf import GoldenRetrieverModel
 
 console_logger = get_console_logger()
 logger = get_logger(__name__, level=logging.INFO)
@@ -78,24 +77,63 @@ class SavePredictionsCallback(NLPTemplateCallback):
 
 
 class ResetModelCallback(pl.Callback):
-    def __init__(self, conf, verbose: bool = True) -> None:
+    def __init__(
+        self,
+        question_encoder: str,
+        passage_encoder: Optional[str] = None,
+        verbose: bool = True,
+    ) -> None:
         super().__init__()
-        self.conf = conf
+        self.question_encoder = question_encoder
+        self.passage_encoder = passage_encoder
+        self.verbose = verbose
 
     def on_train_epoch_start(
         self, trainer: pl.Trainer, pl_module: pl.LightningModule, *args, **kwargs
     ) -> None:
         if trainer.current_epoch == 0:
+            if self.verbose:
+                logger.info("Current epoch is 0, skipping resetting model")
             return
 
-        pl_module = hydra.utils.instantiate(self.conf, _recursive_=False)
+        if self.verbose:
+            logger.info("Resetting model, optimizer and lr scheduler")
+        # reload model from scratch
+        previous_device = pl_module.device
+        trainer.model.model.question_encoder = GoldenRetrieverModel.from_pretrained(
+            self.question_encoder
+        )
+        trainer.model.model.question_encoder.to(previous_device)
+        if self.passage_encoder is not None:
+            trainer.model.model.passage_encoder = GoldenRetrieverModel.from_pretrained(
+                self.passage_encoder
+            )
+            trainer.model.model.passage_encoder.to(previous_device)
 
-        trainer.model = pl_module
+        trainer.strategy.setup_optimizers(trainer)
+        # for optimizer in trainer.optimizers:
+        #     optimizer.state = collections.defaultdict(dict)
 
-        optimizers, lr_scheduler_configs = pl_module.configure_optimizers()
-        trainer.optimizers = optimizers
-        trainer.lr_schedulers = trainer.configure_schedulers(lr_scheduler_configs)
-        trainer.optimizer_frequencies = []  # or optimizers frequencies if you have any
+        # trainer.model.load_state_dict(torch.load(self.conf)["state_dict"])
+        # trainer.strategy._lightning_module = hydra.utils.instantiate(self.conf, _recursive_=False)
+        # trainer.strategy._lightning_module.trainer = trainer
+        # # links data to the trainer
+        # self._data_connector.attach_data(
+        #     trainer.strategy._lightning_module.trainer, train_dataloaders=trainer.train_dataloaders, val_dataloaders=trainer.val_dataloaders, datamodule=trainer.datamodule
+        # )
+        # trainer.strategy.setup(trainer)
+
+        # reset the model
+        # pl_module.model = hydra.utils.instantiate(self.conf.model)
+        # assign the model to the trainer
+        # pl_module = hydra.utils.instantiate(self.conf, _recursive_=False)
+        # previous_device = pl_module.device
+        # trainer.model.model = hydra.utils.instantiate(self.conf)
+        # trainer.model.model.to(previous_device)
+        # optimizers, lr_scheduler_configs = pl_module.configure_optimizers()
+        # trainer.optimizers = optimizers
+        # trainer.lr_schedulers = trainer.configure_schedulers(lr_scheduler_configs)
+        # trainer.optimizer_frequencies = []  # or optimizers frequencies if you have any
 
 
 class FreeUpIndexerVRAMCallback(pl.Callback):
@@ -109,11 +147,10 @@ class FreeUpIndexerVRAMCallback(pl.Callback):
 
         # remove the index from the GPU memory
         # remove the embeddings from the GPU memory first
-        if pl_module.model._passage_embeddings is not None:
-            pl_module.model._passage_embeddings.cpu()
-        pl_module.model._passage_embeddings = None
-        pl_module.model._passage_index = None
-        pl_module.model._faiss_indexer = None
+        if pl_module.model.document_index is not None:
+            if pl_module.model.document_index.embeddings is not None:
+                pl_module.model.document_index.embeddings.cpu()
+            pl_module.model.document_index.embeddings = None
 
         import gc
 
@@ -121,6 +158,11 @@ class FreeUpIndexerVRAMCallback(pl.Callback):
         torch.cuda.empty_cache()
 
     def on_train_epoch_start(
+        self, trainer: pl.Trainer, pl_module: pl.LightningModule, *args, **kwargs
+    ) -> None:
+        return self(pl_module)
+
+    def on_test_epoch_start(
         self, trainer: pl.Trainer, pl_module: pl.LightningModule, *args, **kwargs
     ) -> None:
         return self(pl_module)

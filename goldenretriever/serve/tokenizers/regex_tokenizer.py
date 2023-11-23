@@ -3,8 +3,8 @@ from typing import List, Union
 
 from overrides import overrides
 
-from goldenretriever.serve.tokenizers.word import Word
 from goldenretriever.serve.tokenizers.base_tokenizer import BaseTokenizer
+from goldenretriever.serve.tokenizers.word import Word
 
 
 class RegexTokenizer(BaseTokenizer):

@@ -1,5 +1,6 @@
-import torch
+from dataclasses import dataclass
 
+import torch
 
 PRECISION_MAP = {
     None: torch.float32,
@@ -14,3 +15,14 @@ PRECISION_MAP = {
     "fp16": torch.float16,
     "fp32": torch.float32,
 }
+
+
+@dataclass
+class RetrievedSample:
+    """
+    Dataclass for the output of the GoldenRetriever model.
+    """
+
+    score: float
+    index: int
+    label: str

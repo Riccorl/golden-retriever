@@ -3,7 +3,8 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Union
+import time
+from typing import Optional, Union
 
 import torch
 import tqdm
@@ -35,23 +36,25 @@ def compute_retriever_stats(dataset) -> None:
 
 @torch.no_grad()
 def add_candidates(
-    retriever_name_or_path: Union[str, os.PathLike],
+    question_encoder: Union[str, os.PathLike],
+    document_index: Union[str, os.PathLike],
     input_path: Union[str, os.PathLike],
     output_path: Union[str, os.PathLike],
+    passage_encoder: Optional[Union[str, os.PathLike]] = None,
     batch_size: int = 128,
     num_workers: int = 4,
     device: str = "cuda",
     index_device: str = "cpu",
     precision: str = "fp32",
-    faiss: bool = False,
     topics: bool = False,
 ):
-    retriever = GoldenRetriever.from_pretrained(
-        retriever_name_or_path,
+    retriever = GoldenRetriever(
+        question_encoder=question_encoder,
+        passage_encoder=passage_encoder,
+        document_index=document_index,
         device=device,
         index_device=index_device,
         index_precision=precision,
-        load_faiss_index=faiss,
     )
     retriever.eval()
 
@@ -90,6 +93,7 @@ def add_candidates(
         with torch.inference_mode():
             num_completed_docs = 0
 
+            start = time.time()
             for documents_batch in tqdm.tqdm(dataloader):
                 retrieve_kwargs = {
                     **documents_batch,
@@ -151,19 +155,22 @@ def add_candidates(
                 num_completed_docs += len(retrieved_accumulator)
                 retrieved_accumulator = []
 
+            end = time.time()
+            logger.info(f"Retrieval took {end - start} seconds")
     # compute_retriever_stats(samples)
 
 
 if __name__ == "__main__":
     arg_parser = argparse.ArgumentParser()
-    arg_parser.add_argument("--retriever_name_or_path", type=str, required=True)
+    arg_parser.add_argument("--question_encoder", type=str, required=True)
+    arg_parser.add_argument("--passage_encoder", type=str, required=False)
+    arg_parser.add_argument("--document_index", type=str, required=True)
     arg_parser.add_argument("--input_path", type=str, required=True)
     arg_parser.add_argument("--output_path", type=str, required=True)
     arg_parser.add_argument("--batch_size", type=int, default=128)
     arg_parser.add_argument("--device", type=str, default="cuda")
     arg_parser.add_argument("--index_device", type=str, default="cpu")
     arg_parser.add_argument("--precision", type=str, default="fp32")
-    arg_parser.add_argument("--faiss", action="store_true")
     arg_parser.add_argument("--topics", action="store_true")
 
     add_candidates(**vars(arg_parser.parse_args()))

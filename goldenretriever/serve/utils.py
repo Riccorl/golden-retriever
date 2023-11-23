@@ -1,5 +1,5 @@
-from dataclasses import dataclass
 import os
+from dataclasses import dataclass
 from typing import Union
 
 
@@ -9,7 +9,9 @@ class ServerParameterManager:
     index_device: str = os.environ.get("INDEX_DEVICE", device)
     precision: Union[str, int] = os.environ.get("PRECISION", "fp32")
     index_precision: Union[str, int] = os.environ.get("INDEX_PRECISION", precision)
-    model_name_or_path: str = os.environ.get("MODEL_NAME_OR_PATH", None)
+    question_encoder: str = os.environ.get("QUESTION_ENCODER", None)
+    passage_encoder: str = os.environ.get("PASSAGE_ENCODER", None)
+    document_index: str = os.environ.get("DOCUMENT_INDEX", None)
     top_k: int = int(os.environ.get("TOP_K", 100))
     use_faiss: bool = os.environ.get("USE_FAISS", False)
     window_batch_size: int = int(os.environ.get("WINDOW_BATCH_SIZE", 32))

@@ -1,5 +1,4 @@
 import os
-import random
 from copy import deepcopy
 from enum import Enum
 from functools import partial
@@ -17,7 +16,6 @@ from tqdm import tqdm
 from goldenretriever.common.log import get_console_logger, get_logger
 from goldenretriever.common.model_inputs import ModelInputs
 from goldenretriever.data.base.datasets import BaseDataset, IterableBaseDataset
-from goldenretriever.data.labels import PassageManager
 from goldenretriever.data.utils import HardNegativesManager
 
 console_logger = get_console_logger()
@@ -38,7 +36,7 @@ class GoldenRetrieverDataset:
         path: Union[str, os.PathLike, List[str], List[os.PathLike]] = None,
         data: Any = None,
         tokenizer: Optional[Union[str, tr.PreTrainedTokenizer]] = None,
-        passages: Union[str, os.PathLike, List[str]] = None,
+        # passages: Union[str, os.PathLike, List[str]] = None,
         passage_batch_size: int = 32,
         question_batch_size: int = 32,
         max_positives: int = -1,
@@ -136,27 +134,6 @@ class GoldenRetrieverDataset:
             )
         else:
             self.data: Dataset = data
-
-        # create a manager for the passages
-        self.passage_manager = PassageManager()
-        if passages is not None:
-            if isinstance(passages, list):
-                passage_to_add = passages
-            else:
-                # read passages from file if provided
-                logger.info(f"Reading passages from {passages}")
-                with open(self.project_folder / passages, "r") as f:
-                    passage_to_add = [line.strip() for line in f.readlines()]
-            self.passage_manager.add_passages(passage_to_add)
-
-        # passage_batch_size cannot be greater than the number of passages
-        if self.passage_batch_size > len(self.passage_manager):
-            logger.info(
-                f"Your passage_batch_size ({passage_batch_size}) "
-                f"is greater than the number of passages ({len(self.passage_manager)}). "
-                f"Setting passage_batch_size to {len(self.passage_manager)}."
-            )
-            self.passage_batch_size = len(self.passage_manager)
 
         self.hn_manager: Optional[HardNegativesManager] = None
 
@@ -396,12 +373,6 @@ class GoldenRetrieverDataset:
 
     def shuffle_data(self, seed: int = 42):
         self.data = self.data.shuffle(seed=seed)
-
-    @property
-    def passages(self):
-        if self.passage_manager is None:
-            return []
-        return list(self.passage_manager.get_passages().keys())
 
 
 class InBatchNegativesDataset(GoldenRetrieverDataset):
