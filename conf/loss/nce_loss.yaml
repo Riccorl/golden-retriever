@@ -1,1 +1,1 @@
-_target_: goldenretriever.retriever.modules.losses.MultiLabelNCELoss
+_target_: goldenretriever.pytorch_modules.loss.MultiLabelNCELoss

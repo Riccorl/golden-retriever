@@ -3,7 +3,7 @@ language_model: "intfloat/e5-small-v2"
 pl_module:
   _target_: goldenretriever.lightning_modules.pl_modules.GoldenRetrieverPLModule
   model:
-    _target_: goldenretriever.retriever.golden_retriever.GoldenRetriever
+    _target_: goldenretriever.pytorch_modules.model.GoldenRetriever
     question_encoder: ${model.language_model}
     passage_encoder: ${model.language_model}
     document_index: ${index}
