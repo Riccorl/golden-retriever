@@ -4,7 +4,7 @@ import hydra
 import lightning as pl
 import torch
 from omegaconf import DictConfig
-from lightning.utilities.types import EVAL_DATALOADERS
+from lightning.pytorch.utilities.types import EVAL_DATALOADERS
 from torch.utils.data import DataLoader
 
 from goldenretriever.common.log import get_logger

@@ -7,7 +7,7 @@ from spacy import displacy
 from streamlit_extras.badges import badge
 from streamlit_extras.stylable_container import stylable_container
 
-RELIK = os.getenv("RELIK", "localhost:8000/api/entities")
+RELIK = os.getenv("GOLDEN_RETRIEVER", "localhost:8000/api/retrieve")
 
 import random
 

@@ -1,8 +1,9 @@
+import csv
 import json
 from pathlib import Path
 from typing import Dict, List, Union
 
-from relik.common.log import get_logger
+from goldenretriever.common.log import get_logger
 
 logger = get_logger(__name__)
 
@@ -26,6 +27,18 @@ class Document:
 
     def __repr__(self):
         return self.__str__()
+
+    def __eq__(self, other):
+        if isinstance(other, Document):
+            return self.id == other.id
+        elif isinstance(other, int):
+            return self.id == other
+        elif isinstance(other, str):
+            return self.text == other
+        else:
+            raise ValueError(
+                f"Document must be compared with a Document, an int or a str, got `{type(other)}`"
+            )
 
     def to_dict(self):
         return {"text": self.text, "id": self.id, "metadata": self.metadata}
@@ -127,12 +140,15 @@ class DocumentStore:
             Document: The document just added.
         """
         if id is None:
-            id = hash(text)
+            # id = hash(text)
+            # get the len of the documents and add 1
+            id = len(self._documents) #+ 1
         if id in self._documents_index:
             logger.warning(f"Document with id `{id}` already exists, skipping")
             return self._documents_index[id]
-        self._documents_index[id] = Document(text, id, metadata)
-        self._documents_reverse_index[text] = Document(text, id, metadata)
+        self._documents.append(Document(text, id, metadata))
+        self._documents_index[id] = self._documents[-1]
+        self._documents_reverse_index[text] = self._documents[-1]
         return self._documents_index[id]
 
     def delete_document(self, document: int | str | Document) -> bool:
@@ -207,6 +223,7 @@ class DocumentStore:
         if document.id not in self._documents_index:
             logger.warning(f"Document {document} does not exist, skipping")
             return False
+        del self._documents[self._documents.index(document)]
         del self._documents_index[document.id]
         del self._documents_reverse_index[self._documents_index[document.id]]
 
@@ -222,6 +239,25 @@ class DocumentStore:
         with open(file_path, "r") as f:
             # load a json lines file
             d = [Document.from_dict(json.loads(line)) for line in f]
+        return cls(d)
+
+    @classmethod
+    def from_tsv(cls, file_path: Union[str, Path], delimiter: str = "\t", **kwargs):
+        d = []
+        # load a tsv/csv file and take the header into account
+        # the header must be `id\ttext\t[list of metadata keys]`
+        with open(file_path, "r") as f:
+            csv_reader = csv.reader(f, delimiter=delimiter)
+            header = next(csv_reader)
+            id, text, *metadata_keys = header
+            for row in csv_reader:
+                d.append(
+                    Document(
+                        text=row[header.index(text)],
+                        id=row[header.index(id)],
+                        metadata={key: row[header.index(key)] for key in metadata_keys},
+                    )
+                )
         return cls(d)
 
     def save(self, file_path: Union[str, Path], **kwargs):

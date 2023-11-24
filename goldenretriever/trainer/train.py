@@ -44,7 +44,7 @@ from goldenretriever.pytorch_modules.scheduler import LinearScheduler
 logger = get_logger()
 
 
-class RetrieverTrainer:
+class Trainer:
     def __init__(
         self,
         retriever: GoldenRetriever,
@@ -74,7 +74,7 @@ class RetrieverTrainer:
         # checkpoint_path: Optional[Union[str, os.PathLike]] = None,
         deterministic: bool = True,
         fast_dev_run: bool = False,
-        precision: int = 16,
+        precision: [int, str] = 16,
         reload_dataloaders_every_n_epochs: int = 1,
         top_ks: Union[int, List[int]] = 100,
         # early stopping parameters
@@ -87,7 +87,7 @@ class RetrieverTrainer:
         wandb_project_name: Optional[str] = None,
         wandb_save_dir: Optional[Union[str, os.PathLike]] = None,
         wandb_log_model: bool = True,
-        wandb_offline_mode: bool = False,
+        wandb_online_mode: bool = False,
         wandb_watch: str = "all",
         # checkpoint parameters
         model_checkpointing: bool = True,
@@ -148,7 +148,7 @@ class RetrieverTrainer:
         self.wandb_project_name = wandb_project_name
         self.wandb_save_dir = wandb_save_dir
         self.wandb_log_model = wandb_log_model
-        self.wandb_offline_mode = wandb_offline_mode
+        self.wandb_online_mode = wandb_online_mode
         self.wandb_watch = wandb_watch
         # checkpoint parameters
         self.model_checkpointing = model_checkpointing
@@ -346,7 +346,7 @@ class RetrieverTrainer:
         if self.log_to_wandb:
             # define some default values for the wandb logger
             if self.wandb_project_name is None:
-                self.wandb_project_name = "relik-retriever"
+                self.wandb_project_name = "golden-retriever"
             if self.wandb_save_dir is None:
                 self.wandb_save_dir = "./"
             logger.info("Instantiating Wandb Logger")
@@ -356,7 +356,7 @@ class RetrieverTrainer:
                 name=self.wandb_experiment_name,
                 save_dir=self.wandb_save_dir,
                 log_model=self.wandb_log_model,
-                mode="offline" if self.wandb_offline_mode else "online",
+                mode="online" if self.wandb_online_mode else "offline",
             )
             self.wandb_logger.watch(self.lightining_module, log=self.wandb_watch)
             self.experiment_path = Path(self.wandb_logger.experiment.dir)
@@ -402,7 +402,7 @@ class RetrieverTrainer:
         ]
         self.other_callbacks_for_prediction += [
             AvgRankingEvaluationCallback(k=self.top_k, verbose=True, prefix="train"),
-            SavePredictionsCallback(),
+            # SavePredictionsCallback(),
         ]
         self.prediction_callback = GoldenRetrieverPredictionCallback(
             k=self.top_k,

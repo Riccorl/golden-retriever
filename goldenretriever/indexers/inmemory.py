@@ -7,13 +7,13 @@ import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from relik.common.log import get_logger
-from relik.common.torch_utils import get_autocast_context
-from relik.retriever.common.model_inputs import ModelInputs
-from relik.retriever.data.base.datasets import BaseDataset
-from relik.retriever.indexers.base import BaseDocumentIndex
-from relik.retriever.indexers.document import Document, DocumentStore
-from relik.retriever.pytorch_modules import PRECISION_MAP, RetrievedSample
+from goldenretriever.common.log import get_logger
+from goldenretriever.common.torch_utils import get_autocast_context
+from goldenretriever.common.model_inputs import ModelInputs
+from goldenretriever.data.base.datasets import BaseDataset
+from goldenretriever.indexers.base import BaseDocumentIndex
+from goldenretriever.indexers.document import Document, DocumentStore
+from goldenretriever.pytorch_modules import PRECISION_MAP, RetrievedSample
 
 logger = get_logger(__name__, level=logging.INFO)
 

@@ -6,18 +6,17 @@ import psutil
 
 import torch
 
-from relik.common.utils import is_package_available
-from relik.inference.annotator import Relik
+from goldenretriever.common.utils import is_package_available
 
 if not is_package_available("fastapi"):
     raise ImportError(
-        "FastAPI is not installed. Please install FastAPI with `pip install relik[serve]`."
+        "FastAPI is not installed. Please install FastAPI with `pip install goldenretriever[serve]`."
     )
 from fastapi import FastAPI, HTTPException, APIRouter
 
 
-from relik.common.log import get_logger
-from relik.inference.serve.backend.utils import (
+from goldenretriever.common.log import get_logger
+from goldenretriever.serve.server.backend.utils import (
     RayParameterManager,
     ServerParameterManager,
 )
@@ -35,7 +34,7 @@ SERVER_MANAGER = ServerParameterManager()
 RAY_MANAGER = RayParameterManager()
 
 
-class RelikServer:
+class GoldenRetrieverServer:
     def __init__(
         self,
         relik_pretrained: str | None = None,
@@ -94,7 +93,7 @@ class RelikServer:
         )
 
         self.router = APIRouter()
-        self.router.add_api_route("/api/relik", self.relik_endpoint, methods=["POST"])
+        self.router.add_api_route("/api/goldenretriever", self.relik_endpoint, methods=["POST"])
 
         logger.info("RelikServer initialized.")
 
@@ -102,7 +101,7 @@ class RelikServer:
     async def __call__(self, text: List[str]) -> List:
         return self.relik(text, annotation_type=self.annotation_type)
 
-    # @app.post("/api/relik")
+    # @app.post("/api/goldenretriever")
     async def relik_endpoint(self, text: Union[str, List[str]]):
         try:
             # get predictions for the retriever
@@ -114,9 +113,9 @@ class RelikServer:
 
 
 app = FastAPI(
-    title="ReLiK",
+    title="Golden Retriever",
     version=VERSION["VERSION"],
-    description="ReLiK REST API",
+    description="Golden Retriever REST API",
 )
-server = RelikServer(**vars(SERVER_MANAGER))
+server = GoldenRetrieverServer(**vars(SERVER_MANAGER))
 app.include_router(server.router)

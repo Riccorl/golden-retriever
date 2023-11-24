@@ -72,13 +72,18 @@ def parse_requirements_file(
                         raise ValueError(f"invalid extra '{extra}' in {path}")
                     extras[extra].append(req)
                 if include_all_extra and req not in extras["all"]:
-                    extras["all"].append(req)
+                    if "gpu" in extra:
+                        extras["all-gpu"].append(req)
+                    elif "cpu" in extra:
+                        extras["all-cpu"].append(req)
+                    else:
+                        extras["all"].append(req)
             else:
                 requirements.append(req)
     return requirements, extras, find_links
 
 
-allowed_extras = {"onnx", "onnx-gpu", "serve"}
+allowed_extras = {"all", "all-cpu", "all-gpu", "onnx", "onnx-gpu", "serve", "dev", "faiss"}
 
 # Load requirements.
 install_requirements, extras, find_links = parse_requirements_file(

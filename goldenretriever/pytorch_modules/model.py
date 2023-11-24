@@ -19,6 +19,7 @@ from goldenretriever.common.model_inputs import ModelInputs
 from goldenretriever.data.base.datasets import BaseDataset
 from goldenretriever.data.labels import Labels
 from goldenretriever.indexers.base import BaseDocumentIndex
+from goldenretriever.indexers.document import Document
 from goldenretriever.indexers.inmemory import InMemoryDocumentIndex
 from goldenretriever.pytorch_modules import PRECISION_MAP, RetrievedSample
 from goldenretriever.pytorch_modules.hf import GoldenRetrieverModel
@@ -377,6 +378,40 @@ class GoldenRetriever(torch.nn.Module):
                 max_length=max_length or tokenizer.model_max_length,
             )
         )
+
+    def get_document_from_index(self, index: int) -> Document:
+        """
+        Get the document from its ID.
+
+        Args:
+            id (`int`):
+                The ID of the document.
+
+        Returns:
+            `str`: The document.
+        """
+        if self.document_index is None:
+            raise ValueError(
+                "The passages must be indexed before they can be retrieved."
+            )
+        return self.document_index.get_document_from_index(index)
+    
+    def get_document_from_passage(self, passage: str) -> Document:
+        """
+        Get the document from its text.
+
+        Args:
+            text (`str`):
+                The text of the document.
+
+        Returns:
+            `str`: The document.
+        """
+        if self.document_index is None:
+            raise ValueError(
+                "The passages must be indexed before they can be retrieved."
+            )
+        return self.document_index.get_document_from_passage(passage)
 
     def get_index_from_passage(self, passage: str) -> int:
         """

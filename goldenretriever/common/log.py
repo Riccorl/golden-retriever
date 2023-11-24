@@ -65,7 +65,7 @@ DEFAULT_LOGGING_CONFIG: Dict[str, Any] = {
     },
     "root": {"handlers": ["console"], "level": os.getenv("LOG_LEVEL", "INFO")},
     "loggers": {
-        "relik": {
+        "goldenretriever": {
             "handlers": ["color_console"],
             "level": "DEBUG",
             "propagate": False,
@@ -165,5 +165,5 @@ def get_console_logger():
     return _console
 
 
-def print_relik_text_art(text: str = "relik", font: str = "larry3d", **kwargs):
+def print_relik_text_art(text: str = "golden-retriever", font: str = "larry3d", **kwargs):
     tprint(text, font=font, **kwargs)

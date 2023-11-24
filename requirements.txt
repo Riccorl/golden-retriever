@@ -1,20 +1,31 @@
-# Core dependencies
+#------- Core dependencies -------
 torch>=2.1,<2.2
+
+transformers>=4.33,<4.34
+datasets>=2.15,<2.16
+rich>=13.0.0,<14.0.0
+scikit-learn>=1.3,<1.4
+
+# train
 lightning>=2.1,<2.2
 hydra-core>=1.3,<1.4
 hydra_colorlog
 wandb>=0.16,<0.17
-rich>=13.0.0,<14.0.0
-transformers>=4.33,<4.34
-datasets>=2.15,<2.16
-scikit-learn
-black[d]>=23.0,<24.0
-pformat
 
-# Optional dependencies
+# utils
+art==6.1
+pprintpp==0.4.0
+colorama==0.4.6
+
+#------- Optional dependencies -------
+
+# faiss
+faiss-cpu==1.7.4 # needed by: faiss
+
 # onnx GPU
 optimum[onnxruntime-gpu]>=1.7,<1.8; platform_system == "Linux"# needed by: onnx-gpu
 termcolor>=2.3,<2.4 # needed by: onnx-gpu
+
 # onnx CPU
 optimum[onnxruntime]>=1.14,<1.15 # needed by: onnx
 termcolor>=2.3,<2.4 # needed by: onnx
@@ -25,3 +36,8 @@ uvicorn[standard]>=0.24,<0.25 # needed by: serve
 gunicorn==21.2.0 # needed by: serve
 ray[serve]>=2.8,<=2.9 # needed by: serve
 ipa-core # needed by: serve
+
+# dev
+pre-commit # needed by: dev
+black[d] # needed by: dev
+isort # needed by: dev

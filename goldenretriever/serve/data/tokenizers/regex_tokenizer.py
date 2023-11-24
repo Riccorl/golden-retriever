@@ -40,7 +40,7 @@ class RegexTokenizer(BaseTokenizer):
 
         Example::
 
-            >>> from relik.retriever.serve.tokenizers.regex_tokenizer import RegexTokenizer
+            >>> from goldenretriever.serve.tokenizers.regex_tokenizer import RegexTokenizer
 
             >>> regex_tokenizer = RegexTokenizer()
             >>> regex_tokenizer("Mary sold the car to John.")

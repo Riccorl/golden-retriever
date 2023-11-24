@@ -10,15 +10,15 @@ import torch
 from omegaconf import OmegaConf
 from pprintpp import pformat
 
-from relik.common.log import get_logger
-from relik.common.upload import upload
-from relik.common.utils import (
+from goldenretriever.common.log import get_logger
+from goldenretriever.common.upload import upload
+from goldenretriever.common.utils import (
     from_cache,
     is_str_a_path,
     relative_to_absolute_path,
     to_config,
 )
-from relik.retriever.indexers.document import Document, DocumentStore
+from goldenretriever.indexers.document import Document, DocumentStore
 
 logger = get_logger(__name__)
 

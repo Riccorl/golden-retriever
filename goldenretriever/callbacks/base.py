@@ -5,7 +5,7 @@ import hydra
 import lightning as pl
 import torch
 from omegaconf import DictConfig
-from lightning.trainer.states import RunningStage
+from lightning.pytorch.trainer.states import RunningStage
 from torch.utils.data import DataLoader, Dataset
 
 from goldenretriever.common.log import get_logger

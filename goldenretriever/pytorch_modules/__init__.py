@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 import torch
 
-from relik.retriever.indexers.document import Document
+from goldenretriever.indexers.document import Document
 
 PRECISION_MAP = {
     None: torch.float32,

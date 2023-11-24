@@ -36,7 +36,6 @@ class GoldenRetrieverDataset:
         path: Union[str, os.PathLike, List[str], List[os.PathLike]] = None,
         data: Any = None,
         tokenizer: Optional[Union[str, tr.PreTrainedTokenizer]] = None,
-        # passages: Union[str, os.PathLike, List[str]] = None,
         passage_batch_size: int = 32,
         question_batch_size: int = 32,
         max_positives: int = -1,
@@ -172,10 +171,10 @@ class GoldenRetrieverDataset:
         *args,
         **kwargs,
     ) -> Any:
-        if isinstance(paths, Sequence):
-            paths = [self.project_folder / path for path in paths]
+        if isinstance(paths, str):
+            paths = [Path(paths) if Path(paths).is_absolute() else self.project_folder / paths]
         else:
-            paths = [self.project_folder / paths]
+            paths = [Path(path) if Path(path).is_absolute() else self.project_folder / path for path in paths]
 
         # read the data and put it in a placeholder list
         for path in paths:
@@ -482,9 +481,11 @@ class InBatchNegativesDataset(GoldenRetrieverDataset):
         positives = list(set([p["text"].strip() for p in sample["positive_ctxs"]]))
         if max_positives != -1:
             positives = positives[:max_positives]
+        
         negatives = list(set([n["text"].strip() for n in sample["negative_ctxs"]]))
         if max_negatives != -1:
             negatives = negatives[:max_negatives]
+        
         hard_negatives = list(
             set([h["text"].strip() for h in sample["hard_negative_ctxs"]])
         )
@@ -507,8 +508,10 @@ class InBatchNegativesDataset(GoldenRetrieverDataset):
         output = dict(
             question=question,
             passage=passage,
-            positives=positives,
             positive_pssgs=passage[: len(positives)],
+            positives=positives,
+            negatives=negatives,
+            hard_negatives=hard_negatives,
         )
         return output
 
@@ -529,10 +532,12 @@ class InBatchNegativesDataset(GoldenRetrieverDataset):
             the same number of passages.
             """
 
-            split_fn = lambda x: [
-                x[i : i + question_batch_size]
-                for i in range(0, len(x), question_batch_size)
-            ]
+            def split_fn(x):
+                return [
+                    x[i : i + question_batch_size]
+                    for i in range(0, len(x), question_batch_size)
+                ]
+
             # split the sample_idx
             sample_idx = split_fn(batch["sample_idx"])
             # split the questions

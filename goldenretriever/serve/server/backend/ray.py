@@ -6,23 +6,22 @@ import psutil
 
 import torch
 
-from relik.common.utils import is_package_available
-from relik.inference.annotator import Relik
+from goldenretriever.common.utils import is_package_available
 
 if not is_package_available("fastapi"):
     raise ImportError(
-        "FastAPI is not installed. Please install FastAPI with `pip install relik[serve]`."
+        "FastAPI is not installed. Please install FastAPI with `pip install goldenretriever[serve]`."
     )
 from fastapi import FastAPI, HTTPException
 
 if not is_package_available("ray"):
     raise ImportError(
-        "Ray is not installed. Please install Ray with `pip install relik[serve]`."
+        "Ray is not installed. Please install Ray with `pip install goldenretriever[serve]`."
     )
 from ray import serve
 
-from relik.common.log import get_logger
-from relik.inference.serve.backend.utils import (
+from goldenretriever.common.log import get_logger
+from goldenretriever.serve.server.backend.utils import (
     RayParameterManager,
     ServerParameterManager,
 )
@@ -40,9 +39,9 @@ SERVER_MANAGER = ServerParameterManager()
 RAY_MANAGER = RayParameterManager()
 
 app = FastAPI(
-    title="ReLiK",
+    title="Golden Retriever",
     version=VERSION["VERSION"],
-    description="ReLiK REST API",
+    description="Golden Retriever REST API",
 )
 
 
@@ -124,7 +123,7 @@ class RelikServer:
     async def handle_batch(self, text: List[str]) -> List:
         return self.relik(text, annotation_type=self.annotation_type)
 
-    @app.post("/api/relik")
+    @app.post("/api/goldenretriever")
     async def relik_endpoint(self, text: Union[str, List[str]]):
         try:
             # get predictions for the retriever

@@ -2,8 +2,6 @@ import contextlib
 
 import torch
 
-# from relik.retriever.pytorch_modules import PRECISION_MAP
-
 
 def get_autocast_context(
     device: str | torch.device, precision: str

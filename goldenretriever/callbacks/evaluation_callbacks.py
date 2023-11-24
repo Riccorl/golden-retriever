@@ -3,7 +3,7 @@ from typing import Dict, List, Optional
 
 import lightning as pl
 import torch
-from lightning.trainer.states import RunningStage
+from lightning.pytorch.trainer.states import RunningStage
 from sklearn.metrics import label_ranking_average_precision_score
 
 from goldenretriever.callbacks.base import DEFAULT_STAGES, NLPTemplateCallback
@@ -85,9 +85,10 @@ class RecallAtKEvaluationCallback(NLPTemplateCallback):
             for sample in samples:
                 # compute the recall at k
                 # cut the predictions to the first k elements
-                predictions = sample["predictions"][: self.k]
-                hits += len(set(predictions) & set(sample["gold"]))
-                total += len(set(sample["gold"]))
+                predictions = sample["retrieved_docs"][: self.k]
+                gold_ids = set([g.id for g in sample["gold_docs"]])
+                hits += len(set([p.id for p in predictions]) & gold_ids)
+                total += len(gold_ids)
 
             # compute the mean recall at k
             recall_at_k = hits / total

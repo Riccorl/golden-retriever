@@ -26,20 +26,16 @@ NEW_CONDA_LINE="source \$CONDA_BASE/bin/activate $ENV_NAME"
 sed -i.bak -e "s,.*bin/activate.*,$NEW_CONDA_LINE,g" scripts/train.sh
 
 # install torch
-read -rp "Enter cuda version (e.g. '11.7', default no cuda support): " CUDA_VERSION
-read -rp "Enter PyTorch version (e.g. '1.13.1', default latest): " PYTORCH_VERSION
+read -rp "Enter cuda version (e.g. '12.1', default no cuda support): " CUDA_VERSION
+read -rp "Enter PyTorch version (e.g. '2.1.0', default latest): " PYTORCH_VERSION
 if [ -n "$PYTORCH_VERSION" ]; then
   PYTORCH_VERSION="=$PYTORCH_VERSION"
 fi
 if [ -z "$CUDA_VERSION" ]; then
   conda install -y pytorch"$PYTORCH_VERSION" cpuonly -c pytorch
-  pip install faiss-cpu
 else
   conda install -y pytorch"$PYTORCH_VERSION" pytorch-cuda="$CUDA_VERSION" -c pytorch -c nvidia
-  CPPYTHON=$(python -c "import sys; print('cp' + ''.join(str(s) for s in sys.version_info[:2]))")
-  # conda install -y -c conda-forge faiss-gpu
-  pip install faiss-gpu
 fi
 
 # install python requirements
-pip install -e .
+pip install -e ".[all]"
