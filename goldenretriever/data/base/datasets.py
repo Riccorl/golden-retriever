@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Tuple, Union, Optional
+from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 import torch
 from torch.utils.data import Dataset, IterableDataset

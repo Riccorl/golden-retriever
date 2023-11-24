@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import Optional, Union, List, Set, Dict
+from typing import Dict, List, Optional, Set, Union
 
 import transformers as tr
 

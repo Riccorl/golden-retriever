@@ -1,9 +1,9 @@
 import contextlib
-from functools import partial
 import logging
 import os
 import platform
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Union
 
@@ -14,8 +14,8 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from goldenretriever.common.log import get_logger
-from goldenretriever.common.torch_utils import get_autocast_context
 from goldenretriever.common.model_inputs import ModelInputs
+from goldenretriever.common.torch_utils import get_autocast_context
 from goldenretriever.data.base.datasets import BaseDataset
 from goldenretriever.data.labels import Labels
 from goldenretriever.indexers.base import BaseDocumentIndex
@@ -395,7 +395,7 @@ class GoldenRetriever(torch.nn.Module):
                 "The passages must be indexed before they can be retrieved."
             )
         return self.document_index.get_document_from_index(index)
-    
+
     def get_document_from_passage(self, passage: str) -> Document:
         """
         Get the document from its text.

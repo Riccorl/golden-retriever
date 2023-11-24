@@ -7,22 +7,20 @@ from typing import List, Optional, Set, Union
 
 import lightning as pl
 import torch
-from omegaconf import DictConfig
 from lightning.pytorch.trainer.states import RunningStage
+from omegaconf import DictConfig
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from goldenretriever.callbacks.base import PredictionCallback
-from goldenretriever.common.log import get_console_logger, get_logger
+from goldenretriever.common.log import get_logger
 from goldenretriever.common.model_inputs import ModelInputs
 from goldenretriever.data.base.datasets import BaseDataset
 from goldenretriever.data.datasets import GoldenRetrieverDataset
 from goldenretriever.data.utils import HardNegativesManager
-from goldenretriever.indexers.document import DocumentStore
-from goldenretriever.pytorch_modules.model import GoldenRetriever
 from goldenretriever.indexers.base import BaseDocumentIndex
+from goldenretriever.pytorch_modules.model import GoldenRetriever
 
-console_logger = get_console_logger()
 logger = get_logger(__name__, level=logging.INFO)
 
 
@@ -40,7 +38,6 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         other_callbacks: Optional[List[DictConfig]] = None,
         dataset: Optional[Union[DictConfig, BaseDataset]] = None,
         dataloader: Optional[DataLoader] = None,
-        document_store: Optional[DocumentStore] = None,
         *args,
         **kwargs,
     ):
@@ -51,7 +48,6 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         self.precision = precision
         self.force_reindex = force_reindex
         self.retriever_dir = retriever_dir
-        self.document_store = document_store
 
     @torch.no_grad()
     def __call__(
@@ -132,17 +128,6 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
             # you never know :)
             retriever.eval()
 
-            # if retriever.document_index is None:
-            # if self.document_store is not None:
-            #     # if the document store is not provided, we use the one from the dataset
-            #     document_store = current_dataset.document_store
-
-            # check if retriever has documents to index
-            # if retriever.document_index.documents is None:
-            #     # if not, we use the passages from the dataset
-            #     doc_store = DocumentStore()
-            #     for sample in current_dataset:
-
             retriever.index(
                 batch_size=self.batch_size,
                 num_workers=self.num_workers,
@@ -175,16 +160,15 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                 for batch_idx, retrieved_samples in enumerate(retriever_output):
                     # get the positive passages
                     gold_passages = batch["positives"][batch_idx]
-                    gold_docs = [
-                        retriever.document_index.get_document_from_passage(passage_id)
-                        for passage_id in gold_passages
-                    ]
                     # get the index of the gold passages in the retrieved passages
-                    gold_passage_indices = [doc.id for doc in gold_docs]
-
-                    # get the retrieved passages
+                    gold_passage_indices = [
+                        retriever.get_index_from_passage(passage)
+                        for passage in gold_passages
+                    ]
                     retrieved_indices = [r.document.id for r in retrieved_samples]
-                    retrieved_passages = [r.document.text for r in retrieved_samples]
+                    retrieved_passages = [
+                        retriever.get_passage_from_index(i) for i in retrieved_indices
+                    ]
                     retrieved_scores = [r.score for r in retrieved_samples]
                     # correct predictions are the passages that are in the top-k and are gold
                     correct_indices = set(gold_passage_indices) & set(retrieved_indices)
@@ -201,14 +185,6 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                         ],
                         wrong=[
                             retriever.get_passage_from_index(i) for i in wrong_indices
-                        ],
-                        gold_docs = gold_docs,
-                        retrieved_docs =  [r.document for r in retrieved_samples],
-                        correct_docs = [
-                            retriever.document_index.get_document_from_index(i) for i in correct_indices
-                        ],
-                        wrong_docs = [
-                            retriever.document_index.get_document_from_index(i) for i in wrong_indices
                         ],
                     )
                     predictions.append(prediction_output)

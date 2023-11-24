@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import List, Optional, Union
 
 from fastapi import FastAPI, HTTPException
+from ray_old import serve
 
 from goldenretriever import GoldenRetriever
 from goldenretriever.common.log import get_logger
@@ -10,7 +11,6 @@ from goldenretriever.data.utils import batch_generator
 from goldenretriever.serve.tokenizers import SpacyTokenizer, WhitespaceTokenizer
 from goldenretriever.serve.utils import RayParameterManager, ServerParameterManager
 from goldenretriever.serve.window.manager import WindowManager
-from ray_old import serve
 
 logger = get_logger(__name__, level=logging.INFO)
 

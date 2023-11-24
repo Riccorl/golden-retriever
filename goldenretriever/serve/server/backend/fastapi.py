@@ -2,8 +2,8 @@ import logging
 import os
 from pathlib import Path
 from typing import List, Union
-import psutil
 
+import psutil
 import torch
 
 from goldenretriever.common.utils import is_package_available
@@ -12,8 +12,7 @@ if not is_package_available("fastapi"):
     raise ImportError(
         "FastAPI is not installed. Please install FastAPI with `pip install goldenretriever[serve]`."
     )
-from fastapi import FastAPI, HTTPException, APIRouter
-
+from fastapi import APIRouter, FastAPI, HTTPException
 
 from goldenretriever.common.log import get_logger
 from goldenretriever.serve.server.backend.utils import (
@@ -93,7 +92,9 @@ class GoldenRetrieverServer:
         )
 
         self.router = APIRouter()
-        self.router.add_api_route("/api/goldenretriever", self.relik_endpoint, methods=["POST"])
+        self.router.add_api_route(
+            "/api/goldenretriever", self.relik_endpoint, methods=["POST"]
+        )
 
         logger.info("RelikServer initialized.")
 

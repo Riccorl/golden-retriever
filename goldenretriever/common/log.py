@@ -165,5 +165,7 @@ def get_console_logger():
     return _console
 
 
-def print_relik_text_art(text: str = "golden-retriever", font: str = "larry3d", **kwargs):
+def print_relik_text_art(
+    text: str = "golden-retriever", font: str = "larry3d", **kwargs
+):
     tprint(text, font=font, **kwargs)

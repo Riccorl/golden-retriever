@@ -1,10 +1,10 @@
-from typing import Any, Union, List, Optional, Sequence
+from typing import Any, List, Optional, Sequence, Union
 
 import hydra
 import lightning as pl
 import torch
-from omegaconf import DictConfig
 from lightning.pytorch.utilities.types import EVAL_DATALOADERS
+from omegaconf import DictConfig
 from torch.utils.data import DataLoader
 
 from goldenretriever.common.log import get_logger

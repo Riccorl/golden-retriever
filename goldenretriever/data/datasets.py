@@ -172,9 +172,16 @@ class GoldenRetrieverDataset:
         **kwargs,
     ) -> Any:
         if isinstance(paths, str):
-            paths = [Path(paths) if Path(paths).is_absolute() else self.project_folder / paths]
+            paths = [
+                Path(paths)
+                if Path(paths).is_absolute()
+                else self.project_folder / paths
+            ]
         else:
-            paths = [Path(path) if Path(path).is_absolute() else self.project_folder / path for path in paths]
+            paths = [
+                Path(path) if Path(path).is_absolute() else self.project_folder / path
+                for path in paths
+            ]
 
         # read the data and put it in a placeholder list
         for path in paths:
@@ -481,11 +488,11 @@ class InBatchNegativesDataset(GoldenRetrieverDataset):
         positives = list(set([p["text"].strip() for p in sample["positive_ctxs"]]))
         if max_positives != -1:
             positives = positives[:max_positives]
-        
+
         negatives = list(set([n["text"].strip() for n in sample["negative_ctxs"]]))
         if max_negatives != -1:
             negatives = negatives[:max_negatives]
-        
+
         hard_negatives = list(
             set([h["text"].strip() for h in sample["hard_negative_ctxs"]])
         )

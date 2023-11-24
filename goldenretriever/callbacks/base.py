@@ -4,8 +4,8 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 import hydra
 import lightning as pl
 import torch
-from omegaconf import DictConfig
 from lightning.pytorch.trainer.states import RunningStage
+from omegaconf import DictConfig
 from torch.utils.data import DataLoader, Dataset
 
 from goldenretriever.common.log import get_logger

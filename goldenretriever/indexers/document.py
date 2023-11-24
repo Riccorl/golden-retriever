@@ -142,7 +142,7 @@ class DocumentStore:
         if id is None:
             # id = hash(text)
             # get the len of the documents and add 1
-            id = len(self._documents) #+ 1
+            id = len(self._documents)  # + 1
         if id in self._documents_index:
             logger.warning(f"Document with id `{id}` already exists, skipping")
             return self._documents_index[id]

@@ -9,10 +9,9 @@ import torch
 from lightning.pytorch.trainer.states import RunningStage
 
 from goldenretriever.callbacks.base import NLPTemplateCallback, PredictionCallback
-from goldenretriever.common.log import get_console_logger, get_logger
+from goldenretriever.common.log import get_logger
 from goldenretriever.pytorch_modules.hf import GoldenRetrieverModel
 
-console_logger = get_console_logger()
 logger = get_logger(__name__, level=logging.INFO)
 
 
@@ -55,7 +54,7 @@ class SavePredictionsCallback(NLPTemplateCallback):
                     prediction_folder = (
                         Path(trainer.logger.experiment.dir) / "predictions"
                     )
-                except:
+                except Exception:
                     logger.info(
                         "You need to specify an output directory (`saving_dir`) or a logger to save the predictions.\n"
                         "Skipping saving predictions."
@@ -111,29 +110,6 @@ class ResetModelCallback(pl.Callback):
             trainer.model.model.passage_encoder.to(previous_device)
 
         trainer.strategy.setup_optimizers(trainer)
-        # for optimizer in trainer.optimizers:
-        #     optimizer.state = collections.defaultdict(dict)
-
-        # trainer.model.load_state_dict(torch.load(self.conf)["state_dict"])
-        # trainer.strategy._lightning_module = hydra.utils.instantiate(self.conf, _recursive_=False)
-        # trainer.strategy._lightning_module.trainer = trainer
-        # # links data to the trainer
-        # self._data_connector.attach_data(
-        #     trainer.strategy._lightning_module.trainer, train_dataloaders=trainer.train_dataloaders, val_dataloaders=trainer.val_dataloaders, datamodule=trainer.datamodule
-        # )
-        # trainer.strategy.setup(trainer)
-
-        # reset the model
-        # pl_module.model = hydra.utils.instantiate(self.conf.model)
-        # assign the model to the trainer
-        # pl_module = hydra.utils.instantiate(self.conf, _recursive_=False)
-        # previous_device = pl_module.device
-        # trainer.model.model = hydra.utils.instantiate(self.conf)
-        # trainer.model.model.to(previous_device)
-        # optimizers, lr_scheduler_configs = pl_module.configure_optimizers()
-        # trainer.optimizers = optimizers
-        # trainer.lr_schedulers = trainer.configure_schedulers(lr_scheduler_configs)
-        # trainer.optimizer_frequencies = []  # or optimizers frequencies if you have any
 
 
 class FreeUpIndexerVRAMCallback(pl.Callback):
@@ -252,7 +228,7 @@ class SaveRetrieverCallback(pl.Callback):
         else:
             try:
                 retriever_folder = Path(trainer.logger.experiment.dir) / "retriever"
-            except:
+            except Exception:
                 logger.info(
                     "You need to specify an output directory (`saving_dir`) or a logger to save the retriever.\n"
                     "Skipping saving retriever."

@@ -1,6 +1,8 @@
 from typing import List, Union
 
-from goldenretriever.serve.data.splitters.base_sentence_splitter import BaseSentenceSplitter
+from goldenretriever.serve.data.splitters.base_sentence_splitter import (
+    BaseSentenceSplitter,
+)
 
 
 class WindowSentenceSplitter(BaseSentenceSplitter):

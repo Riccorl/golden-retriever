@@ -2,11 +2,11 @@ import collections
 import itertools
 from typing import Dict, List, Optional, Set, Tuple
 
+from goldenretriever.serve.data.objects import Window
 from goldenretriever.serve.data.splitters.base_sentence_splitter import (
     BaseSentenceSplitter,
 )
 from goldenretriever.serve.data.tokenizers.base_tokenizer import BaseTokenizer
-from goldenretriever.serve.data.objects import Window
 
 
 class WindowManager:

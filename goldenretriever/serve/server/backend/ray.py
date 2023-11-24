@@ -2,8 +2,8 @@ import logging
 import os
 from pathlib import Path
 from typing import List, Union
-import psutil
 
+import psutil
 import torch
 
 from goldenretriever.common.utils import is_package_available
