@@ -1,9 +1,13 @@
 import csv
 import json
 from pathlib import Path
+import pickle
+import sys
 from typing import Dict, List, Union
 
 from goldenretriever.common.log import get_logger
+
+csv.field_size_limit(sys.maxsize)
 
 logger = get_logger(__name__)
 
@@ -67,9 +71,15 @@ class DocumentStore:
             The documents to store.
     """
 
-    def __init__(self, documents: List[Document] = None) -> None:
+    def __init__(
+        self, documents: List[Document] = None, ignore_case: bool = False
+    ) -> None:
+        self.ignore_case = ignore_case
+
         if documents is None:
             documents = []
+        # if self.ingore_case:
+        #     documents = [doc.lower() for doc in documents]
         self._documents = documents
         # build an index for the documents
         self._documents_index = {doc.id: doc for doc in self._documents}
@@ -120,6 +130,10 @@ class DocumentStore:
         Returns:
             Optional[Document]: The document with the given text, or None if it does not exist.
         """
+        if self.ignore_case:
+            text = text.lower()
+        if text not in self._documents_reverse_index:
+            logger.warning(f"Document with text `{text}` does not exist, skipping")
         return self._documents_reverse_index.get(text, None)
 
     def add_document(
@@ -242,20 +256,45 @@ class DocumentStore:
         return cls(d)
 
     @classmethod
-    def from_tsv(cls, file_path: Union[str, Path], delimiter: str = "\t", **kwargs):
+    def from_pickle(cls, file_path: Union[str, Path], **kwargs):
+        with open(file_path, "rb") as handle:
+            d = pickle.load(handle)
+        return cls(d)
+
+    @classmethod
+    def from_tsv(
+        cls,
+        file_path: Union[str, Path],
+        ingore_case: bool = False,
+        delimiter: str = "\t",
+        **kwargs,
+    ):
         d = []
         # load a tsv/csv file and take the header into account
         # the header must be `id\ttext\t[list of metadata keys]`
-        with open(file_path, "r") as f:
-            csv_reader = csv.reader(f, delimiter=delimiter)
+        with open(file_path, "r", encoding="utf8") as f:
+            csv_reader = csv.reader(f, delimiter=delimiter, **kwargs)
             header = next(csv_reader)
             id, text, *metadata_keys = header
-            for row in csv_reader:
+            for i, row in enumerate(csv_reader):
+                # check if id can be casted to int
+                # if not, we add it to the metadata and use `i` as id
+                try:
+                    s_id = int(row[header.index(id)])
+                    row_metadata_keys = metadata_keys
+                except ValueError:
+                    row_metadata_keys = [id] + metadata_keys
+                    s_id = i
+
                 d.append(
                     Document(
-                        text=row[header.index(text)],
-                        id=row[header.index(id)],
-                        metadata={key: row[header.index(key)] for key in metadata_keys},
+                        text=row[header.index(text)].strip().lower()
+                        if ingore_case
+                        else row[header.index(text)].strip(),
+                        id=s_id,  # row[header.index(id)],
+                        metadata={
+                            key: row[header.index(key)] for key in row_metadata_keys
+                        },
                     )
                 )
         return cls(d)
@@ -265,3 +304,6 @@ class DocumentStore:
             for doc in self._documents:
                 # save as json lines
                 f.write(json.dumps(doc.to_dict()) + "\n")
+
+        # with open(file_path, "wb") as handle:
+        #     pickle.dump(self._documents, handle, protocol=pickle.HIGHEST_PROTOCOL)

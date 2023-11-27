@@ -71,7 +71,7 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
             shuffle=False,
             batch_size=None,
             num_workers=self.num_workers.train,
-            pin_memory=True,
+            pin_memory=False,
             collate_fn=lambda x: x,
         )
 
@@ -85,7 +85,7 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
                     shuffle=False,
                     batch_size=None,
                     num_workers=self.num_workers.val,
-                    pin_memory=True,
+                    pin_memory=False,
                     collate_fn=lambda x: x,
                 )
             )
@@ -101,7 +101,7 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
                     shuffle=False,
                     batch_size=None,
                     num_workers=self.num_workers.test,
-                    pin_memory=True,
+                    pin_memory=False,
                     collate_fn=lambda x: x,
                 )
             )

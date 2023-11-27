@@ -56,7 +56,7 @@ class BaseDocumentIndex:
         | None = None,
         embeddings: torch.Tensor | None = None,
         metadata_fields: List[str] | None = None,
-        separator: str = "<def>",
+        separator: str | None = None,
         name_or_path: str | os.PathLike | None = None,
         device: str = "cpu",
     ) -> None:
@@ -184,7 +184,10 @@ class BaseDocumentIndex:
             `str`: The document label.
         """
         # get the text from the document
-        text = document.split(self.separator)[0]
+        if self.separator:
+            text = document.split(self.separator)[0]
+        else:
+            text = document
         return self.documents.get_document_from_text(text)
 
     def get_index_from_passage(self, document: str) -> int:
@@ -199,7 +202,10 @@ class BaseDocumentIndex:
             `int`: The index of the document.
         """
         # get the text from the document
-        return self.get_document_from_passage(document).id
+        doc = self.get_document_from_passage(document)
+        if doc is None:
+            raise ValueError(f"Document `{document}` not found.")
+        return doc.id
 
     def get_document_from_index(self, index: int) -> str:
         """
@@ -227,6 +233,12 @@ class BaseDocumentIndex:
         """
         document = self.get_document_from_index(index)
         # build the passage using the metadata fields
+        passage = document.text
+        for field in self.metadata_fields:
+            passage += f"{self.separator}{document.metadata[field]}"
+        return passage
+
+    def get_passage_from_document(self, document: Document) -> str:
         passage = document.text
         for field in self.metadata_fields:
             passage += f"{self.separator}{document.metadata[field]}"
@@ -296,7 +308,8 @@ class BaseDocumentIndex:
         """
         documents = documents or self.documents
         # construct the passages from the documents
-        return [self.get_passage_from_index(i) for i in range(len(documents))]
+        # return [self.get_passage_from_index(i) for i in range(len(documents))]
+        return [self.get_passage_from_document(doc) for doc in documents]
 
     def save_pretrained(
         self,
@@ -414,6 +427,15 @@ class BaseDocumentIndex:
             raise ValueError(f"Document file `{documents_path}` does not exist.")
         logger.info(f"Loading documents from {documents_path}")
         documents = DocumentStore.from_file(documents_path)
+        # TODO: probably is better to do the opposite and iterate over the config
+        # check for each possible attribute ind DocumentStore
+        for attr in dir(documents):
+            if attr.startswith("__"):
+                continue
+            if attr not in config:
+                continue
+            # set the attribute
+            setattr(documents, attr, config[attr])
 
         # load the passage embeddings
         embedding_path = model_dir / embedding_file_name

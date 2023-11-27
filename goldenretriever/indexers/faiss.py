@@ -33,7 +33,7 @@ class FaissOutput:
 
 
 class FaissDocumentIndex(BaseDocumentIndex):
-    DOCUMENTS_FILE_NAME = "documents.json"
+    DOCUMENTS_FILE_NAME = "documents.jsonl"
     EMBEDDINGS_FILE_NAME = "embeddings.pt"
     INDEX_FILE_NAME = "index.faiss"
 
@@ -47,7 +47,7 @@ class FaissDocumentIndex(BaseDocumentIndex):
         | None = None,
         embeddings: torch.Tensor | numpy.ndarray | None = None,
         metadata_fields: List[str] | None = None,
-        separator: str = "<def>",
+        separator: str | None = None,
         name_or_path: str | os.PathLike | None = None,
         device: str = "cpu",
         index=None,
@@ -66,7 +66,8 @@ class FaissDocumentIndex(BaseDocumentIndex):
             logger.info("Both documents and embeddings are provided.")
             if len(documents) != embeddings.shape[0]:
                 raise ValueError(
-                    "The number of documents and embeddings must be the same."
+                    "The number of documents and embeddings must be the same. "
+                    f"Got {len(documents)} documents and {embeddings.shape[0]} embeddings."
                 )
 
         faiss.omp_set_num_threads(psutil.cpu_count(logical=False))
@@ -171,7 +172,6 @@ class FaissDocumentIndex(BaseDocumentIndex):
                 embeddings.cpu() if isinstance(embeddings, torch.Tensor) else embeddings
             )
 
-        self.embeddings.hnsw.efConstruction = 20
         # convert to float32 if embeddings is a torch.Tensor and is float16
         if isinstance(embeddings, torch.Tensor) and embeddings.dtype == torch.float16:
             embeddings = embeddings.float()
@@ -183,11 +183,6 @@ class FaissDocumentIndex(BaseDocumentIndex):
         self.embeddings.add(embeddings)
 
         self.embeddings.nprobe = nprobe
-
-        # self.embeddings.hnsw.efSearch
-        # self.embeddings.hnsw.efSearch = 256
-
-        # self.embeddings.k_factor = 10
 
         # save parameters for saving/loading
         self.index_type = index_type
@@ -242,7 +237,7 @@ class FaissDocumentIndex(BaseDocumentIndex):
         """
 
         if self.embeddings is not None and not force_reindex:
-            logger.log(
+            logger.info(
                 "Embeddings are already present and `force_reindex` is `False`. Skipping indexing."
             )
             if documents is None:

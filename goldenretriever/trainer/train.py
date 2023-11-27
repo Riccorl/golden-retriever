@@ -226,7 +226,9 @@ class Trainer:
 
     def configure_lightning_datamodule(self, *args, **kwargs):
         # lightning data module declaration
-        if isinstance(self.val_dataset, GoldenRetrieverDataset):
+        if self.val_dataset is not None and isinstance(
+            self.val_dataset, GoldenRetrieverDataset
+        ):
             self.val_dataset = [self.val_dataset]
         if self.test_dataset is not None and isinstance(
             self.test_dataset, GoldenRetrieverDataset
@@ -409,6 +411,7 @@ class Trainer:
             batch_size=self.prediction_batch_size,
             precision=self.precision,
             other_callbacks=self.other_callbacks_for_prediction,
+            force_reindex=False,
         )
         self.callbacks_store.append(self.prediction_callback)
 
@@ -438,12 +441,17 @@ class Trainer:
             self.callbacks_store.append(self.hard_negatives_callback)
 
         # utils callback
-        self.callbacks_store.extend(
-            [SaveRetrieverCallback(), FreeUpIndexerVRAMCallback()]
-        )
+        # self.callbacks_store.extend(
+        #     [SaveRetrieverCallback(), FreeUpIndexerVRAMCallback()]
+        # )
         return self.callbacks_store
 
     def train(self):
+        # update callbacks for training specific callbacks
+        self.callbacks_store = self.callbacks or []
+        self.callbacks_store.extend(
+            [SaveRetrieverCallback(), FreeUpIndexerVRAMCallback()]
+        )
         self.trainer.fit(self.lightining_module, datamodule=self.lightining_datamodule)
 
     def test(
@@ -455,31 +463,31 @@ class Trainer:
         if lightining_module is not None:
             self.lightining_module = lightining_module
         else:
-            if self.fast_dev_run:
-                best_lightining_module = self.lightining_module
-            else:
-                # load best model for testing
-                if checkpoint_path is not None:
-                    best_model_path = checkpoint_path
-                elif self.checkpoint_path:
-                    best_model_path = self.checkpoint_path
-                elif self.model_checkpoint_callback:
-                    best_model_path = self.model_checkpoint_callback.best_model_path
+            try:
+                if self.fast_dev_run:
+                    best_lightining_module = self.lightining_module
                 else:
-                    raise ValueError(
-                        "Either `checkpoint_path` or `model_checkpoint_callback` should "
-                        "be provided to the trainer"
-                    )
-                logger.info(f"Loading best model from {best_model_path}")
+                    # load best model for testing
+                    if checkpoint_path is not None:
+                        best_model_path = checkpoint_path
+                    elif self.checkpoint_path:
+                        best_model_path = self.checkpoint_path
+                    elif self.model_checkpoint_callback:
+                        best_model_path = self.model_checkpoint_callback.best_model_path
+                    else:
+                        raise ValueError(
+                            "Either `checkpoint_path` or `model_checkpoint_callback` should "
+                            "be provided to the trainer"
+                        )
+                    logger.info(f"Loading best model from {best_model_path}")
 
-                try:
                     best_lightining_module = (
                         GoldenRetrieverPLModule.load_from_checkpoint(best_model_path)
                     )
-                except Exception as e:
-                    logger.info(f"Failed to load the model from checkpoint: {e}")
-                    logger.info("Using last model instead")
-                    best_lightining_module = self.lightining_module
+            except Exception as e:
+                logger.info(f"Failed to load the model from checkpoint: {e}")
+                logger.info("Using last model instead")
+                best_lightining_module = self.lightining_module
 
         lightining_datamodule = lightining_datamodule or self.lightining_datamodule
         # module test

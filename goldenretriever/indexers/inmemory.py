@@ -32,7 +32,7 @@ class InMemoryDocumentIndex(BaseDocumentIndex):
         | None = None,
         embeddings: torch.Tensor | None = None,
         metadata_fields: List[str] | None = None,
-        separator: str = "<def>",
+        separator: str | None = None,
         name_or_path: str | os.PathLike | None = None,
         device: str = "cpu",
         precision: str | int | torch.dtype = 32,
@@ -194,7 +194,7 @@ class InMemoryDocumentIndex(BaseDocumentIndex):
         # Create empty lists to store the passage embeddings and passage index
         passage_embeddings: List[torch.Tensor] = []
 
-        encoder_device = "cpu" if compute_on_cpu else self.device
+        encoder_device = "cpu" if compute_on_cpu else encoder.device
 
         # fucking autocast only wants pure strings like 'cpu' or 'cuda'
         # we need to convert the model device to that

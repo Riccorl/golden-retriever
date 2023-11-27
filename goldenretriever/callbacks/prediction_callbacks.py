@@ -161,11 +161,21 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                     # get the positive passages
                     gold_passages = batch["positives"][batch_idx]
                     # get the index of the gold passages in the retrieved passages
-                    gold_passage_indices = [
-                        retriever.get_index_from_passage(passage)
-                        for passage in gold_passages
-                    ]
-                    retrieved_indices = [r.document.id for r in retrieved_samples]
+                    gold_passage_indices = []
+                    gold_passage_indices = []
+                    for passage in gold_passages:
+                        try:
+                            gold_passage_indices.append(
+                                retriever.get_index_from_passage(passage)
+                            )
+                        except ValueError:
+                            logger.warning(
+                                f"Passage `{passage}` not found in the index. "
+                                "We will skip it, but the results might not reflect the "
+                                "actual performance."
+                            )
+                            pass
+                    retrieved_indices = [r.document.id for r in retrieved_samples if r]
                     retrieved_passages = [
                         retriever.get_passage_from_index(i) for i in retrieved_indices
                     ]

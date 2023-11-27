@@ -30,7 +30,7 @@ if __name__ == "__main__":
         max_passage_length=64,
     )
 
-    documents = DocumentStore()
+    documents = DocumentStore(ignore_case=True)
     logger.info("Adding documents to document store")
     for sample in tqdm(train_dataset):
         [documents.add_document(s) for s in sample["positives"]]
