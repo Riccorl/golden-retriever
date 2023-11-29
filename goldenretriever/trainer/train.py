@@ -323,7 +323,7 @@ class Trainer:
         if isinstance(self.top_ks, int):
             self.top_ks = [self.top_ks]
         # order the top_ks in descending order
-        # self.top_ks = sorted(self.top_ks, reverse=True)
+        self.top_ks = sorted(self.top_ks, reverse=True)
         # get the max top_k to monitor
         self.top_k = self.top_ks[0]
         self.metric_to_monitor = f"validate_recall@{self.top_k}"

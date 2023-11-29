@@ -72,9 +72,8 @@ class DocumentStore:
     """
 
     def __init__(
-        self, documents: List[Document] = None, ignore_case: bool = False
+        self, documents: List[Document] = None
     ) -> None:
-        self.ignore_case = ignore_case
 
         if documents is None:
             documents = []
@@ -130,8 +129,6 @@ class DocumentStore:
         Returns:
             Optional[Document]: The document with the given text, or None if it does not exist.
         """
-        if self.ignore_case:
-            text = text.lower()
         if text not in self._documents_reverse_index:
             logger.warning(f"Document with text `{text}` does not exist, skipping")
         return self._documents_reverse_index.get(text, None)
@@ -160,6 +157,9 @@ class DocumentStore:
         if id in self._documents_index:
             logger.warning(f"Document with id `{id}` already exists, skipping")
             return self._documents_index[id]
+        if text in self._documents_reverse_index:
+            logger.warning(f"Document with text `{text}` already exists, skipping")
+            return self._documents_reverse_index[text]
         self._documents.append(Document(text, id, metadata))
         self._documents_index[id] = self._documents[-1]
         self._documents_reverse_index[text] = self._documents[-1]

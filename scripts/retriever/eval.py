@@ -13,11 +13,11 @@ logger = get_logger(__name__)
 if __name__ == "__main__":
     # instantiate retriever
     document_index = BaseDocumentIndex.from_pretrained(
-        "/root/golden-retriever/wandb/run-20231124_163727-d8jnv08r/files/retriever/document_index",
+        "/root/golden-retriever/data/retrievers/raco-e5-small-v2/training-index/document_index",
         # _target_="goldenretriever.indexers.faiss.FaissDocumentIndex"
     )
     retriever = GoldenRetriever(
-        question_encoder="/root/golden-retriever/data/retrievers/raco-e5-small-v2/index/question_encoder",
+        question_encoder="/root/golden-retriever/data/retrievers/raco-e5-small-v2/training-index/question_encoder",
         document_index=document_index,
         device="cuda",
         precision="16",
@@ -42,7 +42,7 @@ if __name__ == "__main__":
     )
     test_dataset = InBatchNegativesDataset(
         name="raco_val",
-        path="/root/golden-retriever/data/commonsense/raco/CommonsenseTraining/dev.json",
+        path="/root/golden-retriever/data/commonsense/raco/CommonsenseTraining/obqa.json",
         tokenizer=retriever.question_tokenizer,
         question_batch_size=64,
         passage_batch_size=400,
@@ -70,6 +70,7 @@ if __name__ == "__main__":
         wandb_project_name="golden-retriever-raco",
         wandb_experiment_name="raco-e5-small-inbatch",
         max_hard_negatives_to_mine=0,
+        top_ks=[5, 10]
     )
 
     # trainer.train()
