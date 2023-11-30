@@ -172,7 +172,7 @@ class BaseDocumentIndex:
     def search(self, query: Any, k: int = 1, *args, **kwargs) -> List:
         raise NotImplementedError
 
-    def get_document_from_passage(self, document: str) -> str:
+    def get_document_from_passage(self, passage: str) -> str:
         """
         Get the document label from the passage.
 
@@ -185,12 +185,12 @@ class BaseDocumentIndex:
         """
         # get the text from the document
         if self.separator:
-            text = document.split(self.separator)[0]
+            text = passage.split(self.separator)[0]
         else:
-            text = document
+            text = passage
         return self.documents.get_document_from_text(text)
 
-    def get_index_from_passage(self, document: str) -> int:
+    def get_index_from_passage(self, passage: str) -> int:
         """
         Get the index of the passage.
 
@@ -202,9 +202,9 @@ class BaseDocumentIndex:
             `int`: The index of the document.
         """
         # get the text from the document
-        doc = self.get_document_from_passage(document)
+        doc = self.get_document_from_passage(passage)
         if doc is None:
-            raise ValueError(f"Document `{document}` not found.")
+            raise ValueError(f"Document `{passage}` not found.")
         return doc.id
 
     def get_document_from_index(self, index: int) -> str:

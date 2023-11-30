@@ -27,19 +27,17 @@ logger = get_logger(__name__, level=logging.INFO)
 class GoldenRetrieverPredictionCallback(PredictionCallback):
     def __init__(
         self,
-        k: Optional[int] = None,
+        k: int | None = None,
         batch_size: int = 32,
         num_workers: int = 8,
-        document_index: Optional[BaseDocumentIndex] = None,
-        precision: Union[str, int] = 32,
+        document_index: BaseDocumentIndex | None = None,
+        precision: str | int = 32,
         force_reindex: bool = True,
         retriever_dir: Optional[Path] = None,
-        stages: Optional[Set[Union[str, RunningStage]]] = None,
-        other_callbacks: Optional[
-            Union[List[DictConfig], List["NLPTemplateCallback"]]
-        ] = None,
-        dataset: Optional[Union[DictConfig, BaseDataset]] = None,
-        dataloader: Optional[DataLoader] = None,
+        stages: Set[str | RunningStage] | None = None,
+        other_callbacks: List[DictConfig] | List["NLPTemplateCallback"] | None = None,
+        dataset: DictConfig | BaseDataset | None = None,
+        dataloader: DataLoader | None = None,
         *args,
         **kwargs,
     ):
@@ -56,10 +54,12 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         self,
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
-        datasets: Optional[
-            Union[DictConfig, BaseDataset, List[DictConfig], List[BaseDataset]]
-        ] = None,
-        dataloaders: Optional[Union[DataLoader, List[DataLoader]]] = None,
+        datasets: DictConfig
+        | BaseDataset
+        | List[DictConfig]
+        | List[BaseDataset]
+        | None = None,
+        dataloaders: DataLoader | List[DataLoader] | None = None,
         *args,
         **kwargs,
     ) -> dict:
@@ -95,7 +95,6 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
             logger.info(
                 f"Computing passage embeddings for dataset {current_dataset.name}"
             )
-            # passages = self._get_passages_dataloader(current_dataset, trainer)
 
             tokenizer = current_dataset.tokenizer
 
@@ -125,7 +124,6 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                 and stage == RunningStage.TESTING
             ):
                 retriever = retriever.from_pretrained(self.retriever_dir)
-                # set the retriever to eval mode if we are loading it from disk
 
             # you never know :)
             retriever.eval()
@@ -139,12 +137,6 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                 compute_on_cpu=False,
                 force_reindex=force_reindex,
             )
-
-            # pl_module_original_device = pl_module.device
-            # if (
-            #     and pl_module.device.type == "cuda"
-            # ):
-            #     pl_module.to("cpu")
 
             # now compute the question embeddings and compute the top-k accuracy
             predictions = []
@@ -163,7 +155,6 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                     # get the positive passages
                     gold_passages = batch["positives"][batch_idx]
                     # get the index of the gold passages in the retrieved passages
-                    gold_passage_indices = []
                     gold_passage_indices = []
                     for passage in gold_passages:
                         try:
@@ -210,50 +201,6 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
 
         # return the predictions
         return dataloader_predictions
-
-    # @staticmethod
-    # def _get_passages_dataloader(
-    #     indexer: Optional[BaseIndexer] = None,
-    #     dataset: Optional[GoldenRetrieverDataset] = None,
-    #     trainer: Optional[pl.Trainer] = None,
-    # ):
-    #     if indexer is None:
-    #         logger.info(
-    #             f"Indexer is None, creating indexer from passages not found in dataset {dataset.name}, computing them from the dataloaders"
-    #         )
-    #         # get the passages from the all the dataloader passage ids
-    #         passages = set()  # set to avoid duplicates
-    #         for batch in trainer.train_dataloader:
-    #             passages.update(
-    #                 [
-    #                     " ".join(map(str, [c for c in passage_ids.tolist() if c != 0]))
-    #                     for passage_ids in batch["passages"]["input_ids"]
-    #                 ]
-    #             )
-    #         for d in trainer.val_dataloaders:
-    #             for batch in d:
-    #                 passages.update(
-    #                     [
-    #                         " ".join(
-    #                             map(str, [c for c in passage_ids.tolist() if c != 0])
-    #                         )
-    #                         for passage_ids in batch["passages"]["input_ids"]
-    #                     ]
-    #                 )
-    #         for d in trainer.test_dataloaders:
-    #             for batch in d:
-    #                 passages.update(
-    #                     [
-    #                         " ".join(
-    #                             map(str, [c for c in passage_ids.tolist() if c != 0])
-    #                         )
-    #                         for passage_ids in batch["passages"]["input_ids"]
-    #                     ]
-    #                 )
-    #         passages = list(passages)
-    #     else:
-    #         passages = dataset.passages
-    #     return passages
 
 
 class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
@@ -359,10 +306,12 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
             return {}
 
         if self.metrics_to_monitor not in trainer.logged_metrics:
-            raise ValueError(
-                f"Metric `{self.metrics_to_monitor}` not found in trainer.logged_metrics"
+            logger.warning(
+                f"Metric `{self.metrics_to_monitor}` not found in trainer.logged_metrics. "
                 f"Available metrics: {trainer.logged_metrics.keys()}"
             )
+            return {}
+
         if trainer.logged_metrics[self.metrics_to_monitor] < self.threshold:
             return {}
 

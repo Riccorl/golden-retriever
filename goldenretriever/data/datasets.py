@@ -485,16 +485,16 @@ class InBatchNegativesDataset(GoldenRetrieverDataset):
         **kwargs,
     ) -> Dict:
         # remove duplicates and limit the number of passages
-        positives = list(set([p["text"].strip() for p in sample["positive_ctxs"]]))
+        positives = list(set([p["text"] for p in sample["positive_ctxs"]]))
         if max_positives != -1:
             positives = positives[:max_positives]
 
-        negatives = list(set([n["text"].strip() for n in sample["negative_ctxs"]]))
+        negatives = list(set([n["text"] for n in sample["negative_ctxs"]]))
         if max_negatives != -1:
             negatives = negatives[:max_negatives]
 
         hard_negatives = list(
-            set([h["text"].strip() for h in sample["hard_negative_ctxs"]])
+            set([h["text"] for h in sample["hard_negative_ctxs"]])
         )
         if max_hard_negatives != -1:
             hard_negatives = hard_negatives[:max_hard_negatives]
@@ -690,14 +690,14 @@ class AidaInBatchNegativesDataset(InBatchNegativesDataset):
         **kwargs,
     ) -> Dict:
         # remove duplicates and limit the number of passages
-        positives = list(set([p["text"].strip() for p in sample["positive_ctxs"]]))
+        positives = list(set([p["text"] for p in sample["positive_ctxs"]]))
         if max_positives != -1:
             positives = positives[:max_positives]
-        negatives = list(set([n["text"].strip() for n in sample["negative_ctxs"]]))
+        negatives = list(set([n["text"] for n in sample["negative_ctxs"]]))
         if max_negatives != -1:
             negatives = negatives[:max_negatives]
         hard_negatives = list(
-            set([h["text"].strip() for h in sample["hard_negative_ctxs"]])
+            set([h["text"] for h in sample["hard_negative_ctxs"]])
         )
         if max_hard_negatives != -1:
             hard_negatives = hard_negatives[:max_hard_negatives]

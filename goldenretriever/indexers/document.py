@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 import pickle
 import sys
-from typing import Dict, List, Union
+from typing import Any, Dict, List, Union
 
 from goldenretriever.common.log import get_logger
 
@@ -71,10 +71,7 @@ class DocumentStore:
             The documents to store.
     """
 
-    def __init__(
-        self, documents: List[Document] = None
-    ) -> None:
-
+    def __init__(self, documents: List[Document] = None) -> None:
         if documents is None:
             documents = []
         # if self.ingore_case:
@@ -95,7 +92,13 @@ class DocumentStore:
         return iter(self._documents)
 
     def __contains__(self, item):
-        return item in self._documents_index
+        if isinstance(item, int):
+            return item in self._documents_index
+        elif isinstance(item, str):
+            return item in self._documents_reverse_index
+        elif isinstance(item, Document):
+            return item.id in self._documents_index
+        # return item in self._documents_index
 
     def __str__(self):
         return f"DocumentStore with {len(self)} documents"
@@ -133,8 +136,29 @@ class DocumentStore:
             logger.warning(f"Document with text `{text}` does not exist, skipping")
         return self._documents_reverse_index.get(text, None)
 
+    def add_documents(self, documents: List[Document] | List[Dict]) -> List[Document]:
+        """
+        Add a list of documents to the document store.
+
+        Args:
+            documents (`List[Document]`):
+                The documents to add.
+
+        Returns:
+            List[Document]: The documents just added.
+        """
+        return [
+            self.add_document(doc)
+            if isinstance(doc, Document)
+            else self.add_document(Document.from_dict(doc))
+            for doc in documents
+        ]
+
     def add_document(
-        self, text: str, id: int | None = None, metadata: Dict | None = None
+        self,
+        text: str | Document,
+        id: int | None = None,
+        metadata: Dict | None = None,
     ) -> Document:
         """
         Add a document to the document store.
@@ -150,20 +174,30 @@ class DocumentStore:
         Returns:
             Document: The document just added.
         """
-        if id is None:
-            # id = hash(text)
-            # get the len of the documents and add 1
-            id = len(self._documents)  # + 1
-        if id in self._documents_index:
-            logger.warning(f"Document with id `{id}` already exists, skipping")
-            return self._documents_index[id]
-        if text in self._documents_reverse_index:
-            logger.warning(f"Document with text `{text}` already exists, skipping")
-            return self._documents_reverse_index[text]
-        self._documents.append(Document(text, id, metadata))
-        self._documents_index[id] = self._documents[-1]
-        self._documents_reverse_index[text] = self._documents[-1]
-        return self._documents_index[id]
+        if isinstance(text, str):
+            if id is None:
+                # get the len of the documents and add 1
+                id = len(self._documents)  # + 1
+            text = Document(text, id, metadata)
+
+        if text in self:
+            logger.warning(f"Document {text} already exists, skipping")
+            return self._documents_index[text.id]
+
+        self._documents.append(text)
+        self._documents_index[text.id] = text
+        self._documents_reverse_index[text.text] = text
+        return text
+        # if id in self._documents_index:
+        #     logger.warning(f"Document with id `{id}` already exists, skipping")
+        #     return self._documents_index[id]
+        # if text_or_document in self._documents_reverse_index:
+        #     logger.warning(f"Document with text `{text_or_document}` already exists, skipping")
+        #     return self._documents_reverse_index[text_or_document]
+        # self._documents.append(Document(text_or_document, id, metadata))
+        # self._documents_index[id] = self._documents[-1]
+        # self._documents_reverse_index[text_or_document] = self._documents[-1]
+        # return self._documents_index[id]
 
     def delete_document(self, document: int | str | Document) -> bool:
         """

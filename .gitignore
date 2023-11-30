@@ -1,5 +1,6 @@
 # custom
 
+.fleet
 data/*
 experiments/*
 retrievers

@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from typing import List, Optional, Union, Literal
+from typing import List, Literal, Optional, Union
 
 import hydra
 import lightning as pl
@@ -18,7 +18,7 @@ from lightning.pytorch.loggers import WandbLogger
 from omegaconf import OmegaConf
 from pprintpp import pformat
 
-from callbacks.base import NLPTemplateCallback
+from goldenretriever.callbacks.base import NLPTemplateCallback
 from goldenretriever.callbacks.evaluation_callbacks import (
     AvgRankingEvaluationCallback,
     RecallAtKEvaluationCallback,
@@ -418,7 +418,7 @@ class Trainer:
             save_dir=save_dir,
             offline=offline,
             project=project,
-            log_model=log_model,
+            log_model=log_model and not offline,
             entity=entity,
             *args,
             **kwargs,
@@ -432,19 +432,17 @@ class Trainer:
 
     @staticmethod
     def configure_early_stopping(
-        metric_to_monitor: str,
-        monitor_mode: str,
-        early_stopping_patience: int = 3,
+        monitor: str,
+        mode: str,
+        patience: int = 3,
         *args,
         **kwargs,
     ) -> EarlyStopping:
-        logger.info(
-            f"Enabling EarlyStopping callback with patience: {early_stopping_patience}"
-        )
+        logger.info(f"Enabling EarlyStopping callback with patience: {patience}")
         early_stopping_callback = EarlyStopping(
-            monitor=metric_to_monitor,
-            mode=monitor_mode,
-            patience=early_stopping_patience,
+            monitor=monitor,
+            mode=mode,
+            patience=patience,
             *args,
             **kwargs,
         )
@@ -483,15 +481,13 @@ class Trainer:
         )
         logger.info(f"Checkpoint directory: {self.checkpoint_dir}")
         logger.info(f"Checkpoint filename: {self.checkpoint_filename}")
+        # update the kwargs
+        # TODO: this is bad
+        kwargs.update(
+            dirpath=self.checkpoint_dir,
+            filename=self.checkpoint_filename,
+        )
         self.model_checkpoint_callback = ModelCheckpoint(*args, **kwargs)
-        # monitor=monitor,
-        # mode=mode,
-        # verbose=verbose,
-        # save_top_k=save_top_k,
-        # save_last=save_last,
-        # filename=filename,
-        # dirpath=dirpath,
-        # auto_insert_metric_name=auto_insert_metric_name,
         return self.model_checkpoint_callback
 
     def configure_hard_negatives_callback(self):
@@ -522,8 +518,6 @@ class Trainer:
             self.early_stopping_callback = self.configure_early_stopping(
                 **self.early_stopping_kwargs
             )
-        if self.max_hard_negatives_to_mine > 0:
-            self.callbacks_store.append(self.configure_hard_negatives_callback())
         return self.callbacks_store
 
     def configure_metrics_callbacks(
@@ -583,14 +577,17 @@ class Trainer:
         if self.log_to_wandb:
             logger.info("Instantiating Wandb Logger")
             # log the args to wandb
-            logger.info(pformat(self.wandb_kwargs))
+            # logger.info(pformat(self.wandb_kwargs))
             self.wandb_logger = self.configure_logger(**self.wandb_kwargs)
             self.experiment_path = Path(self.wandb_logger.experiment.dir)
 
         # set-up training specific callbacks
         self.callbacks_store = self.training_callbacks()
-        # and add the evaluation callback
+        # add the evaluation callbacks
         self.callbacks_store.append(self.configure_prediction_callbacks())
+        # add the hard negatives callback after the evaluation callback
+        if self.max_hard_negatives_to_mine > 0:
+            self.callbacks_store.append(self.configure_hard_negatives_callback())
 
         if self.trainer is None:
             logger.info("Instantiating the Trainer")

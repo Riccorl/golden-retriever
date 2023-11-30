@@ -14,7 +14,7 @@ from goldenretriever.data.base.datasets import BaseDataset
 from goldenretriever.indexers.base import BaseDocumentIndex
 from goldenretriever.indexers.document import Document, DocumentStore
 from goldenretriever.pytorch_modules import PRECISION_MAP, RetrievedSample
-from pytorch_modules.modules import MatrixMultiplicationModule
+from goldenretriever.pytorch_modules.modules import MatrixMultiplicationModule
 
 logger = get_logger(__name__, level=logging.INFO)
 
@@ -153,12 +153,25 @@ class InMemoryDocumentIndex(BaseDocumentIndex):
         if documents is None and self.documents is None:
             raise ValueError("Documents must be provided.")
 
-        if self.embeddings is not None and not force_reindex:
+        if self.embeddings is not None and not force_reindex and documents is None:
             logger.info(
                 "Embeddings are already present and `force_reindex` is `False`. Skipping indexing."
             )
-            if documents is None:
-                return self
+            return self
+
+        if force_reindex:
+            if documents is not None:
+                self.documents.add_documents(documents)
+            data = [k for k in self.get_passages()]
+
+        else:
+            if documents is not None:
+                data = [k for k in self.get_passages(DocumentStore(documents))]
+                # add the documents to the actual document store
+                self.documents.add_documents(documents)
+            else:
+                if self.embeddings is None:
+                    data = [k for k in self.get_passages()]
 
         if collate_fn is None:
             tokenizer = retriever.passage_tokenizer
@@ -173,18 +186,6 @@ class InMemoryDocumentIndex(BaseDocumentIndex):
                         max_length=max_length or tokenizer.model_max_length,
                     )
                 )
-
-        if force_reindex:
-            if documents is not None:
-                self.documents.add_document(documents)
-            data = [k for k in self.get_passages()]
-
-        else:
-            if documents is not None:
-                # TODO: check, are they really added to the documents?
-                data = [k for k in self.get_passages(DocumentStore(documents))]
-            else:
-                return self
 
         dataloader = DataLoader(
             BaseDataset(name="passage", data=data),
@@ -240,6 +241,8 @@ class InMemoryDocumentIndex(BaseDocumentIndex):
             passage_embeddings = passage_embeddings.to(PRECISION_MAP[self.precision])
             passage_embeddings = passage_embeddings.to(self.device)
         self.embeddings = passage_embeddings
+        # update the matrix multiplication module
+        self.mm = MatrixMultiplicationModule(embeddings=self.embeddings)
 
         # free up memory from the unused variable
         del passage_embeddings

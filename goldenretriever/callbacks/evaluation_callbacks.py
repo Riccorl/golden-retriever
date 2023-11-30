@@ -67,9 +67,6 @@ class RecallAtKEvaluationCallback(NLPTemplateCallback):
         Returns:
             :obj:`Dict`: The computed metrics.
         """
-        if self.verbose:
-            logger.info(f"Computing recall@{self.k}")
-
         # metrics to return
         metrics = {}
 
