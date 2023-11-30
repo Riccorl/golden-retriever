@@ -70,7 +70,7 @@ if __name__ == "__main__":
         wandb_project_name="golden-retriever-raco",
         wandb_experiment_name="raco-e5-small-inbatch",
         max_hard_negatives_to_mine=0,
-        top_ks=[5, 10]
+        top_k=[5, 10]
     )
 
     # trainer.train()

@@ -14,6 +14,7 @@ from goldenretriever.data.base.datasets import BaseDataset
 from goldenretriever.indexers.base import BaseDocumentIndex
 from goldenretriever.indexers.document import Document, DocumentStore
 from goldenretriever.pytorch_modules import PRECISION_MAP, RetrievedSample
+from pytorch_modules.modules import MatrixMultiplicationModule
 
 logger = get_logger(__name__, level=logging.INFO)
 
@@ -101,6 +102,10 @@ class InMemoryDocumentIndex(BaseDocumentIndex):
         if self.embeddings is not None and not self.embeddings.device == device:
             self.embeddings = self.embeddings.to(device)
 
+        # TODO: check interactions with the embeddings
+        self.mm = MatrixMultiplicationModule(embeddings=self.embeddings)
+        self.mm.eval()
+
         # precision to be used for the embeddings
         self.precision = precision
 
@@ -176,6 +181,7 @@ class InMemoryDocumentIndex(BaseDocumentIndex):
 
         else:
             if documents is not None:
+                # TODO: check, are they really added to the documents?
                 data = [k for k in self.get_passages(DocumentStore(documents))]
             else:
                 return self
@@ -261,7 +267,8 @@ class InMemoryDocumentIndex(BaseDocumentIndex):
             query = query.to(self.embeddings.device)
             if query.dtype != self.embeddings.dtype:
                 query = query.to(self.embeddings.dtype)
-            similarity = torch.matmul(query, self.embeddings.T)
+            # similarity = torch.matmul(query, self.embeddings.T)
+            similarity = self.mm(query)
             # Retrieve the indices of the top k passage embeddings
             retriever_out: Tuple = torch.topk(
                 similarity, k=min(k, similarity.shape[-1]), dim=1

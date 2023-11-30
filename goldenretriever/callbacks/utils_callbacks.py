@@ -236,8 +236,8 @@ class SaveRetrieverCallback(pl.Callback):
                 retriever_folder = Path(trainer.logger.experiment.dir) / "retriever"
             except Exception:
                 logger.info(
-                    "You need to specify an output directory (`saving_dir`) or a logger to save the retriever.\n"
-                    "Skipping saving retriever."
+                    "You need to specify an output directory (`saving_dir`) or a logger to save the "
+                    "retriever.\nSkipping saving retriever."
                 )
                 return
         retriever_folder.mkdir(exist_ok=True, parents=True)

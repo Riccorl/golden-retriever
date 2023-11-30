@@ -207,6 +207,8 @@ class GoldenRetriever(torch.nn.Module):
         force_reindex: bool = False,
         compute_on_cpu: bool = False,
         precision: Optional[Union[str, int]] = None,
+        *args,
+        **kwargs,
     ):
         """
         Index the passages for later retrieval.
@@ -232,6 +234,7 @@ class GoldenRetriever(torch.nn.Module):
                 "The retriever must be initialized with an indexer to index "
                 "the passages within the retriever."
             )
+        # TODO: add kwargs
         return self.document_index.index(
             retriever=self,
             batch_size=batch_size,
@@ -241,6 +244,8 @@ class GoldenRetriever(torch.nn.Module):
             encoder_precision=precision or self.precision,
             compute_on_cpu=compute_on_cpu,
             force_reindex=force_reindex,
+            *args,
+            **kwargs,
         )
 
     @torch.no_grad()

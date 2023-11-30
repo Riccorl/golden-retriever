@@ -1,129 +1,149 @@
 <h1 align="center">
-  Golden Retriever
+  🦮 Golden Retriever
 </h1>
 
 <p align="center">
   <a href="https://pytorch.org/get-started/locally/"><img alt="PyTorch" src="https://img.shields.io/badge/PyTorch-orange?logo=pytorch"></a>
   <a href="https://pytorchlightning.ai/"><img alt="Lightning" src="https://img.shields.io/badge/-Lightning-blueviolet"></a>
-  <a href="https://hydra.cc/"><img alt="Config: hydra" src="https://img.shields.io/badge/config-hydra-blue"></a>
   <a href="https://black.readthedocs.io/en/stable/"><img alt="Code style: black" src="https://img.shields.io/badge/code%20style-black-black.svg"></a>
 </p>
 
-## Repository Structure
+# How to use
 
-```text
-golden-retriever
-| conf                      # contains Hydra config files
-  | data
-  | evaluation
-  | logging
-  | loss
-  | model
-  | optimizer
-  | scheduler
-  | train
-  default.yaml              # hydra root config file
-| data                      # datasets should go here
-| experiments               # where the models are stored
-| scripts                   # setup and train scripts
-| src
-  | callbacks               # where to put custom Lightning Callbacks
-  | data                    # contains base Dataset and LightinigDataModule
-  | models                  # contains base nn.Module and LightningModule
-  | utils                   # additional code you might need
-  | train.py                # main script for training the network
-| README.md
-| requirements.txt
-```
-
-## Initializing the environment
-In order to set up the python interpreter we utilize [conda](https://docs.conda.io/projects/conda/en/latest/index.html)
-, the script `setup.sh` creates a conda environment and install pytorch
-and the dependencies in "requirements.txt".
-
-## How to run
-
-Train
+Install the library from [PyPI]():
 
 ```bash
-bash scripts/train.sh
+pip install goldenretriever
 ```
+
+or from source:
 
 ```bash
-train.sh [-h --help] [-l --language-model LANG_MODEL_NAME] [-d --debug] [-p --precision PRECISION]
-[-c --cpu] [-g --devices DEVICES] [-n --nodes NODES] [-m --gpu-mem GPU_MEM] [-s --strategy STRATEGY]
-[-o --offline] [-t --test] [--config-path CONFIG_PATH] [--checkpoint CHECKPOINT_PATH] OVERRIDES
-
-where:
-    -h --help             Show this help text
-    -l --language-model   Language model name (one of the models from HuggingFace)
-    -d --debug            Run in debug mode (no GPU and wandb offline)
-    -p --precision        Training precision, default 16.
-    -c --cpu              Use CPU instead of GPU.
-    -g --devices          How many GPU to use, default 1. If 0, use CPU.
-    -n --nodes            How many nodes to use, default 1.
-    -m --gpu-mem          Minimum GPU memory required in MB (default: 8000). If less that this,
-                          training will wait until there is enough space.
-    -s --strategy         Strategy to use for distributed training, default NULL.
-    -o --offline          Run the experiment offline
-    -v --print            Print the config
-    -t --test             Run only the test phase
-    --config-path         Run a specific config file
-    --checkpoint          Run a specific checkpoint
-    OVERRIDES             Overrides for the experiment, in the form of key=value.
-                          For example, 'model_name=bert-base-uncased'.
-Example:
-  ./script/train.sh
-  ./script/train.sh --config-path conf/custom_config.yaml
-  ./script/train.sh -l bert-base-cased
-  ./script/train.sh -l bert-base-cased -m 10000
-
+git clone https://github.com/Riccorl/goldenretriever.git
+cd goldenretriever
+pip install -e .
 ```
 
+# Usage
 
+## Example of Training
 
-## FAQ
-**Q**: When I run any script using a Hydra config I can see that relative paths do not work. Why?
+```python
+from goldenretriever.indexers.document import DocumentStore
+from goldenretriever.trainer import Trainer
+from goldenretriever import GoldenRetriever
+from goldenretriever.indexers.inmemory import InMemoryDocumentIndex
+from goldenretriever.data.datasets import InBatchNegativesDataset
 
-**A**: Whenever you run a script that uses a Hydra config, Hydra will create a new working directory
-(specified in the root.yaml file) for you. Every relative path you will use will start from it, and this is why you 
-get the 'FileNotFound' error. However, using a different working directory for each of your experiments has a couple of 
-benefits that you can read in the 
-[Hydra documentation](https://hydra.cc/docs/tutorials/basic/running_your_app/working_directory/) for the Working 
-directory. There are several ways that hydra offers as a workaround for this problem here we will report the two that
-the authors of this repository use the most, but you can find the other on the link we previously mentioned:
+# create a retriever
+retriever = GoldenRetriever(
+    question_encoder="intfloat/e5-small-v2",
+    passage_encoder="intfloat/e5-small-v2"
+)
 
-1. You can use the 'hydra.utils.to_absolute_path' function that will convert every relative path starting from your 
-working directory (p-lightning-template in this project) to a full path that will be accessible from inside the 
-new working dir.
-   
-2. Hydra will provide you with a reference to the original working directory in your config files.
-You can access it under the name of 'hydra:runtime.cwd'. So, for example, if your training dataset
-has the relative path 'data/train.tsv' you can convert it to a full path by prepending the hydra 
-variable before 
+# create a dataset
+train_dataset = InBatchNegativesDataset(
+    name="train",
+    path="data/train.json",
+    tokenizer=retriever.question_tokenizer,
+    question_batch_size=64,
+    passage_batch_size=400,
+    max_passage_length=64,
+    shuffle=True,
+)
+val_dataset = InBatchNegativesDataset(
+    name="val",
+    path="data/val.json",
+    tokenizer=retriever.question_tokenizer,
+    question_batch_size=64,
+    passage_batch_size=400,
+    max_passage_length=64,
+)
+test_dataset = InBatchNegativesDataset(
+    name="test",
+    path="data/test.json",
+    tokenizer=retriever.question_tokenizer,
+    question_batch_size=64,
+    passage_batch_size=400,
+    max_passage_length=64,
+)
 
+# create an in-memory document index
+document_index = InMemoryDocumentIndex(
+    documents=DocumentStore.from_tsv("data/dpr_like_index.tsv"),
+    device="cuda", 
+    precision="16"
+)
+# add the index to the retriever
+retriever.document_index = document_index
 
-## Contributing
-Contributions are always more than welcome, the only thing to take into account when submitting a pull request is
-that we utilize the [Black](https://github.com/psf/black) code formatter with a max length for the code of 120. 
-More pragmatically you should ensure to utilize the command "black -l 120" on the whole "src" directory before pushing
-the code. 
+trainer = Trainer(
+    retriever=retriever,
+    train_dataset=train_dataset,
+    val_dataset=val_dataset,
+    test_dataset=test_dataset,
+    max_steps=25_000,
+    wandb_online_mode=True,
+    wandb_project_name="golden-retriever",
+    wandb_experiment_name="e5-small-experiment",
+    max_hard_negatives_to_mine=5,
+)
 
+# start training
+trainer.train()
 
-## Other useful repositories
-This repository has been created with the idea of providing a simple skeleton from which you can 
-start a PyTorch Lightning project. Instead of favoring the customizability, we favored the simplicity
-and we intended this template as a base for building more specific templates based on the user needs
-(for example by forking this one). However, there are several other repositories with different 
-features that you can check if interested. We will list two of them here:
-- [lucmos/nn-template](https://github.com/lucmos/nn-template): a very nice template with support for
-    DVC.
-- [hobogalaxy/lightning-hydra-template](https://github.com/hobogalaxy/lightning-hydra-template):
-    another useful and very well documented template repository.
+# evaluate on test set (optional)
+trainer.test()
+```
 
-As we were mentioning earlier we created this repository even with the intention of bootstrapping
-other Lightning templates. We mention here these repositories:
-- [poccio/grid-seq2seq](https://github.com/poccio/grid-seq2seq): This is a NLP oriented repository 
-  that serves as a skeleton for Seq2Seq projects, while at the same time offering a way of running 
-  Bart based Seq2Seq models without writing a single line of code!
-it in the yaml files by doing that following: '${hydra:runtime.cwd}/data/train.tsv'.
+## Data format
+
+### Input data
+
+The retriever expects a jsonl file similar to [DPR](https://github.com/facebookresearch/DPR):
+
+```json lines
+[
+  {
+	"question": "....",
+	"answers": ["...", "...", "..."],
+	"positive_ctxs": [{
+		"title": "...",
+		"text": "...."
+	}],
+	"negative_ctxs": ["..."],
+	"hard_negative_ctxs": ["..."]
+  },
+  ...
+]
+```
+
+### Index data
+
+The document to index can be either a jsonl file or a tsv file similar to 
+[DPR](https://github.com/facebookresearch/DPR):
+
+- `jsonl`: each line is a json object with the following keys: `id`, `text`, `metadata`
+- `tsv`: each line is a tab-separated string with the `id` and `text` column, 
+  followed by any other column that will be stored in the `metadata` field
+
+jsonl example:
+
+```json lines
+[
+  {
+    "id": "...",
+    "text": "...",
+    "metadata": ["{...}"]
+  },
+  ...
+]
+```
+
+tsv example:
+
+```tsv
+id \t text \t any other column
+...
+```
+

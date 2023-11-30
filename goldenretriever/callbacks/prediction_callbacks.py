@@ -3,7 +3,7 @@ import random
 import time
 from copy import deepcopy
 from pathlib import Path
-from typing import List, Optional, Set, Union
+from typing import List, Optional, Set, Union, Sequence
 
 import lightning as pl
 import torch
@@ -12,7 +12,7 @@ from omegaconf import DictConfig
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from goldenretriever.callbacks.base import PredictionCallback
+from goldenretriever.callbacks.base import PredictionCallback, NLPTemplateCallback
 from goldenretriever.common.log import get_logger
 from goldenretriever.common.model_inputs import ModelInputs
 from goldenretriever.data.base.datasets import BaseDataset
@@ -35,7 +35,9 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         force_reindex: bool = True,
         retriever_dir: Optional[Path] = None,
         stages: Optional[Set[Union[str, RunningStage]]] = None,
-        other_callbacks: Optional[List[DictConfig]] = None,
+        other_callbacks: Optional[
+            Union[List[DictConfig], List["NLPTemplateCallback"]]
+        ] = None,
         dataset: Optional[Union[DictConfig, BaseDataset]] = None,
         dataloader: Optional[DataLoader] = None,
         *args,
@@ -300,7 +302,7 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
         num_workers: int = 0,
         force_reindex: bool = False,
         retriever_dir: Optional[Path] = None,
-        stages: Set[Union[str, RunningStage]] = None,
+        stages: Sequence[Union[str, RunningStage]] = None,
         other_callbacks: Optional[List[DictConfig]] = None,
         dataset: Optional[Union[DictConfig, BaseDataset]] = None,
         metrics_to_monitor: List[str] = None,
