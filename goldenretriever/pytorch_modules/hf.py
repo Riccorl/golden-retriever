@@ -27,6 +27,7 @@ class GoldenRetrieverConfig(PretrainedConfig):
         position_embedding_type="absolute",
         use_cache=True,
         classifier_dropout=None,
+        projection_dim=None,
         **kwargs,
     ):
         super().__init__(pad_token_id=pad_token_id, **kwargs)
@@ -46,6 +47,7 @@ class GoldenRetrieverConfig(PretrainedConfig):
         self.position_embedding_type = position_embedding_type
         self.use_cache = use_cache
         self.classifier_dropout = classifier_dropout
+        self.projection_dim = projection_dim
 
 
 class GoldenRetrieverModel(BertModel):
@@ -56,6 +58,12 @@ class GoldenRetrieverModel(BertModel):
         self.layer_norm_layer = torch.nn.LayerNorm(
             config.hidden_size, eps=config.layer_norm_eps
         )
+        self.projection: torch.nn.Module | None = None
+        if config.projection_dim is not None:
+            self.projection = torch.nn.Sequential(
+                torch.nn.Linear(config.hidden_size, config.projection_dim),
+                torch.nn.LayerNorm(config.projection_dim),
+            )
 
     def forward(
         self, **kwargs
@@ -73,7 +81,10 @@ class GoldenRetrieverModel(BertModel):
                 token_embeddings * input_mask_expanded, 1
             ) / torch.clamp(input_mask_expanded.sum(1), min=1e-9)
 
-            pooler_output = self.layer_norm_layer(pooler_output)
+        pooler_output = self.layer_norm_layer(pooler_output)
+
+        if self.projection is not None:
+            pooler_output = self.projection(pooler_output)
 
         if not kwargs.get("return_dict", True):
             return (model_outputs[0], pooler_output) + model_outputs[2:]

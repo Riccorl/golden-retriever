@@ -10,7 +10,7 @@ logger = get_logger(__name__)
 
 if __name__ == "__main__":
     # instantiate retriever
-    retriever = GoldenRetriever(question_encoder="intfloat/e5-small-v2")
+    retriever = GoldenRetriever(question_encoder="intfloat/e5-small-v2", projection_dim=256)
 
     train_dataset = AidaInBatchNegativesDataset(
         name="aida_train",
@@ -60,7 +60,7 @@ if __name__ == "__main__":
         max_steps=25_000,
         wandb_online_mode=True,
         wandb_project_name="golden-retriever-aida",
-        wandb_experiment_name="aida-e5-small-topics",
+        wandb_experiment_name="aida-e5-small-topics-projection-256",
         max_hard_negatives_to_mine=15,
     )
 

@@ -25,8 +25,8 @@ from goldenretriever.callbacks.evaluation_callbacks import (
 )
 from goldenretriever.callbacks.prediction_callbacks import (
     GoldenRetrieverPredictionCallback,
-    NegativeAugmentationCallback,
 )
+from goldenretriever.callbacks.training_callbacks import NegativeAugmentationCallback
 from goldenretriever.callbacks.utils_callbacks import (
     FreeUpIndexerVRAMCallback,
     SavePredictionsCallback,
@@ -596,7 +596,7 @@ class Trainer:
             self.experiment_path = Path(self.wandb_logger.experiment.dir)
 
         # set-up training specific callbacks
-        self.callbacks_store = self.training_callbacks()
+        self.callbacks_store += self.training_callbacks()
         # add the evaluation callbacks
         self.callbacks_store.append(
             self.configure_prediction_callbacks(
@@ -635,6 +635,7 @@ class Trainer:
         lightning_module: GoldenRetrieverPLModule | None = None,
         checkpoint_path: str | os.PathLike | None = None,
         lightning_datamodule: GoldenRetrieverPLDataModule | None = None,
+        force_reindex: bool = False,
         *args,
         **kwargs,
     ):
@@ -666,22 +667,16 @@ class Trainer:
                 devices=self.devices,
                 num_nodes=self.num_nodes,
                 strategy=self.strategy,
-                # max_epochs=self.max_epochs,
-                # max_steps=self.max_steps,
-                # val_check_interval=self.val_check_interval,
-                # check_val_every_n_epoch=self.check_val_every_n_epoch,
                 deterministic=self.deterministic,
                 fast_dev_run=self.fast_dev_run,
                 precision=self.precision,
-                # reload_dataloaders_every_n_epochs=self.reload_dataloaders_every_n_epochs,
                 callbacks=[
                     self.configure_prediction_callbacks(
                         batch_size=self.prediction_batch_size,
                         precision=self.precision,
-                        force_reindex=False,
+                        force_reindex=force_reindex,
                     )
                 ],
-                # logger=self.wandb_logger,
             )
         if lightning_module is not None:
             best_lightning_module = lightning_module
@@ -718,6 +713,48 @@ class Trainer:
 
 
 def train(conf: omegaconf.DictConfig) -> None:
+    logger.info("Starting training with config:")
+    logger.info(pformat(OmegaConf.to_container(conf)))
+
+    logger.info("Instantiating the Retriever")
+    retriever = hydra.utils.instantiate(conf.retriever, _recursive_=False)
+
+    logger.info("Instantiating datasets")
+    train_dataset = hydra.utils.instantiate(conf.data.train_dataset, _recursive_=False)
+    val_dataset = hydra.utils.instantiate(conf.data.val_dataset, _recursive_=False)
+    test_dataset = hydra.utils.instantiate(conf.data.test_dataset, _recursive_=False)
+
+    logger.info("Loading the document index")
+    document_index = hydra.utils.instantiate(
+        conf.data.document_index, _recursive_=False
+    )
+    retriever.document_index = document_index
+
+    logger.info("Instantiating the Trainer")
+    trainer = hydra.utils.instantiate(
+        conf.train,
+        retriever=retriever,
+        train_dataset=train_dataset,
+        val_dataset=val_dataset,
+        test_dataset=test_dataset,
+        _recursive_=False,
+    )
+
+    logger.info("Starting training")
+    trainer.train()
+
+    logger.info("Starting testing")
+    trainer.test()
+
+    logger.info("Training and testing completed")
+
+
+@hydra.main(config_path="../../conf", config_name="default", version_base="1.3")
+def main(conf: omegaconf.DictConfig):
+    train(conf)
+
+
+def train_hydra(conf: omegaconf.DictConfig) -> None:
     # reproducibility
     pl.seed_everything(conf.train.seed)
     torch.set_float32_matmul_precision(conf.train.float32_matmul_precision)
@@ -914,11 +951,6 @@ def train(conf: omegaconf.DictConfig) -> None:
 
     # module test
     trainer.test(best_pl_module, datamodule=pl_data_module)
-
-
-@hydra.main(config_path="../../conf", config_name="default", version_base="1.3")
-def main(conf: omegaconf.DictConfig):
-    train(conf)
 
 
 if __name__ == "__main__":
