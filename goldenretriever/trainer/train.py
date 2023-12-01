@@ -547,17 +547,31 @@ class Trainer:
             metrics_callbacks.append(SavePredictionsCallback())
         return metrics_callbacks
 
-    def configure_prediction_callbacks(self, *args, **kwargs):
-        metrics_callbacks = self.configure_metrics_callbacks()
-        # we need the largest k for the prediction callback
-        # get the max top_k for the prediction callback
-        max_top_k = sorted(self.top_k, reverse=True)[0]
+    def configure_prediction_callbacks(
+        self,
+        batch_size: int = 64,
+        precision: int | str = 32,
+        k: int | None = None,
+        force_reindex: bool = True,
+        metrics_callbacks: list[NLPTemplateCallback] | None = None,
+        *args,
+        **kwargs,
+    ):
+        if k is None:
+            # we need the largest k for the prediction callback
+            # get the max top_k for the prediction callback
+            k = sorted(self.top_k, reverse=True)[0]
+        if metrics_callbacks is None:
+            metrics_callbacks = self.configure_metrics_callbacks()
+
         prediction_callback = GoldenRetrieverPredictionCallback(
-            k=max_top_k,
-            batch_size=self.prediction_batch_size,
-            precision=self.precision,
+            batch_size=batch_size,
+            precision=precision,
+            k=k,
+            force_reindex=force_reindex,
             other_callbacks=metrics_callbacks,
-            force_reindex=False,
+            *args,
+            **kwargs,
         )
         return prediction_callback
 
@@ -584,7 +598,12 @@ class Trainer:
         # set-up training specific callbacks
         self.callbacks_store = self.training_callbacks()
         # add the evaluation callbacks
-        self.callbacks_store.append(self.configure_prediction_callbacks())
+        self.callbacks_store.append(
+            self.configure_prediction_callbacks(
+                batch_size=self.prediction_batch_size,
+                precision=self.precision,
+            )
+        )
         # add the hard negatives callback after the evaluation callback
         if self.max_hard_negatives_to_mine > 0:
             self.callbacks_store.append(self.configure_hard_negatives_callback())
@@ -637,6 +656,10 @@ class Trainer:
         Returns:
             `None`
         """
+        if self.test_dataset is None:
+            logger.warning("No test dataset provided. Skipping testing")
+            return
+
         if self.trainer is None:
             self.trainer = pl.Trainer(
                 accelerator=self.accelerator,
@@ -651,7 +674,13 @@ class Trainer:
                 fast_dev_run=self.fast_dev_run,
                 precision=self.precision,
                 # reload_dataloaders_every_n_epochs=self.reload_dataloaders_every_n_epochs,
-                callbacks=[self.configure_prediction_callbacks()],
+                callbacks=[
+                    self.configure_prediction_callbacks(
+                        batch_size=self.prediction_batch_size,
+                        precision=self.precision,
+                        force_reindex=False,
+                    )
+                ],
                 # logger=self.wandb_logger,
             )
         if lightning_module is not None:

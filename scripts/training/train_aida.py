@@ -43,7 +43,7 @@ if __name__ == "__main__":
 
     logger.info("Loading document index")
     document_index = InMemoryDocumentIndex(
-        documents=DocumentStore.from_file("/root/golden-retriever/data/entitylinking/documents_only_data.jsonl"),
+        documents=DocumentStore.from_file("/root/golden-retriever/data/entitylinking/documents.jsonl"),
         metadata_fields=["definition"],
         separator=" <def> ",
         device="cuda",
@@ -55,9 +55,10 @@ if __name__ == "__main__":
         retriever=retriever,
         train_dataset=train_dataset,
         val_dataset=val_dataset,
-        num_workers=0,
+        test_dataset=test_dataset,
+        num_workers=4,
         max_steps=25_000,
-        wandb_online_mode=False,
+        wandb_online_mode=True,
         wandb_project_name="golden-retriever-aida",
         wandb_experiment_name="aida-e5-small-topics",
         max_hard_negatives_to_mine=15,

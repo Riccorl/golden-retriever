@@ -493,9 +493,7 @@ class InBatchNegativesDataset(GoldenRetrieverDataset):
         if max_negatives != -1:
             negatives = negatives[:max_negatives]
 
-        hard_negatives = list(
-            set([h["text"] for h in sample["hard_negative_ctxs"]])
-        )
+        hard_negatives = list(set([h["text"] for h in sample["hard_negative_ctxs"]]))
         if max_hard_negatives != -1:
             hard_negatives = hard_negatives[:max_hard_negatives]
 
@@ -696,9 +694,7 @@ class AidaInBatchNegativesDataset(InBatchNegativesDataset):
         negatives = list(set([n["text"] for n in sample["negative_ctxs"]]))
         if max_negatives != -1:
             negatives = negatives[:max_negatives]
-        hard_negatives = list(
-            set([h["text"] for h in sample["hard_negative_ctxs"]])
-        )
+        hard_negatives = list(set([h["text"] for h in sample["hard_negative_ctxs"]]))
         if max_hard_negatives != -1:
             hard_negatives = hard_negatives[:max_hard_negatives]
 
