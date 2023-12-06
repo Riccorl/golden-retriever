@@ -62,9 +62,9 @@ def upload(
     model_dir: Union[str, os.PathLike],
     model_name: str,
     filenames: Optional[list[str]] = None,
-    organization: Optional[str] = None,
-    repo_name: Optional[str] = None,
-    commit: Optional[str] = None,
+    organization: str | None = None,
+    repo_name: str | None = None,
+    commit: str | None = None,
     archive: bool = False,
 ):
     token = huggingface_hub.HfFolder.get_token()

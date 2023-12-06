@@ -25,10 +25,10 @@ def get_svg(svg: str, style: str = "", wrap: bool = True):
 def visualize_parser(
     doc: Union[spacy.tokens.Doc, List[Dict[str, str]]],
     *,
-    title: Optional[str] = None,
-    key: Optional[str] = None,
+    title: str | None = None,
+    key: str | None = None,
     manual: bool = False,
-    displacy_options: Optional[Dict] = None,
+    displacy_options: dict | None = None,
 ) -> None:
     """Visualizer for dependency parses.
 

@@ -18,7 +18,7 @@ logger = get_logger(__name__, level=logging.INFO)
 class SavePredictionsCallback(NLPTemplateCallback):
     def __init__(
         self,
-        saving_dir: Optional[Union[str, os.PathLike]] = None,
+        saving_dir: str | os.PathLike | None = None,
         verbose: bool = False,
         *args,
         **kwargs,
@@ -79,7 +79,7 @@ class ResetModelCallback(pl.Callback):
     def __init__(
         self,
         question_encoder: str,
-        passage_encoder: Optional[str] = None,
+        passage_encoder: str | None = None,
         verbose: bool = True,
     ) -> None:
         super().__init__()
@@ -205,7 +205,7 @@ class SubsampleTrainDatasetCallback(pl.Callback):
 class SaveRetrieverCallback(pl.Callback):
     def __init__(
         self,
-        saving_dir: Optional[Union[str, os.PathLike]] = None,
+        saving_dir: str | os.PathLike | None = None,
         verbose: bool = True,
         *args,
         **kwargs,

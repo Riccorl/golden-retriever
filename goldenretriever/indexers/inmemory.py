@@ -117,7 +117,7 @@ class InMemoryDocumentIndex(BaseDocumentIndex):
         documents: Optional[List[Document]] = None,
         batch_size: int = 32,
         num_workers: int = 4,
-        max_length: Optional[int] = None,
+        max_length: int | None = None,
         collate_fn: Optional[Callable] = None,
         encoder_precision: Optional[Union[str, int]] = None,
         compute_on_cpu: bool = False,

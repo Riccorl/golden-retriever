@@ -328,29 +328,31 @@ export PYTHONPATH="$DIRPATH"
 
 export HYDRA_FULL_ERROR=1
 
-if [ "$DEV_RUN" = "True" ]; then
-  python goldenretriever/trainer/train.py \
-    $CONFIG_PATH \
-    "train.pl_trainer.fast_dev_run=$DEV_RUN" \
-    "train.pl_trainer.devices=$DEVICES" \
-    "train.pl_trainer.accelerator=$ACCELERATOR" \
-    "train.pl_trainer.num_nodes=$NODES" \
-    "train.pl_trainer.strategy=$STRATEGY" \
-    "train.pl_trainer.precision=$PRECISION" \
-    "hydra.run.dir=." \
-    "hydra.output_subdir=null" \
-    "hydra/job_logging=disabled" \
-    "hydra/hydra_logging=disabled" \
-    $OVERRIDES
-else
-  python goldenretriever/trainer/train.py \
-    $CONFIG_PATH \
-    "train.pl_trainer.fast_dev_run=$DEV_RUN" \
-    "train.pl_trainer.devices=$DEVICES" \
-    "train.pl_trainer.accelerator=$ACCELERATOR" \
-    "train.pl_trainer.num_nodes=$NODES" \
-    "train.pl_trainer.strategy=$STRATEGY" \
-    "train.pl_trainer.precision=$PRECISION" \
-    "logging.wandb_arg.mode=$WANDB" \
-    $OVERRIDES
-fi
+python /root/golden-retriever/scripts/training/train_blink.py
+
+# if [ "$DEV_RUN" = "True" ]; then
+#   python goldenretriever/trainer/train.py \
+#     $CONFIG_PATH \
+#     "train.pl_trainer.fast_dev_run=$DEV_RUN" \
+#     "train.pl_trainer.devices=$DEVICES" \
+#     "train.pl_trainer.accelerator=$ACCELERATOR" \
+#     "train.pl_trainer.num_nodes=$NODES" \
+#     "train.pl_trainer.strategy=$STRATEGY" \
+#     "train.pl_trainer.precision=$PRECISION" \
+#     "hydra.run.dir=." \
+#     "hydra.output_subdir=null" \
+#     "hydra/job_logging=disabled" \
+#     "hydra/hydra_logging=disabled" \
+#     $OVERRIDES
+# else
+#   python goldenretriever/trainer/train.py \
+#     $CONFIG_PATH \
+#     "train.pl_trainer.fast_dev_run=$DEV_RUN" \
+#     "train.pl_trainer.devices=$DEVICES" \
+#     "train.pl_trainer.accelerator=$ACCELERATOR" \
+#     "train.pl_trainer.num_nodes=$NODES" \
+#     "train.pl_trainer.strategy=$STRATEGY" \
+#     "train.pl_trainer.precision=$PRECISION" \
+#     "logging.wandb_arg.mode=$WANDB" \
+#     $OVERRIDES
+# fi

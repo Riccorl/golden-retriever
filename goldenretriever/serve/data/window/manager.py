@@ -21,7 +21,7 @@ class WindowManager:
         documents: str | List[str],
         window_size: int,
         stride: int,
-        max_length: Optional[int] = None,
+        max_length: int | None = None,
         doc_topic: str = None,
     ) -> List[Window]:
         """

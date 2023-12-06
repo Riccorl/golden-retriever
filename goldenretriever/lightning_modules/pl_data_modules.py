@@ -45,7 +45,7 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
         """
         pass
 
-    def setup(self, stage: Optional[str] = None):
+    def setup(self, stage: str | None = None):
         if stage == "fit" or stage is None:
             # usually there is only one dataset for train
             # if you need more train loader, you can follow

@@ -33,7 +33,9 @@ from goldenretriever.callbacks.utils_callbacks import (
     SaveRetrieverCallback,
 )
 from goldenretriever.common.log import get_logger
+from goldenretriever.common.utils import to_config
 from goldenretriever.data.datasets import GoldenRetrieverDataset
+from goldenretriever.indexers.base import BaseDocumentIndex
 from goldenretriever.lightning_modules.pl_data_modules import (
     GoldenRetrieverPLDataModule,
 )
@@ -64,7 +66,7 @@ class Trainer:
         lr_scheduler: torch.optim.lr_scheduler.LRScheduler = LinearScheduler,
         num_warmup_steps: int = 0,
         loss: torch.nn.Module = MultiLabelNCELoss,
-        callbacks: Optional[list] = None,
+        callbacks: list | None = None,
         accelerator: str = "auto",
         devices: int = 1,
         num_nodes: int = 1,
@@ -73,43 +75,44 @@ class Trainer:
         gradient_clip_val: float = 1.0,
         val_check_interval: float = 1.0,
         check_val_every_n_epoch: int = 1,
-        max_steps: Optional[int] = None,
-        max_epochs: Optional[int] = None,
+        max_steps: int | None = None,
+        max_epochs: int | None = None,
         deterministic: bool = True,
         fast_dev_run: bool = False,
-        precision: [int, str] = 16,
+        precision: int | str = 16,
         reload_dataloaders_every_n_epochs: int = 1,
+        trainer_kwargs: dict | None = None,
         # eval parameters
         metric_to_monitor: str = "validate_recall@{top_k}",
         monitor_mode: str = "max",
-        top_k: Union[int, List[int]] = 100,
+        top_k: int | List[int] = 100,
         # early stopping parameters
         early_stopping: bool = True,
         early_stopping_patience: int = 10,
-        early_stopping_kwargs: Optional[dict] = None,
+        early_stopping_kwargs: dict | None = None,
         # wandb logger parameters
         log_to_wandb: bool = True,
-        wandb_entity: Optional[str] = None,
-        wandb_experiment_name: Optional[str] = None,
+        wandb_entity: str | None = None,
+        wandb_experiment_name: str | None = None,
         wandb_project_name: str = "golden-retriever",
         wandb_save_dir: str | os.PathLike = "./",  # TODO: i don't like this default
         wandb_log_model: bool = True,
         wandb_online_mode: bool = False,
         wandb_watch: str = "all",
-        wandb_kwargs: Optional[dict] = None,
+        wandb_kwargs: dict | None = None,
         # checkpoint parameters
         model_checkpointing: bool = True,
-        checkpoint_dir: Optional[Union[str, os.PathLike]] = None,
-        checkpoint_filename: Optional[Union[str, os.PathLike]] = None,
+        checkpoint_dir: str | os.PathLike | None = None,
+        checkpoint_filename: str | os.PathLike | None = None,
         save_top_k: int = 1,
         save_last: bool = False,
-        checkpoint_kwargs: Optional[dict] = None,
+        checkpoint_kwargs: dict | None = None,
         # prediction callback parameters
         prediction_batch_size: int = 128,
         # hard negatives callback parameters
         max_hard_negatives_to_mine: int = 15,
         hard_negatives_threshold: float = 0.0,
-        metrics_to_monitor_for_hard_negatives: Optional[str] = None,
+        metrics_to_monitor_for_hard_negatives: str | None = None,
         mine_hard_negatives_with_probability: float = 1.0,
         # other parameters
         seed: int = 42,
@@ -141,11 +144,11 @@ class Trainer:
         self.check_val_every_n_epoch = check_val_every_n_epoch
         self.max_steps = max_steps
         self.max_epochs = max_epochs
-        # self.checkpoint_path = checkpoint_path
         self.deterministic = deterministic
         self.fast_dev_run = fast_dev_run
         self.precision = precision
         self.reload_dataloaders_every_n_epochs = reload_dataloaders_every_n_epochs
+        self.trainer_kwargs = trainer_kwargs or {}
         # eval parameters
         self.metric_to_monitor = metric_to_monitor
         self.monitor_mode = monitor_mode
@@ -596,7 +599,7 @@ class Trainer:
             self.experiment_path = Path(self.wandb_logger.experiment.dir)
 
         # set-up training specific callbacks
-        self.callbacks_store += self.training_callbacks()
+        self.callbacks_store = self.training_callbacks()
         # add the evaluation callbacks
         self.callbacks_store.append(
             self.configure_prediction_callbacks(
@@ -607,6 +610,8 @@ class Trainer:
         # add the hard negatives callback after the evaluation callback
         if self.max_hard_negatives_to_mine > 0:
             self.callbacks_store.append(self.configure_hard_negatives_callback())
+        
+        self.callbacks_store.append(FreeUpIndexerVRAMCallback())
 
         if self.trainer is None:
             logger.info("Instantiating the Trainer")
@@ -627,7 +632,17 @@ class Trainer:
                 reload_dataloaders_every_n_epochs=self.reload_dataloaders_every_n_epochs,
                 callbacks=self.callbacks_store,
                 logger=self.wandb_logger,
+                **self.trainer_kwargs,
             )
+
+        # # save this class as config to file
+        # if self.experiment_path is not None:
+        #     logger.info("Saving the configuration to file")
+        #     self.experiment_path.mkdir(parents=True, exist_ok=True)
+        #     OmegaConf.save(
+        #         OmegaConf.create(to_config(self)),
+        #         self.experiment_path / "trainer_config.yaml",
+        #     )
         self.trainer.fit(self.lightning_module, datamodule=self.lightning_datamodule)
 
     def test(
@@ -658,7 +673,7 @@ class Trainer:
             `None`
         """
         if self.test_dataset is None:
-            logger.warning("No test dataset provided. Skipping testing")
+            logger.warning("No test dataset provided. Skipping testing.")
             return
 
         if self.trainer is None:
@@ -677,6 +692,7 @@ class Trainer:
                         force_reindex=force_reindex,
                     )
                 ],
+                **self.trainer_kwargs,
             )
         if lightning_module is not None:
             best_lightning_module = lightning_module
@@ -711,27 +727,38 @@ class Trainer:
         # module test
         self.trainer.test(best_lightning_module, datamodule=lightning_datamodule)
 
+    def convert_to_yaml(self):
+        return OmegaConf.to_yaml(cfg=to_config(self))
+
 
 def train(conf: omegaconf.DictConfig) -> None:
     logger.info("Starting training with config:")
     logger.info(pformat(OmegaConf.to_container(conf)))
 
     logger.info("Instantiating the Retriever")
-    retriever = hydra.utils.instantiate(conf.retriever, _recursive_=False)
+    retriever: GoldenRetriever = hydra.utils.instantiate(
+        conf.retriever, _recursive_=False
+    )
 
     logger.info("Instantiating datasets")
-    train_dataset = hydra.utils.instantiate(conf.data.train_dataset, _recursive_=False)
-    val_dataset = hydra.utils.instantiate(conf.data.val_dataset, _recursive_=False)
-    test_dataset = hydra.utils.instantiate(conf.data.test_dataset, _recursive_=False)
+    train_dataset: GoldenRetrieverDataset = hydra.utils.instantiate(
+        conf.data.train_dataset, _recursive_=False
+    )
+    val_dataset: GoldenRetrieverDataset = hydra.utils.instantiate(
+        conf.data.val_dataset, _recursive_=False
+    )
+    test_dataset: GoldenRetrieverDataset = hydra.utils.instantiate(
+        conf.data.test_dataset, _recursive_=False
+    )
 
     logger.info("Loading the document index")
-    document_index = hydra.utils.instantiate(
+    document_index: BaseDocumentIndex = hydra.utils.instantiate(
         conf.data.document_index, _recursive_=False
     )
     retriever.document_index = document_index
 
     logger.info("Instantiating the Trainer")
-    trainer = hydra.utils.instantiate(
+    trainer: Trainer = hydra.utils.instantiate(
         conf.train,
         retriever=retriever,
         train_dataset=train_dataset,

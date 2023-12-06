@@ -315,11 +315,11 @@ class BaseDocumentIndex:
         self,
         output_dir: Union[str, os.PathLike],
         config: Optional[Dict[str, Any]] = None,
-        config_file_name: Optional[str] = None,
-        document_file_name: Optional[str] = None,
-        embedding_file_name: Optional[str] = None,
+        config_file_name: str | None = None,
+        document_file_name: str | None = None,
+        embedding_file_name: str | None = None,
         push_to_hub: bool = False,
-        model_id: Optional[str] = None,
+        model_id: str | None = None,
         **kwargs,
     ):
         """
@@ -331,15 +331,15 @@ class BaseDocumentIndex:
             config (`Optional[Dict[str, Any]]`, `optional`):
                 The configuration to save. If `None`, the current configuration of the retriever will be
                 saved. Defaults to `None`.
-            config_file_name (`Optional[str]`, `optional`):
+            config_file_name (`str | None`, `optional`):
                 The name of the configuration file. Defaults to `config.yaml`.
-            document_file_name (`Optional[str]`, `optional`):
+            document_file_name (`str | None`, `optional`):
                 The name of the document file. Defaults to `documents.json`.
-            embedding_file_name (`Optional[str]`, `optional`):
+            embedding_file_name (`str | None`, `optional`):
                 The name of the embedding file. Defaults to `embeddings.pt`.
             push_to_hub (`bool`, `optional`):
                 Whether to push the saved retriever to the hub. Defaults to `False`.
-            model_id (`Optional[str]`, `optional`):
+            model_id (`str | None`, `optional`):
                 The id of the model to push to the hub. If `None`, the name of the output
                 directory will be used. Defaults to `None`.
             **kwargs:
@@ -386,10 +386,10 @@ class BaseDocumentIndex:
         cls,
         name_or_dir: Union[str, os.PathLike],
         device: str = "cpu",
-        precision: Optional[str] = None,
-        config_file_name: Optional[str] = None,
-        document_file_name: Optional[str] = None,
-        embedding_file_name: Optional[str] = None,
+        precision: str | None = None,
+        config_file_name: str | None = None,
+        document_file_name: str | None = None,
+        embedding_file_name: str | None = None,
         *args,
         **kwargs,
     ) -> "BaseDocumentIndex":

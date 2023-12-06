@@ -33,7 +33,7 @@ SAPIENZANLP_HF_MODEL_REPO_ARCHIVE_URL = (
     f"{SAPIENZANLP_HF_MODEL_REPO_URL}/resolve/main/model.zip"
 )
 # path constants
-SAPIENZANLP_CACHE_DIR = os.getenv("SAPIENZANLP_CACHE_DIR", Path.home() / ".sapienzanlp")
+GOLDENRETRIEVER_CACHE_DIR = os.getenv("GOLDENRETRIEVER_CACHE_DIR", Path.home() / ".goldenretriever")
 SAPIENZANLP_DATE_FORMAT = "%Y-%m-%d %H-%M-%S"
 
 
@@ -81,14 +81,14 @@ def load_json(path: Union[str, Path]) -> Any:
         return json.load(f)
 
 
-def dump_json(document: Any, path: Union[str, Path], indent: Optional[int] = None):
+def dump_json(document: Any, path: Union[str, Path], indent: int | None = None):
     """
     Dump input to json file.
 
     Args:
         document (`Any`): The document to dump.
         path (`Union[str, Path]`): The path to dump the document to.
-        indent (`Optional[int]`): The indent to use for the json file.
+        indent (`int | None`): The indent to use for the json file.
 
     """
     with open(path, "w", encoding="utf8") as outfile:
@@ -206,7 +206,7 @@ def download_and_cache(
     force_download: bool = False,
 ):
     if cache_dir is None:
-        cache_dir = SAPIENZANLP_CACHE_DIR
+        cache_dir = GOLDENRETRIEVER_CACHE_DIR
     if isinstance(url, Path):
         url = str(url)
 
@@ -312,7 +312,7 @@ def download_from_hf(
     resume_download: bool = False,
     proxies: Optional[Dict[str, str]] = None,
     use_auth_token: Optional[Union[bool, str]] = None,
-    revision: Optional[str] = None,
+    revision: str | None = None,
     local_files_only: bool = False,
     subfolder: str = "",
     repo_type: str = "model",
@@ -378,7 +378,7 @@ def from_cache(
     resume_download: bool = False,
     proxies: Optional[Dict[str, str]] = None,
     use_auth_token: Optional[Union[bool, str]] = None,
-    revision: Optional[str] = None,
+    revision: str | None = None,
     local_files_only: bool = False,
     subfolder: str = "",
     filenames: Optional[List[str]] = None,
@@ -421,7 +421,7 @@ def from_cache(
     url_or_filename = model_name_or_path_resolver(url_or_filename)
 
     if cache_dir is None:
-        cache_dir = SAPIENZANLP_CACHE_DIR
+        cache_dir = GOLDENRETRIEVER_CACHE_DIR
 
     if file_exists(url_or_filename):
         logger.info(f"{url_or_filename} is a local path or file")
@@ -557,7 +557,10 @@ def relative_to_absolute_path(path: str) -> os.PathLike:
     raise ValueError(f"{path} is not a path")
 
 
-def to_config(object_to_save: Any) -> Dict[str, Any]:
+def to_config(
+    object_to_save: Any,
+    exclude: Optional[List[str]] = None,
+) -> Dict[str, Any]:
     """
     Convert an object to a dictionary.
 
@@ -573,13 +576,15 @@ def to_config(object_to_save: Any) -> Dict[str, Any]:
                     data[k] = obj_to_dict(v)
                 return data
 
-            case list() | tuple():
+            case list() | tuple() | set():
                 return [obj_to_dict(x) for x in obj]
 
             case object(__dict__=_):
-                data = {
-                    "_target_": f"{obj.__class__.__module__}.{obj.__class__.__name__}",
-                }
+                # try first to see if the object has a to_config method
+                target = f"{obj.__class__.__module__}.{obj.__class__.__name__}"
+                if exclude is not None and target in exclude:
+                    return None
+                data = {"_target_": target}
                 for k, v in obj.__dict__.items():
                     if not k.startswith("_"):
                         data[k] = obj_to_dict(v)

@@ -32,7 +32,7 @@ class RecallAtKEvaluationCallback(NLPTemplateCallback):
     def __init__(
         self,
         k: int = 100,
-        prefix: Optional[str] = None,
+        prefix: str | None = None,
         verbose: bool = False,
         prog_bar: bool = True,
         *args,
@@ -125,7 +125,7 @@ class AvgRankingEvaluationCallback(NLPTemplateCallback):
     def __init__(
         self,
         k: int,
-        prefix: Optional[str] = None,
+        prefix: str | None = None,
         stages: Optional[List[str]] = None,
         verbose: bool = True,
         *args,
@@ -213,7 +213,7 @@ class LRAPEvaluationCallback(NLPTemplateCallback):
     def __init__(
         self,
         k: int = 100,
-        prefix: Optional[str] = None,
+        prefix: str | None = None,
         verbose: bool = False,
         prog_bar: bool = True,
         *args,

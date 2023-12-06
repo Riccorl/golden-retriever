@@ -87,7 +87,7 @@ class SpacySentenceSplitter(BaseSentenceSplitter):
     def __call__(
         self,
         texts: Union[str, List[str], List[List[str]]],
-        max_length: Optional[int] = None,
+        max_length: int | None = None,
         is_split_into_words: bool = False,
         **kwargs,
     ) -> Union[List[str], List[List[str]]]:
@@ -130,7 +130,7 @@ class SpacySentenceSplitter(BaseSentenceSplitter):
         return [iterable[i : i + n] for i in range(0, len(iterable), n)]
 
     def split_sentences(
-        self, text: str | List[Word], max_length: Optional[int] = None, *args, **kwargs
+        self, text: str | List[Word], max_length: int | None = None, *args, **kwargs
     ) -> List[str]:
         """
         Splits a `text` into smaller sentences.

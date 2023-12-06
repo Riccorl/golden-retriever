@@ -202,7 +202,7 @@ class GoldenRetriever(torch.nn.Module):
         self,
         batch_size: int = 32,
         num_workers: int = 4,
-        max_length: Optional[int] = None,
+        max_length: int | None = None,
         collate_fn: Optional[Callable] = None,
         force_reindex: bool = False,
         compute_on_cpu: bool = False,
@@ -218,7 +218,7 @@ class GoldenRetriever(torch.nn.Module):
                 The batch size to use for the indexing.
             num_workers (`int`):
                 The number of workers to use for the indexing.
-            max_length (`Optional[int]`):
+            max_length (`int | None`):
                 The maximum length of the passages.
             collate_fn (`Callable`):
                 The collate function to use for the indexing.
@@ -257,8 +257,8 @@ class GoldenRetriever(torch.nn.Module):
         input_ids: Optional[torch.Tensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
         token_type_ids: Optional[torch.Tensor] = None,
-        k: Optional[int] = None,
-        max_length: Optional[int] = None,
+        k: int | None = None,
+        max_length: int | None = None,
         precision: Optional[Union[str, int]] = None,
         collate_fn: Optional[Callable] = None,
         batch_size: int | None = None,
@@ -282,7 +282,7 @@ class GoldenRetriever(torch.nn.Module):
                 The token type ids of the questions.
             k (`int`):
                 The number of top passages to retrieve.
-            max_length (`Optional[int]`):
+            max_length (`int | None`):
                 The maximum length of the questions.
             precision (`Optional[Union[str, int]]`):
                 The precision to use for the model.
@@ -560,9 +560,9 @@ class GoldenRetriever(torch.nn.Module):
     def save_pretrained(
         self,
         output_dir: Union[str, os.PathLike],
-        question_encoder_name: Optional[str] = None,
-        passage_encoder_name: Optional[str] = None,
-        document_index_name: Optional[str] = None,
+        question_encoder_name: str | None = None,
+        passage_encoder_name: str | None = None,
+        document_index_name: str | None = None,
         push_to_hub: bool = False,
         **kwargs,
     ):
@@ -572,11 +572,11 @@ class GoldenRetriever(torch.nn.Module):
         Args:
             output_dir (`str`):
                 The directory to save the retriever to.
-            question_encoder_name (`Optional[str]`):
+            question_encoder_name (`str | None`):
                 The name of the question encoder.
-            passage_encoder_name (`Optional[str]`):
+            passage_encoder_name (`str | None`):
                 The name of the passage encoder.
-            document_index_name (`Optional[str]`):
+            document_index_name (`str | None`):
                 The name of the document index.
             push_to_hub (`bool`):
                 Whether to push the model to the hub.

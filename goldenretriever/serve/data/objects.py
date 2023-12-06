@@ -11,7 +11,7 @@ class Window:
     text: str
     tokens: List[str]
     words: List[Word]
-    doc_topic: Optional[str]
+    doc_topic: str | None
     offset: int
     token2char_start: dict
     token2char_end: dict
@@ -49,13 +49,13 @@ class Word:
 
     text: str
     i: int
-    idx: Optional[int] = None
-    idx_end: Optional[int] = None
+    idx: int | None = None
+    idx_end: int | None = None
     # preprocessing fields
-    lemma: Optional[str] = None
-    pos: Optional[str] = None
-    dep: Optional[str] = None
-    head: Optional[int] = None
+    lemma: str | None = None
+    pos: str | None = None
+    dep: str | None = None
+    head: int | None = None
 
     def __str__(self):
         return self.text

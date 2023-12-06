@@ -292,8 +292,8 @@ class PassageManager:
         Returns:
             :obj:`Dict`: The tokenized passage.
         """
-        passage_index: Optional[int] = None
-        passage_str: Optional[str] = None
+        passage_index: int | None = None
+        passage_str: str | None = None
 
         if isinstance(passage, str):
             passage_index = self.passages.get_index_from_label(passage)

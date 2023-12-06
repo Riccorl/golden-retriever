@@ -11,7 +11,7 @@ class MultiLabelNCELoss(_WeightedLoss):
         self,
         weight: Optional[torch.Tensor] = None,
         size_average=None,
-        reduction: Optional[str] = "mean",
+        reduction: str | None = "mean",
     ) -> None:
         super(MultiLabelNCELoss, self).__init__(weight, size_average, None, reduction)
 

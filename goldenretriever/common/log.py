@@ -134,9 +134,9 @@ def set_log_level(level: int, logger: logging.Logger = None) -> None:
 
 
 def get_logger(
-    name: Optional[str] = None,
-    level: Optional[int] = None,
-    formatter: Optional[str] = None,
+    name: str | None = None,
+    level: int | None = None,
+    formatter: str | None = None,
 ) -> logging.Logger:
     """
     Return a logger with the specified name.

@@ -201,7 +201,7 @@ class FaissDocumentIndex(BaseDocumentIndex):
         documents: Optional[List[Document]] = None,
         batch_size: int = 32,
         num_workers: int = 4,
-        max_length: Optional[int] = None,
+        max_length: int | None = None,
         collate_fn: Optional[Callable] = None,
         encoder_precision: Optional[Union[str, int]] = None,
         compute_on_cpu: bool = False,
@@ -386,9 +386,9 @@ class FaissDocumentIndex(BaseDocumentIndex):
     #     cls,
     #     loading_dir: Union[str, os.PathLike],
     #     device: str = "cpu",
-    #     document_file_name: Optional[str] = None,
-    #     embedding_file_name: Optional[str] = None,
-    #     index_file_name: Optional[str] = None,
+    #     document_file_name: str | None = None,
+    #     embedding_file_name: str | None = None,
+    #     index_file_name: str | None = None,
     #     **kwargs,
     # ) -> "FaissDocumentIndex":
     #     loading_dir = Path(loading_dir)
