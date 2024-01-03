@@ -4,14 +4,17 @@ from goldenretriever.indexers.document import DocumentStore
 from goldenretriever.trainer import Trainer
 from goldenretriever import GoldenRetriever
 from goldenretriever.indexers.inmemory import InMemoryDocumentIndex
-from goldenretriever.data.datasets import InBatchNegativesDataset, AidaInBatchNegativesDataset, SubsampleStrategyEnum
+from goldenretriever.data.datasets import (
+    InBatchNegativesDataset,
+    AidaInBatchNegativesDataset,
+    SubsampleStrategyEnum,
+)
 
 logger = get_logger(__name__)
 
 if __name__ == "__main__":
-
     # instantiate retriever
-    retriever = GoldenRetriever(question_encoder="intfloat/e5-small-v2")
+    retriever = GoldenRetriever(question_encoder="intfloat/e5-base-v2")
 
     train_dataset = AidaInBatchNegativesDataset(
         name="aida_train",
@@ -45,7 +48,9 @@ if __name__ == "__main__":
 
     logger.info("Loading document index")
     document_index = InMemoryDocumentIndex(
-        documents=DocumentStore.from_file("/root/golden-retriever/data/entitylinking/documents.jsonl"),
+        documents=DocumentStore.from_file(
+            "/root/golden-retriever/data/entitylinking/documents.jsonl"
+        ),
         metadata_fields=["definition"],
         separator=" <def> ",
         device="cuda",
@@ -62,10 +67,11 @@ if __name__ == "__main__":
         max_steps=400_000,
         wandb_online_mode=True,
         wandb_project_name="golden-retriever-blink",
-        wandb_experiment_name="blink-first1M-e5-small-topics",
+        wandb_experiment_name="blink-first1M-e5-base-topics",
         max_hard_negatives_to_mine=15,
         mine_hard_negatives_with_probability=0.2,
         save_last=True,
+        resume_from_checkpoint_path="/root/golden-retriever/wandb/run-20231219_151810-8ntynf5t/files/checkpoints/last-12-28888.ckpt",
     )
 
     trainer.train()

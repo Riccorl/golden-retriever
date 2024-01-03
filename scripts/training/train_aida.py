@@ -4,13 +4,24 @@ from goldenretriever.indexers.document import DocumentStore
 from goldenretriever.trainer import Trainer
 from goldenretriever import GoldenRetriever
 from goldenretriever.indexers.inmemory import InMemoryDocumentIndex
-from goldenretriever.data.datasets import InBatchNegativesDataset, AidaInBatchNegativesDataset
+from goldenretriever.data.datasets import AidaInBatchNegativesDataset
 
 logger = get_logger(__name__)
 
 if __name__ == "__main__":
     # instantiate retriever
-    retriever = GoldenRetriever(question_encoder="intfloat/e5-small-v2", projection_dim=256)
+    retriever = GoldenRetriever(
+        question_encoder="/root/golden-retriever/wandb/blink-first1M-e5-base-topics/files/retriever/question_encoder",
+        document_index=InMemoryDocumentIndex(
+            documents=DocumentStore.from_file(
+                "/root/golden-retriever/data/entitylinking/documents.jsonl"
+            ),
+            metadata_fields=["definition"],
+            separator=" <def> ",
+            device="cuda",
+            precision="16",
+        ),
+    )
 
     train_dataset = AidaInBatchNegativesDataset(
         name="aida_train",
@@ -41,15 +52,15 @@ if __name__ == "__main__":
         use_topics=True,
     )
 
-    logger.info("Loading document index")
-    document_index = InMemoryDocumentIndex(
-        documents=DocumentStore.from_file("/root/golden-retriever/data/entitylinking/documents_only_data.jsonl"),
-        metadata_fields=["definition"],
-        separator=" <def> ",
-        device="cuda",
-        precision="16",
-    )
-    retriever.document_index = document_index
+    # logger.info("Loading document index")
+    # document_index = InMemoryDocumentIndex(
+    #     documents=DocumentStore.from_file("/root/golden-retriever/data/entitylinking/documents.jsonl"),
+    #     metadata_fields=["definition"],
+    #     separator=" <def> ",
+    #     device="cuda",
+    #     precision="16",
+    # )
+    # retriever.document_index = document_index
 
     trainer = Trainer(
         retriever=retriever,
@@ -58,9 +69,9 @@ if __name__ == "__main__":
         test_dataset=test_dataset,
         num_workers=4,
         max_steps=25_000,
-        wandb_online_mode=False,
+        wandb_online_mode=True,
         wandb_project_name="golden-retriever-aida",
-        wandb_experiment_name="aida-e5-small-topics-projection-256",
+        wandb_experiment_name="aida-e5-base-topics-from-blink",
         max_hard_negatives_to_mine=15,
     )
 

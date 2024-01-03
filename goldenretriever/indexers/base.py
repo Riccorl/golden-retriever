@@ -19,6 +19,7 @@ from goldenretriever.common.utils import (
     to_config,
 )
 from goldenretriever.indexers.document import Document, DocumentStore
+from goldenretriever.indexers.document import Document
 
 logger = get_logger(__name__)
 
@@ -66,6 +67,8 @@ class BaseDocumentIndex:
         self.metadata_fields = metadata_fields
         self.separator = separator
 
+        self.document_path: List[str | os.PathLike] = []
+
         if documents is not None:
             if isinstance(documents, DocumentStore):
                 self.documents = documents
@@ -89,6 +92,7 @@ class BaseDocumentIndex:
                     _documents = []
                     for doc in documents:
                         with open(relative_to_absolute_path(doc)) as f:
+                            self.document_path.append(doc)
                             _documents += [
                                 Document.from_dict(json.loads(line))
                                 for line in f.readlines()
@@ -159,7 +163,15 @@ class BaseDocumentIndex:
             `Dict[str, Any]`: The configuration of the retriever.
         """
 
-        return to_config(self)
+        config = {
+            "_target_": f"{self.__class__.__module__}.{self.__class__.__name__}",
+            "metadata_fields": self.metadata_fields,
+            "separator": self.separator,
+            "name_or_path": self.name_or_path,
+        }
+        if len(self.document_path) > 0:
+            config["documents"] = self.document_path
+        return config
 
     def index(
         self,
@@ -172,12 +184,12 @@ class BaseDocumentIndex:
     def search(self, query: Any, k: int = 1, *args, **kwargs) -> List:
         raise NotImplementedError
 
-    def get_document_from_passage(self, passage: str) -> str:
+    def get_document_from_passage(self, passage: str) -> Document | None:
         """
         Get the document label from the passage.
 
         Args:
-            document (`str`):
+            passage (`str`):
                 The document to get the label for.
 
         Returns:
@@ -195,7 +207,7 @@ class BaseDocumentIndex:
         Get the index of the passage.
 
         Args:
-            document (`str`):
+            passage (`str`):
                 The document to get the index for.
 
         Returns:
@@ -207,7 +219,7 @@ class BaseDocumentIndex:
             raise ValueError(f"Document `{passage}` not found.")
         return doc.id
 
-    def get_document_from_index(self, index: int) -> str:
+    def get_document_from_index(self, index: int) -> Document | None:
         """
         Get the document from the index.
 
@@ -460,3 +472,19 @@ class BaseDocumentIndex:
         )
 
         return document_index
+
+    @classmethod
+    def to_config(cls, *args, **kwargs):
+        """
+        Store class configuration in a file.
+
+        Args:
+            config_path (:obj:`str`, :obj:`Path`, :obj:`dict`):
+                Path (or dictionary) of the config to store as a file.
+            name (:obj:`str`, optional):
+                The name of the class to store.
+
+        Returns:
+
+        """
+        return cls.config

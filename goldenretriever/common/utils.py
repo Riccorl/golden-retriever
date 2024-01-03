@@ -33,7 +33,9 @@ SAPIENZANLP_HF_MODEL_REPO_ARCHIVE_URL = (
     f"{SAPIENZANLP_HF_MODEL_REPO_URL}/resolve/main/model.zip"
 )
 # path constants
-GOLDENRETRIEVER_CACHE_DIR = os.getenv("GOLDENRETRIEVER_CACHE_DIR", Path.home() / ".goldenretriever")
+GOLDENRETRIEVER_CACHE_DIR = os.getenv(
+    "GOLDENRETRIEVER_CACHE_DIR", Path.home() / ".goldenretriever"
+)
 SAPIENZANLP_DATE_FORMAT = "%Y-%m-%d %H-%M-%S"
 
 
@@ -581,6 +583,8 @@ def to_config(
 
             case object(__dict__=_):
                 # try first to see if the object has a to_config method
+                if hasattr(obj, "to_config"):
+                    return obj.to_config()
                 target = f"{obj.__class__.__module__}.{obj.__class__.__name__}"
                 if exclude is not None and target in exclude:
                     return None

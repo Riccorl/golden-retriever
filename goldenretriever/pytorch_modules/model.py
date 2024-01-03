@@ -16,6 +16,7 @@ from tqdm import tqdm
 from goldenretriever.common.log import get_logger
 from goldenretriever.common.model_inputs import ModelInputs
 from goldenretriever.common.torch_utils import get_autocast_context
+from goldenretriever.common.utils import to_config
 from goldenretriever.data.base.datasets import BaseDataset
 from goldenretriever.data.labels import Labels
 from goldenretriever.indexers.base import BaseDocumentIndex
@@ -406,8 +407,8 @@ class GoldenRetriever(torch.nn.Module):
         Get the document from its text.
 
         Args:
-            text (`str`):
-                The text of the document.
+            passage (`str`):
+                The passage of the document.
 
         Returns:
             `str`: The document.
@@ -625,3 +626,15 @@ class GoldenRetriever(torch.nn.Module):
             )
 
         logger.info("Saving retriever to disk done.")
+
+    @classmethod
+    def to_config(cls, *args, **kwargs):
+        config = {
+            "_target_": f"{cls.__class__.__module__}.{cls.__class__.__name__}",
+            "question_encoder": cls.question_encoder.config.name_or_path,
+            "passage_encoder": cls.passage_encoder.config.name_or_path
+            if not cls.passage_encoder_is_question_encoder
+            else None,
+            "document_index": to_config(cls.document_index),
+        }
+        return config

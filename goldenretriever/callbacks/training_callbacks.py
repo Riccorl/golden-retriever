@@ -6,6 +6,7 @@ from typing import List, Optional, Sequence, Union
 
 import lightning as pl
 import torch
+from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.trainer.states import RunningStage
 from omegaconf import DictConfig
 from torch.utils.data import DataLoader
@@ -61,22 +62,22 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
     """
 
     def __init__(
-        self,
-        k: int = 100,
-        batch_size: int = 32,
-        num_workers: int = 0,
-        force_reindex: bool = False,
-        retriever_dir: Optional[Path] = None,
-        stages: Sequence[Union[str, RunningStage]] = None,
-        other_callbacks: Optional[List[DictConfig]] = None,
-        dataset: Optional[Union[DictConfig, BaseDataset]] = None,
-        metrics_to_monitor: List[str] = None,
-        threshold: float = 0.8,
-        max_negatives: int = 5,
-        add_with_probability: float = 1.0,
-        refresh_every_n_epochs: int = 1,
-        *args,
-        **kwargs,
+            self,
+            k: int = 100,
+            batch_size: int = 32,
+            num_workers: int = 0,
+            force_reindex: bool = False,
+            retriever_dir: Optional[Path] = None,
+            stages: Sequence[Union[str, RunningStage]] = None,
+            other_callbacks: Optional[List[DictConfig]] = None,
+            dataset: Optional[Union[DictConfig, BaseDataset]] = None,
+            metrics_to_monitor: List[str] = None,
+            threshold: float = 0.8,
+            max_negatives: int = 5,
+            add_with_probability: float = 1.0,
+            refresh_every_n_epochs: int = 1,
+            *args,
+            **kwargs,
     ):
         super().__init__(
             k=k,
@@ -100,11 +101,11 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
 
     @torch.no_grad()
     def __call__(
-        self,
-        trainer: pl.Trainer,
-        pl_module: pl.LightningModule,
-        *args,
-        **kwargs,
+            self,
+            trainer: pl.Trainer,
+            pl_module: pl.LightningModule,
+            *args,
+            **kwargs,
     ) -> dict:
         """
         Computes the predictions of a retriever model on a dataset and computes the negative
@@ -195,10 +196,10 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
             gold_passages = prediction["gold"]
             # get the ids of the max_negatives wrong passages with the highest similarity
             wrong_passages = [
-                passage_id
-                for passage_id in top_k_passages
-                if passage_id not in gold_passages
-            ][: self.max_negatives]
+                                 passage_id
+                                 for passage_id in top_k_passages
+                                 if passage_id not in gold_passages
+                             ][: self.max_negatives]
             hard_negatives_list[prediction["sample_idx"]] = wrong_passages
 
         trainer.datamodule.train_dataset.hn_manager = HardNegativesManager(
@@ -210,3 +211,11 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
         # normalize predictions as in the original GoldenRetrieverPredictionCallback
         predictions = {0: predictions}
         return predictions
+
+
+class CustomModelCheckpoint(ModelCheckpoint):
+    def on_train_end(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
+        self.save_checkpoint(trainer)
+
+    def on_keyboard_interrupt(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
+        self.save_checkpoint(trainer)

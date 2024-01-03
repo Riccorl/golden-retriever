@@ -103,8 +103,8 @@ class InMemoryDocumentIndex(BaseDocumentIndex):
             self.embeddings = self.embeddings.to(device)
 
         # TODO: check interactions with the embeddings
-        self.mm = MatrixMultiplicationModule(embeddings=self.embeddings)
-        self.mm.eval()
+        # self.mm = MatrixMultiplicationModule(embeddings=self.embeddings)
+        # self.mm.eval()
 
         # precision to be used for the embeddings
         self.precision = precision
@@ -242,7 +242,7 @@ class InMemoryDocumentIndex(BaseDocumentIndex):
             passage_embeddings = passage_embeddings.to(self.device)
         self.embeddings = passage_embeddings
         # update the matrix multiplication module
-        self.mm = MatrixMultiplicationModule(embeddings=self.embeddings)
+        # self.mm = MatrixMultiplicationModule(embeddings=self.embeddings)
 
         # free up memory from the unused variable
         del passage_embeddings
@@ -270,10 +270,10 @@ class InMemoryDocumentIndex(BaseDocumentIndex):
             query = query.to(self.embeddings.device)
             if query.dtype != self.embeddings.dtype:
                 query = query.to(self.embeddings.dtype)
-            # similarity = torch.matmul(query, self.embeddings.T)
-            similarity = self.mm(query)
+            similarity = torch.matmul(query, self.embeddings.T)
+            # similarity = self.mm(query)
             # Retrieve the indices of the top k passage embeddings
-            retriever_out: Tuple = torch.topk(
+            retriever_out: torch.return_types.topk = torch.topk(
                 similarity, k=min(k, similarity.shape[-1]), dim=1
             )
 

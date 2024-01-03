@@ -86,7 +86,7 @@ class FromConfig:
         return subclass
 
     @classmethod
-    def to_config(cls: Type[T], config_path: str | os.PathLike, **kwargs):
+    def to_config(cls: Type[T], config_path: str | os.PathLike | None = None, **kwargs):
         """
         Store class configuration in a file.
 
@@ -100,7 +100,11 @@ class FromConfig:
 
         """
         config = {"_target_": f"{cls.__class__.__module__}.{cls.__class__.__name__}"}
-        OmegaConf.save(OmegaConf.create(config), config_path)
+        if config_path is not None:
+            config_path = Path(config_path)
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            OmegaConf.save(OmegaConf.create(config), config_path)
+        return config
 
     @classmethod
     def resolve_class_name(cls: Type[T], name: str) -> T:

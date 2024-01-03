@@ -1,4 +1,5 @@
 import os
+from copy import deepcopy
 from pathlib import Path
 from typing import List, Literal, Optional, Union
 
@@ -32,6 +33,7 @@ from goldenretriever.callbacks.utils_callbacks import (
     SavePredictionsCallback,
     SaveRetrieverCallback,
 )
+from goldenretriever.common.from_config import FromConfig
 from goldenretriever.common.log import get_logger
 from goldenretriever.common.utils import to_config
 from goldenretriever.data.datasets import GoldenRetrieverDataset
@@ -48,7 +50,7 @@ from goldenretriever.pytorch_modules.scheduler import LinearScheduler
 logger = get_logger()
 
 
-class Trainer:
+class Trainer(FromConfig):
     def __init__(
         self,
         retriever: GoldenRetriever,
@@ -81,6 +83,7 @@ class Trainer:
         fast_dev_run: bool = False,
         precision: int | str = 16,
         reload_dataloaders_every_n_epochs: int = 1,
+        resume_from_checkpoint_path: str | os.PathLike | None = None,
         trainer_kwargs: dict | None = None,
         # eval parameters
         metric_to_monitor: str = "validate_recall@{top_k}",
@@ -148,6 +151,7 @@ class Trainer:
         self.fast_dev_run = fast_dev_run
         self.precision = precision
         self.reload_dataloaders_every_n_epochs = reload_dataloaders_every_n_epochs
+        self.resume_from_checkpoint_path = resume_from_checkpoint_path
         self.trainer_kwargs = trainer_kwargs or {}
         # eval parameters
         self.metric_to_monitor = metric_to_monitor
@@ -247,12 +251,16 @@ class Trainer:
         # explicitly configure some callbacks that will be needed not only by the
         # pl.Trainer but also in this class
         # model checkpoint callback
+        if self.save_last:
+            logger.warning(
+                "We will override the `save_last` of `ModelCheckpoint` to `False`. "
+                "Instead, we will use a separate `ModelCheckpoint` callback to save the last checkpoint"
+            )
         checkpoint_kwargs = dict(
             monitor=self.metric_to_monitor,
             mode=self.monitor_mode,
             verbose=True,
             save_top_k=self.save_top_k,
-            save_last=self.save_last,
             filename=self.checkpoint_filename,
             dirpath=self.checkpoint_dir,
             auto_insert_metric_name=False,
@@ -262,6 +270,17 @@ class Trainer:
         self.checkpoint_kwargs = checkpoint_kwargs
         self.model_checkpoint_callback: ModelCheckpoint | None = None
         self.checkpoint_path: str | os.PathLike | None = None
+        # last checkpoint callback
+        self.latest_model_checkpoint_callback: ModelCheckpoint | None = None
+        self.last_checkpoint_kwargs: dict | None = None
+        if self.save_last:
+            last_checkpoint_kwargs = deepcopy(self.checkpoint_kwargs)
+            last_checkpoint_kwargs["save_top_k"] = 1
+            last_checkpoint_kwargs["filename"] = "last-{epoch}-{step}"
+            last_checkpoint_kwargs["monitor"] = "step"
+            last_checkpoint_kwargs["mode"] = "max"
+            self.last_checkpoint_kwargs = last_checkpoint_kwargs
+
         # early stopping callback
         early_stopping_kwargs = dict(
             monitor=self.metric_to_monitor,
@@ -453,44 +472,55 @@ class Trainer:
 
     def configure_model_checkpoint(
         self,
-        # monitor: str,
-        # mode: str,
-        # verbose: bool = True,
-        # save_top_k: int = 1,
-        # save_last: bool = False,
-        # filename: str | os.PathLike | None = None,
-        # dirpath: str | os.PathLike | None = None,
-        # auto_insert_metric_name: bool = False,
+        monitor: str,
+        mode: str,
+        verbose: bool = True,
+        save_top_k: int = 1,
+        save_last: bool = False,
+        filename: str | os.PathLike | None = None,
+        dirpath: str | os.PathLike | None = None,
+        auto_insert_metric_name: bool = False,
         *args,
         **kwargs,
     ) -> ModelCheckpoint:
         logger.info("Enabling Model Checkpointing")
-        if self.checkpoint_dir is None:
-            self.checkpoint_dir = (
+        if dirpath is None:
+            dirpath = (
                 self.experiment_path / "checkpoints" if self.experiment_path else None
             )
-        if self.checkpoint_filename is None:
-            self.checkpoint_filename = (
-                "checkpoint-"
-                + self.metric_to_monitor
-                + "_{"
-                + self.metric_to_monitor
-                + ":.4f}-epoch_{epoch:02d}"
+        if filename is None:
+            filename = (
+                "checkpoint-" + monitor + "_{" + monitor + ":.4f}-epoch_{epoch:02d}"
             )
-        self.checkpoint_path = (
-            self.checkpoint_dir / self.checkpoint_filename
-            if self.checkpoint_dir is not None
-            else None
+        self.checkpoint_path = dirpath / filename if dirpath is not None else None
+        logger.info(f"Checkpoint directory: {dirpath}")
+        logger.info(f"Checkpoint filename: {filename}")
+
+        kwargs = dict(
+            monitor=monitor,
+            mode=mode,
+            verbose=verbose,
+            save_top_k=save_top_k,
+            save_last=save_last,
+            filename=filename,
+            dirpath=dirpath,
+            auto_insert_metric_name=auto_insert_metric_name,
+            *args,
+            **kwargs,
         )
-        logger.info(f"Checkpoint directory: {self.checkpoint_dir}")
-        logger.info(f"Checkpoint filename: {self.checkpoint_filename}")
+
         # update the kwargs
         # TODO: this is bad
-        kwargs.update(
-            dirpath=self.checkpoint_dir,
-            filename=self.checkpoint_filename,
-        )
-        self.model_checkpoint_callback = ModelCheckpoint(*args, **kwargs)
+        # kwargs.update(
+        #     dirpath=self.checkpoint_dir,
+        #     filename=self.checkpoint_filename,
+        # )
+        # modelcheckpoint_kwargs = dict(
+        #     dirpath=self.checkpoint_dir,
+        #     filename=self.checkpoint_filename,
+        # )
+        # modelcheckpoint_kwargs.update(kwargs)
+        self.model_checkpoint_callback = ModelCheckpoint(**kwargs)
         return self.model_checkpoint_callback
 
     def configure_hard_negatives_callback(self):
@@ -516,6 +546,12 @@ class Trainer:
                 **self.checkpoint_kwargs
             )
             self.callbacks_store.append(self.model_checkpoint_callback)
+            if self.save_last:
+                self.latest_model_checkpoint_callback = self.configure_model_checkpoint(
+                    **self.last_checkpoint_kwargs
+                )
+                self.callbacks_store.append(self.latest_model_checkpoint_callback)
+
             self.callbacks_store.append(SaveRetrieverCallback())
         if self.early_stopping:
             self.early_stopping_callback = self.configure_early_stopping(
@@ -610,7 +646,7 @@ class Trainer:
         # add the hard negatives callback after the evaluation callback
         if self.max_hard_negatives_to_mine > 0:
             self.callbacks_store.append(self.configure_hard_negatives_callback())
-        
+
         self.callbacks_store.append(FreeUpIndexerVRAMCallback())
 
         if self.trainer is None:
@@ -643,7 +679,11 @@ class Trainer:
         #         OmegaConf.create(to_config(self)),
         #         self.experiment_path / "trainer_config.yaml",
         #     )
-        self.trainer.fit(self.lightning_module, datamodule=self.lightning_datamodule)
+        self.trainer.fit(
+            self.lightning_module,
+            datamodule=self.lightning_datamodule,
+            ckpt_path=self.resume_from_checkpoint_path,
+        )
 
     def test(
         self,
@@ -729,6 +769,48 @@ class Trainer:
 
     def convert_to_yaml(self):
         return OmegaConf.to_yaml(cfg=to_config(self))
+
+    @classmethod
+    def to_config(cls):
+        config = {
+            "_target_": f"{cls.__class__.__module__}.{cls.__class__.__name__}",
+            "retriever": to_config(cls.retriever),
+            "train_dataset": to_config(cls.train_dataset)
+            if cls.train_dataset is not None
+            else None,
+            "val_dataset": to_config(cls.val_dataset)
+            if cls.val_dataset is not None
+            else None,
+            "test_dataset": to_config(cls.test_dataset)
+            if cls.test_dataset is not None
+            else None,
+            "num_workers": cls.num_workers,
+            # trainer parameters
+            "optimizer": to_config(cls.optimizer),
+            "lr": cls.lr,
+            "weight_decay": cls.weight_decay,
+            "lr_scheduler": to_config(cls.lr_scheduler),
+            "num_warmup_steps": cls.num_warmup_steps,
+            "loss": to_config(cls.loss),
+            "callbacks": to_config(cls.callbacks)
+            if cls.callbacks is not None
+            else None,
+            "accelerator": cls.accelerator,
+            "devices": cls.devices,
+            "num_nodes": cls.num_nodes,
+            "strategy": cls.strategy,
+            "accumulate_grad_batches": cls.accumulate_grad_batches,
+            "gradient_clip_val": cls.gradient_clip_val,
+            "val_check_interval": cls.val_check_interval,
+            "check_val_every_n_epoch": cls.check_val_every_n_epoch,
+            "max_steps": cls.max_steps,
+            "max_epochs": cls.max_epochs,
+            "deterministic": cls.deterministic,
+            "fast_dev_run": cls.fast_dev_run,
+            "precision": cls.precision,
+            "reload_dataloaders_every_n_epochs": cls.reload_dataloaders_every_n_epochs,
+            "trainer_kwargs": to_config(cls.trainer_kwargs),
+        }
 
 
 def train(conf: omegaconf.DictConfig) -> None:

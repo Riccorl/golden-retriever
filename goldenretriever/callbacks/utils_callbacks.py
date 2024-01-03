@@ -43,7 +43,7 @@ class SavePredictionsCallback(NLPTemplateCallback):
                 "You need to specify an output directory (`saving_dir`) or a logger to save the predictions.\n"
                 "Skipping saving predictions."
             )
-            return
+            return {}
         datasets = callback.datasets
         for dataloader_idx, dataloader_predictions in predictions.items():
             # save to file
@@ -59,7 +59,7 @@ class SavePredictionsCallback(NLPTemplateCallback):
                         "You need to specify an output directory (`saving_dir`) or a logger to save the predictions.\n"
                         "Skipping saving predictions."
                     )
-                    return
+                    return {}
                 prediction_folder.mkdir(exist_ok=True)
             predictions_path = (
                 prediction_folder
