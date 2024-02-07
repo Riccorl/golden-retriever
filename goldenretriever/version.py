@@ -7,7 +7,7 @@ _MINOR = "9"
 _PATCH = "0"
 # This is mainly for nightly builds which have the suffix ".dev$DATE". See
 # https://semver.org/#is-v123-a-semantic-version for the semantics.
-_SUFFIX = os.environ.get("goldenretriever_VERSION_SUFFIX", "")
+_SUFFIX = os.environ.get("GOLDENRETRIEVER_VERSION_SUFFIX", "")
 
 VERSION_SHORT = "{0}.{1}".format(_MAJOR, _MINOR)
 VERSION = "{0}.{1}.{2}{3}".format(_MAJOR, _MINOR, _PATCH, _SUFFIX)
