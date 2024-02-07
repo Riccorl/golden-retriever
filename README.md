@@ -96,6 +96,21 @@ trainer.train()
 trainer.test()
 ```
 
+## Inference
+
+```python
+from goldenretriever import GoldenRetriever
+
+retriever = GoldenRetriever(
+    question_encoder="path/to/question/encoder",
+    passage_encoder="path/to/passage/encoder",
+    document_index="path/to/document/index"
+)
+
+# retrieve documents
+retriever.retrieve("What is the capital of France?", k=5)
+```
+
 ## Data format
 
 ### Input data
