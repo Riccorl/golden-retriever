@@ -19,7 +19,7 @@
 Install the library from [PyPI]():
 
 ```bash
-pip install goldenretriever
+pip install goldenretriever-core
 ```
 
 or from source:
