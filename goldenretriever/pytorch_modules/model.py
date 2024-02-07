@@ -370,7 +370,8 @@ class GoldenRetriever(torch.nn.Module):
         x: tuple, tokenizer: tr.PreTrainedTokenizer, max_length: int | None = None
     ) -> ModelInputs:
         # get text and text pair
-        # TODO: check if only retriever is used
+        if not isinstance(x, list):
+            x = [x]
         _text = [sample[0] for sample in x]
         _text_pair = [sample[1] for sample in x]
         _text_pair = None if any([t is None for t in _text_pair]) else _text_pair
