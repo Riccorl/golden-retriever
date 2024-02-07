@@ -108,7 +108,7 @@ setuptools.setup(
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/Riccorl/golden-retriever",
-    keywords="NLP Sapienza sapienzanlp deep learning transformer pytorch retriever",
+    keywords="NLP deep learning transformer pytorch retriever rag dpr",
     packages=setuptools.find_packages(),
     include_package_data=True,
     license="Apache",
