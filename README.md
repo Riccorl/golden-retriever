@@ -25,7 +25,7 @@ pip install goldenretriever
 or from source:
 
 ```bash
-git clone https://github.com/Riccorl/goldenretriever.git
+git clone https://github.com/Riccorl/golden-retriever.git
 cd goldenretriever
 pip install -e .
 ```
