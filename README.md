@@ -6,6 +6,10 @@
   <a href="https://pytorch.org/get-started/locally/"><img alt="PyTorch" src="https://img.shields.io/badge/PyTorch-orange?logo=pytorch"></a>
   <a href="https://pytorchlightning.ai/"><img alt="Lightning" src="https://img.shields.io/badge/-Lightning-blueviolet"></a>
   <a href="https://black.readthedocs.io/en/stable/"><img alt="Code style: black" src="https://img.shields.io/badge/code%20style-black-black.svg"></a>
+  <a href="https://github.dev/Riccorl/golden-retriever"><img alt="vscode" src="https://img.shields.io/badge/preview%20in-vscode.dev-blue"></a>
+  <a href="https://github.com/Riccorl/golden-retriever/releases"><img alt="release" src="https://img.shields.io/github/v/release/Riccorl/golden-retriever"></a>
+  <a href="https://github.com/Riccorl/golden-retriever/actions/workflows/python-publish-pypi.yml"><img alt="gh-status" src="https://github.com/Riccorl/golden-retriever/actions/workflows/python-publish-pypi.yml/badge.svg"></a>
+
 </p>
 
 # How to use
