@@ -100,7 +100,7 @@ with open("README.md", "r") as fh:
     long_description = fh.read()
 
 setuptools.setup(
-    name="goldenretriever",
+    name="goldenretriever-core",
     version=VERSION["VERSION"],
     author="Riccardo Orlando",
     author_email="orlandorcc@gmail.com",
