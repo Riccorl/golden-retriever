@@ -173,9 +173,11 @@ class GoldenRetrieverDataset:
     ) -> Any:
         if isinstance(paths, str):
             paths = [
-                Path(paths)
-                if Path(paths).is_absolute()
-                else self.project_folder / paths
+                (
+                    Path(paths)
+                    if Path(paths).is_absolute()
+                    else self.project_folder / paths
+                )
             ]
         else:
             paths = [

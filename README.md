@@ -46,8 +46,8 @@ retriever = GoldenRetriever(
 
 # create a dataset
 train_dataset = InBatchNegativesDataset(
-    name="nq_train",
-    path="path/to/nq_train.json",
+    name="webq_train",
+    path="path/to/webq_train.json",
     tokenizer=retriever.question_tokenizer,
     question_batch_size=64,
     passage_batch_size=400,
@@ -55,8 +55,8 @@ train_dataset = InBatchNegativesDataset(
     shuffle=True,
 )
 val_dataset = InBatchNegativesDataset(
-    name="nq_dev",
-    path="path/to/nq_dev.json",
+    name="webq_dev",
+    path="path/to/webq_dev.json",
     tokenizer=retriever.question_tokenizer,
     question_batch_size=64,
     passage_batch_size=400,
@@ -69,8 +69,8 @@ trainer = Trainer(
     val_dataset=val_dataset,
     max_steps=25_000,
     wandb_online_mode=True,
-    wandb_project_name="golden-retriever",
-    wandb_experiment_name="e5-small-nq",
+    wandb_project_name="golden-retriever-dpr",
+    wandb_experiment_name="e5-small-webq",
     max_hard_negatives_to_mine=5,
 )
 
@@ -86,38 +86,28 @@ from goldenretriever import GoldenRetriever
 from goldenretriever.data.datasets import InBatchNegativesDataset
 
 retriever = GoldenRetriever(
-      question_encoder="",
-      document_index="",
-      device="cuda",
-      precision="16",
-  )
-test_dataset = InBatchNegativesDataset(
-    name="test",
-    path="",
-    tokenizer=retriever.question_tokenizer,
-    question_batch_size=64,
-    passage_batch_size=400,
-    max_passage_length=64,
+  question_encoder="",
+  document_index="",
+  device="cuda",
+  precision="16",
 )
 
-# logger.info("Loading document index")
-# document_index = InMemoryDocumentIndex(
-#     documents=documents,
-#     # metadata_fields=["title"],
-#     # separator=" <title> ",
-#     device="cuda",
-#     precision="16",
-# )
-# retriever.document_index = document_index
+test_dataset = InBatchNegativesDataset(
+  name="test",
+  path="",
+  tokenizer=retriever.question_tokenizer,
+  question_batch_size=64,
+  passage_batch_size=400,
+  max_passage_length=64,
+)
 
 trainer = Trainer(
-    retriever=retriever,
-    test_dataset=test_dataset,
-    log_to_wandb=False,
-    top_k=[20, 100]
+  retriever=retriever,
+  test_dataset=test_dataset,
+  log_to_wandb=False,
+  top_k=[20, 100]
 )
 
-# trainer.train()
 trainer.test()
 ```
 
