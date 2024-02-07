@@ -16,7 +16,7 @@
 
 # How to use
 
-Install the library from [PyPI]():
+Install the library from [PyPI](https://pypi.org/project/goldenretriever-core/):
 
 ```bash
 pip install goldenretriever-core
