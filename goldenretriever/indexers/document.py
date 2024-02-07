@@ -136,7 +136,7 @@ class DocumentStore:
             logger.warning(f"Document with text `{text}` does not exist, skipping")
         return self._documents_reverse_index.get(text, None)
 
-    def add_documents(self, documents: List[Document] | List[Dict]) -> List[Document]:
+    def add_documents(self, documents: List[Document] | List[str] | List[Dict]) -> List[Document]:
         """
         Add a list of documents to the document store.
 
@@ -148,9 +148,9 @@ class DocumentStore:
             List[Document]: The documents just added.
         """
         return [
-            self.add_document(doc)
-            if isinstance(doc, Document)
-            else self.add_document(Document.from_dict(doc))
+            self.add_document(Document.from_dict(doc))
+            if isinstance(doc, Dict)
+            else self.add_document(doc)
             for doc in documents
         ]
 

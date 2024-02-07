@@ -18,6 +18,7 @@ from lightning.pytorch.callbacks import (
 from lightning.pytorch.loggers import WandbLogger
 from omegaconf import OmegaConf
 from pprintpp import pformat
+from tqdm import tqdm
 
 from goldenretriever.callbacks.base import NLPTemplateCallback
 from goldenretriever.callbacks.evaluation_callbacks import (
@@ -325,6 +326,36 @@ class Trainer(FromConfig):
         return self.lightning_datamodule
 
     def configure_lightning_module(self, *args, **kwargs):
+        # check if Index is empty
+        if len(self.retriever.document_index) == 0:
+            # add the docs from the datasets
+            logger.info("Document Index is empty. Adding documents from the datasets.")
+            documents = self.retriever.document_index.documents
+            for sample in tqdm(self.train_dataset, desc="Adding documents from train"):
+                [documents.add_document(s) for s in sample["positives"]]
+                [documents.add_document(s) for s in sample["negatives"]]
+                [documents.add_document(s) for s in sample["hard_negatives"]]
+
+            val_passages = []
+            if self.val_dataset is not None:
+                for ds in self.val_dataset:
+                    for sample in ds:
+                        val_passages.extend(sample["positives"])
+                        val_passages.extend(sample["negatives"])
+                        val_passages.extend(sample["hard_negatives"])
+            for sample in tqdm(val_passages, desc="Adding documents from val"):
+                documents.add_document(sample)
+
+            test_passages = []
+            if self.test_dataset is not None:
+                for ds in self.test_dataset:
+                    for sample in ds:
+                        test_passages.extend(sample["positives"])
+                        test_passages.extend(sample["negatives"])
+                        test_passages.extend(sample["hard_negatives"])
+            for sample in tqdm(test_passages, desc="Adding documents from test"):
+                documents.add_document(sample)
+
         # add loss object to the retriever
         if self.retriever.loss_type is None:
             self.retriever.loss_type = self.loss()

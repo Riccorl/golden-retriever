@@ -26,13 +26,16 @@ pip install -e .
 
 # Usage
 
-## Example of Training
+## How to run an experiment
+
+### Training
+
+Here a simple example on how to train a DPR-like Retriever on the NQ dataset.
+First download the dataset from (DPR)[]. The run the following code:
 
 ```python
-from goldenretriever.indexers.document import DocumentStore
 from goldenretriever.trainer import Trainer
 from goldenretriever import GoldenRetriever
-from goldenretriever.indexers.inmemory import InMemoryDocumentIndex
 from goldenretriever.data.datasets import InBatchNegativesDataset
 
 # create a retriever
@@ -43,8 +46,8 @@ retriever = GoldenRetriever(
 
 # create a dataset
 train_dataset = InBatchNegativesDataset(
-    name="train",
-    path="data/train.json",
+    name="nq_train",
+    path="path/to/nq_train.json",
     tokenizer=retriever.question_tokenizer,
     question_batch_size=64,
     passage_batch_size=400,
@@ -52,47 +55,69 @@ train_dataset = InBatchNegativesDataset(
     shuffle=True,
 )
 val_dataset = InBatchNegativesDataset(
-    name="val",
-    path="data/val.json",
+    name="nq_dev",
+    path="path/to/nq_dev.json",
     tokenizer=retriever.question_tokenizer,
     question_batch_size=64,
     passage_batch_size=400,
     max_passage_length=64,
 )
-test_dataset = InBatchNegativesDataset(
-    name="test",
-    path="data/test.json",
-    tokenizer=retriever.question_tokenizer,
-    question_batch_size=64,
-    passage_batch_size=400,
-    max_passage_length=64,
-)
-
-# create an in-memory document index
-document_index = InMemoryDocumentIndex(
-    documents=DocumentStore.from_tsv("data/dpr_like_index.tsv"),
-    device="cuda", 
-    precision="16"
-)
-# add the index to the retriever
-retriever.document_index = document_index
 
 trainer = Trainer(
     retriever=retriever,
     train_dataset=train_dataset,
     val_dataset=val_dataset,
-    test_dataset=test_dataset,
     max_steps=25_000,
     wandb_online_mode=True,
     wandb_project_name="golden-retriever",
-    wandb_experiment_name="e5-small-experiment",
+    wandb_experiment_name="e5-small-nq",
     max_hard_negatives_to_mine=5,
 )
 
 # start training
 trainer.train()
+```
 
-# evaluate on test set (optional)
+### Evaluation
+
+```python
+from goldenretriever.trainer import Trainer
+from goldenretriever import GoldenRetriever
+from goldenretriever.data.datasets import InBatchNegativesDataset
+
+retriever = GoldenRetriever(
+      question_encoder="",
+      document_index="",
+      device="cuda",
+      precision="16",
+  )
+test_dataset = InBatchNegativesDataset(
+    name="test",
+    path="",
+    tokenizer=retriever.question_tokenizer,
+    question_batch_size=64,
+    passage_batch_size=400,
+    max_passage_length=64,
+)
+
+# logger.info("Loading document index")
+# document_index = InMemoryDocumentIndex(
+#     documents=documents,
+#     # metadata_fields=["title"],
+#     # separator=" <title> ",
+#     device="cuda",
+#     precision="16",
+# )
+# retriever.document_index = document_index
+
+trainer = Trainer(
+    retriever=retriever,
+    test_dataset=test_dataset,
+    log_to_wandb=False,
+    top_k=[20, 100]
+)
+
+# trainer.train()
 trainer.test()
 ```
 
