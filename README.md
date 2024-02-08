@@ -26,7 +26,7 @@ or from source:
 
 ```bash
 git clone https://github.com/Riccorl/golden-retriever.git
-cd goldenretriever
+cd golden-retriever
 pip install -e .
 ```
 
@@ -141,14 +141,14 @@ The retriever expects a jsonl file similar to [DPR](https://github.com/facebookr
 ```json lines
 [
   {
-	"question": "....",
-	"answers": ["...", "...", "..."],
-	"positive_ctxs": [{
-		"title": "...",
-		"text": "...."
-	}],
-	"negative_ctxs": ["..."],
-	"hard_negative_ctxs": ["..."]
+  "question": "....",
+  "answers": ["...", "...", "..."],
+  "positive_ctxs": [{
+    "title": "...",
+    "text": "...."
+  }],
+  "negative_ctxs": ["..."],
+  "hard_negative_ctxs": ["..."]
   },
   ...
 ]
@@ -156,11 +156,11 @@ The retriever expects a jsonl file similar to [DPR](https://github.com/facebookr
 
 ### Index data
 
-The document to index can be either a jsonl file or a tsv file similar to 
+The document to index can be either a jsonl file or a tsv file similar to
 [DPR](https://github.com/facebookresearch/DPR):
 
 - `jsonl`: each line is a json object with the following keys: `id`, `text`, `metadata`
-- `tsv`: each line is a tab-separated string with the `id` and `text` column, 
+- `tsv`: each line is a tab-separated string with the `id` and `text` column,
   followed by any other column that will be stored in the `metadata` field
 
 jsonl example:
@@ -182,4 +182,3 @@ tsv example:
 id \t text \t any other column
 ...
 ```
-
