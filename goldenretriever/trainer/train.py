@@ -1,7 +1,8 @@
 import os
 from copy import deepcopy
 from pathlib import Path
-from typing import List, Literal, Optional, Union
+from typing import List, Literal
+from goldenretriever.trainer import PRECISION_INPUT_STR_ALIAS_CONVERSION
 
 import hydra
 import lightning as pl
@@ -56,12 +57,12 @@ class Trainer(FromConfig):
         self,
         retriever: GoldenRetriever,
         train_dataset: GoldenRetrieverDataset | None = None,
-        val_dataset: GoldenRetrieverDataset
-        | list[GoldenRetrieverDataset]
-        | None = None,
-        test_dataset: GoldenRetrieverDataset
-        | list[GoldenRetrieverDataset]
-        | None = None,
+        val_dataset: (
+            GoldenRetrieverDataset | list[GoldenRetrieverDataset] | None
+        ) = None,
+        test_dataset: (
+            GoldenRetrieverDataset | list[GoldenRetrieverDataset] | None
+        ) = None,
         num_workers: int = 4,
         optimizer: torch.optim.Optimizer = RAdamW,
         lr: float = 1e-5,
@@ -239,8 +240,8 @@ class Trainer(FromConfig):
         if self.wandb_kwargs is not None:
             wandb_args.update(self.wandb_kwargs)
         self.wandb_kwargs = wandb_args
-        self.wandb_logger: Optional[WandbLogger] = None
-        self.experiment_path: Optional[Path] = None
+        self.wandb_logger: WandbLogger | None = None
+        self.experiment_path: Path | None = None
 
         # setup metrics to monitor for a bunch of callbacks
         if isinstance(self.top_k, int):
@@ -336,25 +337,25 @@ class Trainer(FromConfig):
                 [documents.add_document(s) for s in sample["negatives"]]
                 [documents.add_document(s) for s in sample["hard_negatives"]]
 
-            val_passages = []
             if self.val_dataset is not None:
+                val_passages = []
                 for ds in self.val_dataset:
                     for sample in ds:
                         val_passages.extend(sample["positives"])
                         val_passages.extend(sample["negatives"])
                         val_passages.extend(sample["hard_negatives"])
-            for sample in tqdm(val_passages, desc="Adding documents from val"):
-                documents.add_document(sample)
+                for sample in tqdm(val_passages, desc="Adding documents from val"):
+                    documents.add_document(sample)
 
-            test_passages = []
             if self.test_dataset is not None:
+                test_passages = []
                 for ds in self.test_dataset:
                     for sample in ds:
                         test_passages.extend(sample["positives"])
                         test_passages.extend(sample["negatives"])
                         test_passages.extend(sample["hard_negatives"])
-            for sample in tqdm(test_passages, desc="Adding documents from test"):
-                documents.add_document(sample)
+                for sample in tqdm(test_passages, desc="Adding documents from test"):
+                    documents.add_document(sample)
 
         # add loss object to the retriever
         if self.retriever.loss_type is None:
@@ -695,7 +696,9 @@ class Trainer(FromConfig):
                 check_val_every_n_epoch=self.check_val_every_n_epoch,
                 deterministic=self.deterministic,
                 fast_dev_run=self.fast_dev_run,
-                precision=self.precision,
+                precision=PRECISION_INPUT_STR_ALIAS_CONVERSION.get(
+                    self.precision, self.precision
+                ),
                 reload_dataloaders_every_n_epochs=self.reload_dataloaders_every_n_epochs,
                 callbacks=self.callbacks_store,
                 logger=self.wandb_logger,
@@ -806,15 +809,15 @@ class Trainer(FromConfig):
         config = {
             "_target_": f"{cls.__class__.__module__}.{cls.__class__.__name__}",
             "retriever": to_config(cls.retriever),
-            "train_dataset": to_config(cls.train_dataset)
-            if cls.train_dataset is not None
-            else None,
-            "val_dataset": to_config(cls.val_dataset)
-            if cls.val_dataset is not None
-            else None,
-            "test_dataset": to_config(cls.test_dataset)
-            if cls.test_dataset is not None
-            else None,
+            "train_dataset": (
+                to_config(cls.train_dataset) if cls.train_dataset is not None else None
+            ),
+            "val_dataset": (
+                to_config(cls.val_dataset) if cls.val_dataset is not None else None
+            ),
+            "test_dataset": (
+                to_config(cls.test_dataset) if cls.test_dataset is not None else None
+            ),
             "num_workers": cls.num_workers,
             # trainer parameters
             "optimizer": to_config(cls.optimizer),
@@ -823,9 +826,9 @@ class Trainer(FromConfig):
             "lr_scheduler": to_config(cls.lr_scheduler),
             "num_warmup_steps": cls.num_warmup_steps,
             "loss": to_config(cls.loss),
-            "callbacks": to_config(cls.callbacks)
-            if cls.callbacks is not None
-            else None,
+            "callbacks": (
+                to_config(cls.callbacks) if cls.callbacks is not None else None
+            ),
             "accelerator": cls.accelerator,
             "devices": cls.devices,
             "num_nodes": cls.num_nodes,
@@ -930,7 +933,7 @@ def train_hydra(conf: omegaconf.DictConfig) -> None:
     # force setup to get labels initialized for the model
     pl_data_module.prepare_data()
     # main module declaration
-    pl_module: Optional[GoldenRetrieverPLModule] = None
+    pl_module: GoldenRetrieverPLModule | None = None
 
     if not conf.train.only_test:
         pl_data_module.setup("fit")
@@ -1004,8 +1007,8 @@ def train_hydra(conf: omegaconf.DictConfig) -> None:
     # callbacks declaration
     callbacks_store = [ModelSummary(max_depth=2)]
 
-    experiment_logger: Optional[WandbLogger] = None
-    experiment_path: Optional[Path] = None
+    experiment_logger: WandbLogger | None = None
+    experiment_path: Path | None = None
     if conf.logging.log:
         logger.info("Instantiating Wandb Logger")
         experiment_logger = hydra.utils.instantiate(conf.logging.wandb_arg)
@@ -1020,14 +1023,14 @@ def train_hydra(conf: omegaconf.DictConfig) -> None:
         # Add a Learning Rate Monitor callback to log the learning rate
         callbacks_store.append(LearningRateMonitor(logging_interval="step"))
 
-    early_stopping_callback: Optional[EarlyStopping] = None
+    early_stopping_callback: EarlyStopping | None = None
     if conf.train.early_stopping_callback is not None:
         early_stopping_callback = hydra.utils.instantiate(
             conf.train.early_stopping_callback
         )
         callbacks_store.append(early_stopping_callback)
 
-    model_checkpoint_callback: Optional[ModelCheckpoint] = None
+    model_checkpoint_callback: ModelCheckpoint | None = None
     if conf.train.model_checkpoint_callback is not None:
         model_checkpoint_callback = hydra.utils.instantiate(
             conf.train.model_checkpoint_callback,

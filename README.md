@@ -6,21 +6,27 @@
   <a href="https://pytorch.org/get-started/locally/"><img alt="PyTorch" src="https://img.shields.io/badge/PyTorch-orange?logo=pytorch"></a>
   <a href="https://pytorchlightning.ai/"><img alt="Lightning" src="https://img.shields.io/badge/-Lightning-blueviolet"></a>
   <a href="https://black.readthedocs.io/en/stable/"><img alt="Code style: black" src="https://img.shields.io/badge/code%20style-black-black.svg"></a>
+  <a href="https://github.dev/Riccorl/golden-retriever"><img alt="vscode" src="https://img.shields.io/badge/preview%20in-vscode.dev-blue"></a>
+</p>
+<p align="center">
+  <a href="https://github.com/Riccorl/golden-retriever/releases"><img alt="release" src="https://img.shields.io/github/v/release/Riccorl/golden-retriever"></a>
+  <a href="https://github.com/Riccorl/golden-retriever/actions/workflows/python-publish-pypi.yml"><img alt="gh-status" src="https://github.com/Riccorl/golden-retriever/actions/workflows/python-publish-pypi.yml/badge.svg"></a>
+
 </p>
 
 # How to use
 
-Install the library from [PyPI]():
+Install the library from [PyPI](https://pypi.org/project/goldenretriever-core/):
 
 ```bash
-pip install goldenretriever
+pip install goldenretriever-core
 ```
 
 or from source:
 
 ```bash
-git clone https://github.com/Riccorl/goldenretriever.git
-cd goldenretriever
+git clone https://github.com/Riccorl/golden-retriever.git
+cd golden-retriever
 pip install -e .
 ```
 
@@ -46,8 +52,8 @@ retriever = GoldenRetriever(
 
 # create a dataset
 train_dataset = InBatchNegativesDataset(
-    name="nq_train",
-    path="path/to/nq_train.json",
+    name="webq_train",
+    path="path/to/webq_train.json",
     tokenizer=retriever.question_tokenizer,
     question_batch_size=64,
     passage_batch_size=400,
@@ -55,8 +61,8 @@ train_dataset = InBatchNegativesDataset(
     shuffle=True,
 )
 val_dataset = InBatchNegativesDataset(
-    name="nq_dev",
-    path="path/to/nq_dev.json",
+    name="webq_dev",
+    path="path/to/webq_dev.json",
     tokenizer=retriever.question_tokenizer,
     question_batch_size=64,
     passage_batch_size=400,
@@ -69,8 +75,8 @@ trainer = Trainer(
     val_dataset=val_dataset,
     max_steps=25_000,
     wandb_online_mode=True,
-    wandb_project_name="golden-retriever",
-    wandb_experiment_name="e5-small-nq",
+    wandb_project_name="golden-retriever-dpr",
+    wandb_experiment_name="e5-small-webq",
     max_hard_negatives_to_mine=5,
 )
 
@@ -86,38 +92,28 @@ from goldenretriever import GoldenRetriever
 from goldenretriever.data.datasets import InBatchNegativesDataset
 
 retriever = GoldenRetriever(
-      question_encoder="",
-      document_index="",
-      device="cuda",
-      precision="16",
-  )
-test_dataset = InBatchNegativesDataset(
-    name="test",
-    path="",
-    tokenizer=retriever.question_tokenizer,
-    question_batch_size=64,
-    passage_batch_size=400,
-    max_passage_length=64,
+  question_encoder="",
+  document_index="",
+  device="cuda",
+  precision="16",
 )
 
-# logger.info("Loading document index")
-# document_index = InMemoryDocumentIndex(
-#     documents=documents,
-#     # metadata_fields=["title"],
-#     # separator=" <title> ",
-#     device="cuda",
-#     precision="16",
-# )
-# retriever.document_index = document_index
+test_dataset = InBatchNegativesDataset(
+  name="test",
+  path="",
+  tokenizer=retriever.question_tokenizer,
+  question_batch_size=64,
+  passage_batch_size=400,
+  max_passage_length=64,
+)
 
 trainer = Trainer(
-    retriever=retriever,
-    test_dataset=test_dataset,
-    log_to_wandb=False,
-    top_k=[20, 100]
+  retriever=retriever,
+  test_dataset=test_dataset,
+  log_to_wandb=False,
+  top_k=[20, 100]
 )
 
-# trainer.train()
 trainer.test()
 ```
 
@@ -145,14 +141,14 @@ The retriever expects a jsonl file similar to [DPR](https://github.com/facebookr
 ```json lines
 [
   {
-	"question": "....",
-	"answers": ["...", "...", "..."],
-	"positive_ctxs": [{
-		"title": "...",
-		"text": "...."
-	}],
-	"negative_ctxs": ["..."],
-	"hard_negative_ctxs": ["..."]
+  "question": "....",
+  "answers": ["...", "...", "..."],
+  "positive_ctxs": [{
+    "title": "...",
+    "text": "...."
+  }],
+  "negative_ctxs": ["..."],
+  "hard_negative_ctxs": ["..."]
   },
   ...
 ]
@@ -160,11 +156,11 @@ The retriever expects a jsonl file similar to [DPR](https://github.com/facebookr
 
 ### Index data
 
-The document to index can be either a jsonl file or a tsv file similar to 
+The document to index can be either a jsonl file or a tsv file similar to
 [DPR](https://github.com/facebookresearch/DPR):
 
 - `jsonl`: each line is a json object with the following keys: `id`, `text`, `metadata`
-- `tsv`: each line is a tab-separated string with the `id` and `text` column, 
+- `tsv`: each line is a tab-separated string with the `id` and `text` column,
   followed by any other column that will be stored in the `metadata` field
 
 jsonl example:
@@ -186,4 +182,3 @@ tsv example:
 id \t text \t any other column
 ...
 ```
-
