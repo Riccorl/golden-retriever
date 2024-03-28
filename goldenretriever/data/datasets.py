@@ -398,7 +398,10 @@ class InBatchNegativesDataset(GoldenRetrieverDataset):
             self.subsample_strategy
             and self.subsample_strategy != SubsampleStrategyEnum.NONE
         ):
-            number_of_samples = int(len(self.data) * self.subsample_portion)
+            if isinstance(self.subsample_portion, int):
+                number_of_samples = self.subsample_portion
+            else:
+                number_of_samples = int(len(self.data) * self.subsample_portion)
             if self.subsample_strategy == SubsampleStrategyEnum.RANDOM:
                 logger.info(
                     f"Random subsampling {number_of_samples} samples from {len(self.data)}"
