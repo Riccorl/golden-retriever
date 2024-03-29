@@ -3,10 +3,12 @@
 
 """Build a StreamingTextDataset dataset and dataloader for training."""
 
-from functools import partial
 import os
+from concurrent.futures import ThreadPoolExecutor, wait
+from functools import partial
 from itertools import islice
 from pathlib import Path
+from threading import Event, Lock
 from typing import (
     Any,
     Callable,
@@ -20,27 +22,22 @@ from typing import (
     cast,
 )
 
+import datasets as hf_datasets
 import numpy as np
 import torch
 import transformers
 from composer.core.data_spec import DataSpec
 from composer.core.types import Batch
+from composer.utils import dist, get_file, parse_uri
 from omegaconf import DictConfig
 from omegaconf import OmegaConf as om
 from streaming import Stream, StreamingDataset
+from streaming.base.dataset import _Iterator
+from streaming.base.world import World
 from torch.utils.data import DataLoader
 from transformers import PreTrainedTokenizerBase
 
 from goldenretriever.common.log import get_logger
-
-from composer.utils import dist, get_file, parse_uri
-import datasets as hf_datasets
-
-from streaming.base.world import World
-from streaming.base.dataset import _Iterator
-from concurrent.futures import ThreadPoolExecutor, wait
-from threading import Event, Lock
-
 from goldenretriever.common.model_inputs import ModelInputs
 
 logger = get_logger(__name__)
@@ -133,7 +130,15 @@ class StreamingGoldenRetrieverDataset(StreamingDataset):
         sampling_method: str = "balanced",
         sampling_granularity: int = 1,
         batching_method: str = "random",
-        passage_batch_size: int = 8,
+        # golden retriever specific
+        question_batch_size: int = 32,
+        passage_batch_size: int = 32,
+        max_positives: int = -1,
+        max_negatives: int = -1,
+        max_hard_negatives: int = -1,
+        max_passages: int = -1,
+        max_question_length: int = 40,
+        max_passage_length: int = 40,
         **kwargs: Any,
     ):
 
@@ -179,8 +184,14 @@ class StreamingGoldenRetrieverDataset(StreamingDataset):
             batching_method=batching_method,
         )
         self.tokenizer = tokenizer
-        # self.max_seq_len = max_seq_len
+        self.question_batch_size = question_batch_size
         self.passage_batch_size = passage_batch_size
+        self.max_positives = max_positives
+        self.max_negatives = max_negatives
+        self.max_hard_negatives = max_hard_negatives
+        self.max_passages = max_passages
+        self.max_question_length = max_question_length
+        self.max_passage_length = max_passage_length
 
     # How to tokenize a text sample to a token sample
     def _tokenize(self, sample: Mapping) -> Dict[str, List[int]]:
@@ -190,36 +201,29 @@ class StreamingGoldenRetrieverDataset(StreamingDataset):
                 "If tokenizing on-the-fly, tokenizer must have a pad_token_id"
             )
 
-        max_positives = -1
-        max_negatives = -1
-        max_hard_negatives = -1
-        max_passages = -1
-        max_question_length = 40
-        max_passage_length = 40
-
         # remove duplicates and limit the number of passages
         positives = list(set([p["text"] for p in sample["positive_ctxs"]]))
-        if max_positives != -1:
-            positives = positives[:max_positives]
+        if self.max_positives != -1:
+            positives = positives[: self.max_positives]
 
         negatives = list(set([n["text"] for n in sample["negative_ctxs"]]))
-        if max_negatives != -1:
-            negatives = negatives[:max_negatives]
+        if self.max_negatives != -1:
+            negatives = negatives[: self.max_negatives]
 
         hard_negatives = list(set([h["text"] for h in sample["hard_negative_ctxs"]]))
-        if max_hard_negatives != -1:
-            hard_negatives = hard_negatives[:max_hard_negatives]
+        if self.max_hard_negatives != -1:
+            hard_negatives = hard_negatives[: self.max_hard_negatives]
 
         question = self.tokenizer(
-            sample["question"], max_length=max_question_length, truncation=True
+            sample["question"], max_length=self.max_question_length, truncation=True
         )
 
         passage = positives + negatives + hard_negatives
-        if max_passages != -1:
-            passage = passage[:max_passages]
+        if self.max_passages != -1:
+            passage = passage[: self.max_passages]
 
         passage = self.tokenizer(
-            passage, max_length=max_passage_length, truncation=True
+            passage, max_length=self.max_passage_length, truncation=True
         )
 
         # invert the passage data structure from a dict of lists to a list of dicts
@@ -305,8 +309,10 @@ class StreamingGoldenRetrieverDataset(StreamingDataset):
                     )
                 )
                 # split the batch if needed
-                # if len(batch) > question_batch_size:
-                #     for splited_batch in split_batch(batch_dict, question_batch_size):
+                # if len(batch) > self.question_batch_size:
+                #     for splited_batch in self.split_batch(
+                #         batch_dict, self.question_batch_size
+                #     ):
                 #         yield splited_batch
                 # else:
                 yield batch_dict
@@ -327,6 +333,126 @@ class StreamingGoldenRetrieverDataset(StreamingDataset):
         # yield from map(self.__getitem__, self._each_sample_id(it))
         wait([prepare_future, ready_future], return_when="FIRST_EXCEPTION")
         it.exit()
+
+    @staticmethod
+    def get_num_samples_in_batch(batch: Dict) -> int:
+        """
+        Get the number of samples in a batch.
+
+        Args:
+            batch (Dict): A batch of data.
+
+        Returns:
+            int: The number of samples in the batch.
+        """
+        try:
+            return batch["questions"]["input_ids"].shape[0]
+        except KeyError:
+            raise ValueError("Batch must contain `questions` key.")
+
+    @staticmethod
+    def get_num_tokens_in_batch(batch: Dict) -> int:
+        """
+        Get the number of tokens in a batch.
+
+        Args:
+            batch (Dict): A batch of data.
+
+        Returns:
+            int: The number of tokens in the batch.
+        """
+        try:
+            return (
+                batch["questions"]["input_ids"].shape[1]
+                + batch["passages"]["input_ids"].shape[1]
+            )
+        except KeyError:
+            raise ValueError("Batch must contain `questions` and `passages` keys.")
+
+    @staticmethod
+    def split_batch(
+        batch: Union[Dict[str, Any], ModelInputs], microbatch_size: int
+    ) -> List[ModelInputs]:
+        """
+        Split a batch into multiple batches of size `question_batch_size` while keeping
+        the same number of passages.
+        """
+
+        # def split_fn(x):
+        #     return [
+        #         x[i : i + microbatch_size] for i in range(0, len(x), microbatch_size)
+        #     ]
+
+        # # split the sample_idx
+        # sample_idx = split_fn(batch["sample_idx"])
+        # # split the questions
+        # questions = split_fn(batch["questions"])
+        # # split the positives
+        # positives = split_fn(batch["positives"])
+        # # split the positives_pssgs
+        # positives_pssgs = split_fn(batch["positives_pssgs"])
+
+        # # collect the new batches
+        # batches = []
+        # for i in range(len(questions)):
+        #     batches.append(
+        #         ModelInputs(
+        #             dict(
+        #                 sample_idx=sample_idx[i],
+        #                 questions=questions[i],
+        #                 passages=batch["passages"],
+        #                 positives=positives[i],
+        #                 positives_pssgs=positives_pssgs[i],
+        #             )
+        #         )
+        #     )
+        # return batches
+
+        if microbatch_size is None:
+            return [batch]
+
+        def split_fn(x):
+            if isinstance(x, list):
+                return [
+                    x[i : i + microbatch_size]
+                    for i in range(0, len(x), microbatch_size)
+                ]
+            elif isinstance(x, torch.Tensor):
+                return torch.split(x, microbatch_size, dim=0)
+            elif isinstance(x, dict):
+                # split the dict values into microbatches while
+                # keeping the keys the same
+                return [
+                    dict((k, v[i : i + microbatch_size]) for k, v in x.items())
+                    for i in range(0, len(x[list(x.keys())[0]]), microbatch_size)
+                ]
+            else:
+                raise ValueError(f"Unsupported type {type(x)}")
+
+        # split the sample_idx
+        sample_idx = split_fn(batch["sample_idx"])
+        # split the questions
+        questions = split_fn(batch["questions"])
+        # split the labels
+        labels = split_fn(batch["labels"])
+        # split the positives
+        positives = split_fn(batch["positives"])
+
+        # collect the new batches
+        batches = []
+        for i in range(len(questions)):
+            batches.append(
+                ModelInputs(
+                    dict(
+                        sample_idx=sample_idx[i],
+                        questions=questions[i],
+                        passages=batch["passages"],
+                        positives=positives[i],
+                        labels=labels[i],
+                    )
+                )
+            )
+        return batches
 
 
 class GoldenRetrieverCollator:
@@ -439,461 +565,6 @@ class GoldenRetrieverCollator:
             }
         )
         return model_inputs
-
-
-def build_text_dataloader(
-    # cfg: DictConfig,
-    path: str,
-    tokenizer: PreTrainedTokenizerBase,
-    device_batch_size: int,
-) -> DataSpec:
-    # assert (
-    #     cfg.name == "text"
-    # ), f"Tried to build text dataloader with cfg.name={cfg.name}"
-
-    # get kwargs
-    # mlm_probability = cfg.dataset.pop("mlm_probability", None)
-    # eos_token_id = cfg.dataset.pop("eos_token_id", None)
-    # bos_token_id = cfg.dataset.pop("bos_token_id", None)
-
-    # streams = build_streams(cfg.dataset)
-
-    # build dataset potentially with streams
-    dataset = StreamingGoldenRetrieverDataset(
-        tokenizer=tokenizer,
-        streams=[Stream(local=path)],
-        batch_size=device_batch_size,
-        **cfg.dataset,
-    )
-
-    # collate_fn = transformers.DataCollatorForLanguageModeling(
-    #     tokenizer=dataset.tokenizer,
-    #     mlm=mlm_probability is not None,
-    #     mlm_probability=mlm_probability,
-    # )
-
-    # if (eos_token_id is not None) or (bos_token_id is not None):
-    #     # Note: Will raise an error if both are non-None
-    #     collate_fn = ConcatenatedSequenceCollatorWrapper(
-    #         base_collator=collate_fn,
-    #         eos_token_id=eos_token_id,
-    #         bos_token_id=bos_token_id,
-    #     )
-
-    # collate_fn =
-    def collate_fn(batch: Any, *args, **kwargs) -> Any:
-        # convert questions and passages to a batch
-        questions = convert_to_batch(batch.questions)
-        passages = convert_to_batch(batch.passages)
-
-        # build an index to map the position of the passage in the batch
-        passage_index = {tuple(c["input_ids"]): i for i, c in enumerate(batch.passages)}
-
-        # now we can create the labels
-        labels = torch.zeros(
-            questions["input_ids"].shape[0], passages["input_ids"].shape[0]
-        )
-        # iterate over the questions and set the labels to 1 if the passage is positive
-        for sample_idx in range(len(questions["input_ids"])):
-            for pssg in batch["positives_pssgs"][sample_idx]:
-                # get the index of the positive passage
-                index = passage_index[tuple(pssg["input_ids"])]
-                # set the label to 1
-                labels[sample_idx, index] = 1
-
-        model_inputs = ModelInputs(
-            {
-                "questions": questions,
-                "passages": passages,
-                "labels": labels,
-                "positives": batch["positives"],
-                "sample_idx": batch["sample_idx"],
-            }
-        )
-        return model_inputs
-
-    detected_cpu_count = os.cpu_count() or 1
-    detected_cpus_with_margin = detected_cpu_count - 8
-    num_cpus_to_use = max(1, detected_cpus_with_margin)
-
-    dl = DataLoader(
-        dataset,
-        collate_fn=collate_fn,
-        batch_size=8,
-        drop_last=False,
-        num_workers=num_cpus_to_use,
-        pin_memory=True,
-        prefetch_factor=2,
-        persistent_workers=True,
-        timeout=0,
-    )
-
-    # If we pretokenized, we may not have padding, in which case the
-    # tokenizer may not have a pad_token_id. In this case, we can
-    # just use the default token counting function. This is correct
-    # because we do not support training on pretokenized data with padding,
-    # and if tokenizing on the fly, we require that the tokenizer has a pad token.
-    # token_counting_func = None
-    # if tokenizer.pad_token_id is not None:
-    #     token_counting_func = get_tokens_per_batch_func()
-
-    # return DataSpec(dataloader=dl, get_num_tokens_in_batch=token_counting_func)
-    return dl
-
-
-# class ConcatenatedSequenceCollatorWrapper:
-#     """Collator wrapper to add sequence_id to batch."""
-
-#     def __init__(
-#         self,
-#         base_collator: Callable,
-#         eos_token_id: Optional[int] = None,
-#         bos_token_id: Optional[int] = None,
-#     ):
-#         self.base_collator = base_collator
-#         if (eos_token_id is None) and (bos_token_id is None):
-#             raise ValueError(
-#                 "Must supply a value for either eos_token_id or bos_token_id, but got None for both."
-#             )
-#         if (eos_token_id is not None) and (bos_token_id is not None):
-#             raise ValueError(
-#                 "Cannot use *both* EOS and BOS tokens for detecting sequence boundaries. "
-#                 + "Please supply `eos_token_id` if sequences end with an EOS token, or use "
-#                 + "`bos_token_id` if sequences start with a BOS token."
-#             )
-
-#         if eos_token_id is None:
-#             self.split_token_id = cast(int, bos_token_id)
-#             self.bos_mode = True
-#         else:
-#             self.split_token_id = eos_token_id
-#             self.bos_mode = False
-
-#     def __call__(self, examples: List[Any]) -> Dict[str, torch.Tensor]:
-#         batch = self.base_collator(examples)
-#         batch["sequence_id"] = self.get_sequence_id_from_batch(batch)
-#         return batch
-
-#     def get_sequence_id_from_batch(
-#         self, batch: Dict[str, torch.Tensor]
-#     ) -> torch.Tensor:
-#         is_separator = torch.eq(batch["input_ids"], self.split_token_id)
-#         cumulative_sep = torch.cumsum(is_separator, dim=1).to(batch["input_ids"].dtype)
-#         # If separator token is bos, we're already done
-#         if self.bos_mode:
-#             return cumulative_sep
-
-#         # If separator token is eos, right shift 1 space
-#         left_zeros = cumulative_sep.new_zeros((cumulative_sep.shape[0], 1))
-#         return torch.cat([left_zeros, cumulative_sep[:, :-1]], dim=1)
-
-
-# # def build_streams(**kwargs: Any) -> Optional[Sequence[Stream]]:
-# #     # streams_dict = dataset_cfg.pop("streams", None)
-# #     # build streams
-# #     streams = None
-# #     if kwargs is not None and len(kwargs) > 0:
-# #         streams = []
-# #         for _, stream in kwargs.items():
-# #             # stream is the streams kwargs
-# #             # fwd all kwargs with **stream allows streaming to check args
-# #             streams.append(Stream(**stream))
-# #     return streams
-
-
-# def get_tokens_per_batch_func(decoder_only: bool = True) -> Callable[[Batch], int]:
-#     """Returns a callable that counts the number of tokens in a batch.
-
-#     Args:
-#         pad_token_id (int): The id of the padding token.
-#         decoder_only (bool, optional): Whether to expect the batch to just contain ``input_ids`` (decoder only)
-#             or to also contain ``decoder_input_ids`` (encoder decoder). Defaults to ``True``.
-
-#     Returns:
-#         Callable[[Batch], int]: A callable that counts the number of tokens in a batch.
-#     """
-
-#     def get_num_samples_in_batch(batch: Batch) -> int:
-#         if not isinstance(batch, Mapping) or (
-#             "attention_mask" not in batch and "input_ids" not in batch
-#         ):
-#             raise ValueError(
-#                 "get_tokens_per_batch_func() requires a batch with an attention_mask key or an input_ids key"
-#             )
-
-#         if not decoder_only and "decoder_attention_mask" not in batch:
-#             raise ValueError(
-#                 "get_tokens_per_batch_func() for encoder decoder requires a batch with a decoder_attention_mask key"
-#             )
-
-#         # Count number of non padding tokens in batch
-#         if "attention_mask" in batch:
-#             input_ids_tokens = int(torch.sum(batch["attention_mask"]).item())
-#         else:
-#             input_ids_tokens = batch["input_ids"].numel()
-
-#         # For encoder decoder models only
-#         decoder_input_ids_tokens = 0
-#         if not decoder_only:
-#             decoder_input_ids_tokens = int(
-#                 torch.sum(batch["decoder_attention_mask"]).item()
-#             )
-
-#         return input_ids_tokens + decoder_input_ids_tokens
-
-#     return get_num_samples_in_batch
-
-
-def build_from_hf(
-    # cfg: DictConfig,
-    paths: Union[str, List[str]],
-    # dataset_name: str,
-    # max_seq_len: int,
-    tokenizer: PreTrainedTokenizerBase,
-    split: str = "train",
-    preprocessing_fn=None,
-    **kwargs: Any,
-) -> Union[
-    hf_datasets.DatasetDict,
-    hf_datasets.Dataset,
-    hf_datasets.IterableDatasetDict,
-    hf_datasets.IterableDataset,
-]:
-    """Load a HuggingFace Datasets, preprocess, and tokenize.
-
-    Note: This function will drop examples where the prompt is longer than the max_seq_len
-
-    Args:
-        cfg (DictConfig): The dataset configuration.
-        max_seq_len (int): The maximum sequence length. Examples with prompts longer than this will be dropped.
-        tokenizer (Tokenizer): The tokenizer to be used for tokenizing the dataset.
-
-    Returns:
-        Dataset: The tokenized dataset.
-    """
-    # dataset_name = cfg.hf_name
-    # HF datasets does not support a split with dashes,so we replace split
-    # dashes with underscore.
-    # split = cfg.split.replace("-", "_")
-    # kwargs = cfg.get("hf_kwargs", {})
-    # proto_preprocessing_fn = cfg.get("preprocessing_fn")
-    # if isinstance(proto_preprocessing_fn, dict) or isinstance(
-    #     proto_preprocessing_fn, DictConfig
-    # ):
-    #     preprocessing_fn = self.get_preprocessing_fn_from_dict(proto_preprocessing_fn)
-    # else:
-    #     preprocessing_fn = self.get_preprocessing_fn_from_str(
-    #         proto_preprocessing_fn, dataset_name
-    #     )
-
-    if isinstance(paths, str):
-        paths = [
-            (
-                Path(paths)
-                # if Path(paths).is_absolute()
-                # else self.project_folder / paths
-            )
-        ]
-    else:
-        paths = [
-            Path(path)  # if Path(path).is_absolute() else self.project_folder / path
-            for path in paths
-        ]
-
-    # read the data and put it in a placeholder list
-    for path in paths:
-        if not path.exists():
-            raise ValueError(f"{path} does not exist")
-
-    signal_file_path = f".node_{dist.get_node_rank()}_local_rank0_data_prep_completed"
-
-    # Non local rank 0 ranks will wait here for local rank 0 to finish the data processing.
-    # Once local rank 0 is done, the datasets are all cached on disk, and all other ranks
-    # can just read them.
-    if dist.get_local_rank() != 0:
-        logger.debug("Waiting for local_rank 0 to finish data prep")
-        with dist.local_rank_zero_download_and_wait(signal_file_path):
-            pass
-
-    error: Optional[Exception] = None
-    tokenized_dataset = None
-    try:
-        dataset = hf_datasets.load_dataset(
-            "json",
-            data_files=[str(p) for p in paths],  # datasets needs str paths and not Path
-            split=split,
-            **kwargs,
-        )
-
-        # def dataset_mapper(example: Dict):
-        #     if preprocessing_fn is not None:
-        #         example = preprocessing_fn(example)
-        #     return _tokenize_formatted_example(example, tokenizer)
-
-        max_positives = -1
-        max_negatives = -1
-        max_hard_negatives = -1
-        max_passages = -1
-        max_question_length = 40
-        max_passage_length = 40
-        fn_kwargs = dict(
-            tokenizer=tokenizer,
-            max_positives=max_positives,
-            max_negatives=max_negatives,
-            max_hard_negatives=max_hard_negatives,
-            max_passages=max_passages,
-            max_question_length=max_question_length,
-            max_passage_length=max_passage_length,
-        )
-
-        def load_fn(
-            sample: Dict,
-            tokenizer: PreTrainedTokenizerBase,
-            max_positives: int,
-            max_negatives: int,
-            max_hard_negatives: int,
-            max_passages: int = -1,
-            max_question_length: int = 256,
-            max_passage_length: int = 128,
-            *args,
-            **kwargs,
-        ) -> Dict:
-            # remove duplicates and limit the number of passages
-            positives = list(set([p["text"] for p in sample["positive_ctxs"]]))
-            if max_positives != -1:
-                positives = positives[:max_positives]
-
-            negatives = list(set([n["text"] for n in sample["negative_ctxs"]]))
-            if max_negatives != -1:
-                negatives = negatives[:max_negatives]
-
-            hard_negatives = list(
-                set([h["text"] for h in sample["hard_negative_ctxs"]])
-            )
-            if max_hard_negatives != -1:
-                hard_negatives = hard_negatives[:max_hard_negatives]
-
-            question = tokenizer(
-                sample["question"], max_length=max_question_length, truncation=True
-            )
-
-            passage = positives + negatives + hard_negatives
-            if max_passages != -1:
-                passage = passage[:max_passages]
-
-            passage = tokenizer(passage, max_length=max_passage_length, truncation=True)
-
-            # invert the passage data structure from a dict of lists to a list of dicts
-            passage = [dict(zip(passage, t)) for t in zip(*passage.values())]
-
-            output = dict(
-                question=question,
-                passage=passage,
-                positive_pssgs=passage[: len(positives)],
-                positives=positives,
-                negatives=negatives,
-                hard_negatives=hard_negatives,
-            )
-            return output
-
-        detected_cpu_count = os.cpu_count() or 1
-        detected_cpus_with_margin = detected_cpu_count - 8
-        num_cpus_to_use = max(1, detected_cpus_with_margin)
-        map_kwargs = dict(
-            function=load_fn,
-            fn_kwargs=fn_kwargs,
-            batched=False,
-            # remove_columns=columns_to_remove,
-            num_proc=num_cpus_to_use,
-            desc="Tokenizing dataset",
-        )
-
-        # columns_to_remove = list(dataset[0].keys())
-        tokenized_dataset = dataset.map(**map_kwargs)
-
-        # pad_token_id = tokenizer.pad_token_id
-
-        # def filter_long_or_empty_examples(example: Dict) -> bool:
-        #     less_than_max_seq_len = len(example["input_ids"]) < max_seq_len
-        #     non_empty_input = len(example["input_ids"]) > 0
-        #     non_empty_labels = len(example["labels"]) > 0
-        #     non_padding_response = any(
-        #         token_id != pad_token_id for token_id in example["labels"]
-        #     )
-        #     return (
-        #         less_than_max_seq_len
-        #         and non_empty_input
-        #         and non_empty_labels
-        #         and non_padding_response
-        #     )
-
-        # filtered_dataset = tokenized_dataset.filter(
-        #     filter_long_or_empty_examples,
-        #     num_proc=num_cpus_to_use,
-        #     desc="Filtering out long prompts",
-        # )
-
-        # examples_removed = len(tokenized_dataset) - len(filtered_dataset)
-        # if examples_removed > 0:
-        #     logger.warn(
-        #         f"Dropped {examples_removed} examples where the prompt was longer than {max_seq_len}, "
-        #         + "the prompt or response was empty, or the response was all padding tokens."
-        #     )
-    except Exception as e:
-        error = e
-    # Now local rank 0 indicates to the other ranks that it is done
-    if dist.get_local_rank() == 0:
-        logger.debug("Local rank 0 finished data prep")
-        with open(signal_file_path, "wb") as f:
-            f.write(b"local_rank0_completed_data_prep")
-
-    # All ranks sync up at this barrier, having completed data processing
-    dist.barrier()
-
-    # Last, local rank 0 cleans up the signal file
-    if dist.get_local_rank() == 0:
-        os.remove(signal_file_path)
-
-    if error is not None:
-        logger.error("Error during data prep")
-        raise error
-    logger.debug("All ranks finished data prep")
-    assert tokenized_dataset is not None
-    return tokenized_dataset
-
-
-# def build_from_streaming(self, *args: Any, **kwargs: Any) -> StreamingFinetuningDataset:
-#     return StreamingFinetuningDataset(*args, **kwargs)
-
-# from torch.utils.data.distributed import DistributedSampler
-
-# class GoldenRetrieverDistributedSampler(DistributedSampler):
-#     def __iter__(self) -> os.Iterator:
-#         if self.shuffle:
-#             # deterministically shuffle based on epoch and seed
-#             g = torch.Generator()
-#             g.manual_seed(self.seed + self.epoch)
-#             indices = torch.randperm(len(self.dataset), generator=g).tolist()  # type: ignore[arg-type]
-#         else:
-#             indices = list(range(len(self.dataset)))  # type: ignore[arg-type]
-
-#         if not self.drop_last:
-#             # add extra samples to make it evenly divisible
-#             padding_size = self.total_size - len(indices)
-#             if padding_size <= len(indices):
-#                 indices += indices[:padding_size]
-#             else:
-#                 indices += (indices * math.ceil(padding_size / len(indices)))[:padding_size]
-#         else:
-#             # remove tail of data to make it evenly divisible.
-#             indices = indices[:self.total_size]
-#         assert len(indices) == self.total_size
-
-#         # subsample
-#         indices = indices[self.rank:self.total_size:self.num_replicas]
-#         assert len(indices) == self.num_samples
-
-#         return iter(indices)
 
 
 # Helpful to test if your dataloader is working locally

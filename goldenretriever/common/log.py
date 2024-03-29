@@ -9,6 +9,22 @@ from art import text2art, tprint
 from colorama import Fore, Style, init
 from rich import get_console
 
+
+import os
+import sys
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, TextIO, Union
+
+import tqdm.auto
+import yaml
+from composer.core.time import TimeUnit
+from composer.loggers.logger import Logger, format_log_data_value
+from composer.loggers.logger_destination import LoggerDestination
+from composer.loggers.progress_bar_logger import ProgressBarLogger, _ProgressBar, _IS_TRAIN_TO_KEYS_TO_LOG
+from composer.utils import dist, is_notebook
+
+# if TYPE_CHECKING:
+from composer.core import State, Timestamp
+
 _lock = threading.Lock()
 _default_handler: Optional[logging.Handler] = None
 
@@ -169,3 +185,68 @@ def print_relik_text_art(
     text: str = "golden-retriever", font: str = "larry3d", **kwargs
 ):
     tprint(text, font=font, **kwargs)
+
+
+# class GoldenRetrieverProgressBarLogger(ProgressBarLogger):
+#     """
+#     We subclass the ProgressBarLogger to add a custom progress bar for the GoldenRetriever training loop.
+#     """
+
+def _golden_retriever_build_pbar(self, state: State, is_train: bool) -> _ProgressBar:
+    """Builds a pbar.
+
+    *   If ``state.max_duration.unit`` is :attr:`.TimeUnit.EPOCH`, then a new progress bar will be created for each epoch.
+        Mid-epoch evaluation progress bars will be labeled with the batch and epoch number.
+    *   Otherwise, one progress bar will be used for all of training. Evaluation progress bars will be labeled
+        with the time (in units of ``max_duration.unit``) at which evaluation runs.
+    """
+    # Always using position=1 to avoid jumping progress bars
+    # In jupyter notebooks, no need for the dummy pbar, so use the default position
+    position = None if is_notebook() else 1
+    desc = f'{state.dataloader_label:15}'
+    max_duration_unit = None if state.max_duration is None else state.max_duration.unit
+
+    if max_duration_unit == TimeUnit.EPOCH or max_duration_unit is None:
+        total = int(state.dataloader_len) if state.dataloader_len is not None else None
+        timestamp_key = 'sample_in_epoch'
+
+        unit = TimeUnit.SAMPLE
+        n = state.timestamp.epoch.value
+        if self.train_pbar is None and not is_train:
+            # epochwise eval results refer to model from previous epoch (n-1)
+            n = n - 1 if n > 0 else 0
+        if self.train_pbar is None:
+            desc += f'Epoch {n:3}'
+        else:
+            # For evaluation mid-epoch, show the total batch count
+            desc += f'Sample {int(state.timestamp.sample):3}'
+        desc += ': '
+
+    else:
+        if is_train:
+            assert state.max_duration is not None, 'max_duration should be set if training'
+            unit = max_duration_unit
+            total = state.max_duration.value
+            # pad for the expected length of an eval pbar -- which is 14 characters (see the else logic below)
+            desc = desc.ljust(len(desc) + 14)
+        else:
+            unit = TimeUnit.BATCH
+            total = int(state.dataloader_len) if state.dataloader_len is not None else None
+            value = int(state.timestamp.get(max_duration_unit))
+            # Longest unit name is sample (6 characters)
+            desc += f'{max_duration_unit.name.capitalize():6} {value:5}: '
+
+        timestamp_key = unit.name.lower()
+
+    return _ProgressBar(
+        file=self.stream,
+        total=total,
+        position=position,
+        keys_to_log=_IS_TRAIN_TO_KEYS_TO_LOG[is_train],
+        # In a notebook, the `bar_format` should not include the {bar}, as otherwise
+        # it would appear twice.
+        bar_format=desc + ' {l_bar}' + ('' if is_notebook() else '{bar:25}') + '{r_bar}{bar:-1b}',
+        unit=unit.value.lower(),
+        metrics={},
+        timestamp_key=timestamp_key,
+    )

@@ -39,12 +39,9 @@ class FaissDocumentIndex(BaseDocumentIndex):
 
     def __init__(
         self,
-        documents: str
-        | List[str]
-        | os.PathLike
-        | List[os.PathLike]
-        | DocumentStore
-        | None = None,
+        documents: (
+            str | List[str] | os.PathLike | List[os.PathLike] | DocumentStore | None
+        ) = None,
         embeddings: torch.Tensor | numpy.ndarray | None = None,
         metadata_fields: List[str] | None = None,
         separator: str | None = None,

@@ -6,9 +6,9 @@ source "$CONDA_BASE"/etc/profile.d/conda.sh
 
 # create conda env
 read -rp "Enter environment name or prefix: " ENV_NAME
-read -rp "Enter python version (default 3.10): " PYTHON_VERSION
+read -rp "Enter python version (default 3.11): " PYTHON_VERSION
 if [ -z "$PYTHON_VERSION" ]; then
-  PYTHON_VERSION="3.10"
+  PYTHON_VERSION="3.11"
 fi
 
 # check if ENV_NAME is a full path
@@ -27,7 +27,7 @@ sed -i.bak -e "s,.*bin/activate.*,$NEW_CONDA_LINE,g" scripts/train.sh
 
 # install torch
 read -rp "Enter cuda version (e.g. '12.1', default no cuda support): " CUDA_VERSION
-read -rp "Enter PyTorch version (e.g. '2.1.0', default latest): " PYTORCH_VERSION
+read -rp "Enter PyTorch version (e.g. '2.2.2', default latest): " PYTORCH_VERSION
 if [ -n "$PYTORCH_VERSION" ]; then
   PYTORCH_VERSION="=$PYTORCH_VERSION"
 fi

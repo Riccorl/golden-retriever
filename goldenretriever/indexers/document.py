@@ -136,7 +136,9 @@ class DocumentStore:
             logger.warning(f"Document with text `{text}` does not exist, skipping")
         return self._documents_reverse_index.get(text, None)
 
-    def add_documents(self, documents: List[Document] | List[str] | List[Dict]) -> List[Document]:
+    def add_documents(
+        self, documents: List[Document] | List[str] | List[Dict]
+    ) -> List[Document]:
         """
         Add a list of documents to the document store.
 
@@ -148,9 +150,11 @@ class DocumentStore:
             List[Document]: The documents just added.
         """
         return [
-            self.add_document(Document.from_dict(doc))
-            if isinstance(doc, Dict)
-            else self.add_document(doc)
+            (
+                self.add_document(Document.from_dict(doc))
+                if isinstance(doc, Dict)
+                else self.add_document(doc)
+            )
             for doc in documents
         ]
 
@@ -322,9 +326,11 @@ class DocumentStore:
 
                 d.append(
                     Document(
-                        text=row[header.index(text)].strip().lower()
-                        if ingore_case
-                        else row[header.index(text)].strip(),
+                        text=(
+                            row[header.index(text)].strip().lower()
+                            if ingore_case
+                            else row[header.index(text)].strip()
+                        ),
                         id=s_id,  # row[header.index(id)],
                         metadata={
                             key: row[header.index(key)] for key in row_metadata_keys

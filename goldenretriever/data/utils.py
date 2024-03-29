@@ -174,3 +174,4 @@ def batch_generator(samples: Iterable[Any], batch_size: int) -> Iterable[Any]:
     # leftover batch
     if len(batch) > 0:
         yield batch
+
