@@ -685,7 +685,7 @@ class Trainer(FromConfig):
         if self.max_hard_negatives_to_mine > 0:
             self.callbacks_store.append(self.configure_hard_negatives_callback())
 
-        self.callbacks_store.append(FreeUpIndexerVRAMCallback())
+        # self.callbacks_store.append(FreeUpIndexerVRAMCallback())
 
         if self.trainer is None:
             logger.info("Instantiating the Trainer")

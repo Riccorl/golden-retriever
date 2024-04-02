@@ -63,19 +63,19 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
             self.train_dataset = StreamingGoldenRetrieverDataset(
                 name="aida_train",
                 tokenizer=self.tokenizer,
-                local="/leonardo_work/IscrC_MEL/golden-retriever/data/el/mosaic/train",
+                local="data/dpr-like/el/mosaic/train",
                 split="train",
-                question_batch_size=64,
-                passage_batch_size=400,
+                question_batch_size=4,
+                passage_batch_size=80,
                 predownload=64*64,
             )
             self.val_dataset = StreamingGoldenRetrieverDataset(
                 name="aida_val",
                 tokenizer=self.tokenizer,
-                local="/leonardo_work/IscrC_MEL/golden-retriever/data/el/mosaic/val",
+                local="data/dpr-like/el/mosaic/val",
                 split="train",
-                question_batch_size=64,
-                passage_batch_size=400,
+                question_batch_size=4,
+                passage_batch_size=80,
                 predownload=64*64,
             )
             self.val_datasets = [self.val_dataset]

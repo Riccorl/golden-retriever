@@ -202,7 +202,7 @@ class AvgRankingEvaluationCallback(NLPTemplateCallback):
             f"{prefix}_{k}": torch.as_tensor(v, dtype=torch.float32)
             for k, v in metrics.items()
         }
-        pl_module.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=False)
+        pl_module.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
 
         if self.verbose:
             if trainer.global_rank == 0:
@@ -266,7 +266,7 @@ class LRAPEvaluationCallback(NLPTemplateCallback):
             for k, v in metrics.items()
         }
         pl_module.log_dict(
-            metrics, on_step=False, on_epoch=True, prog_bar=self.prog_bar
+            metrics, on_step=False, on_epoch=True, prog_bar=self.prog_bar, sync_dist=True
         )
 
         if self.verbose:

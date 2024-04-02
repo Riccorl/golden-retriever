@@ -15,7 +15,7 @@ if __name__ == "__main__":
         question_encoder="intfloat/e5-small-v2",
         document_index=InMemoryDocumentIndex(
             documents=DocumentStore.from_file(
-                "/leonardo_work/IscrC_MEL/golden-retriever/data/el/documents_only_data.jsonl"
+                "/home/ric/Projects/golden-retriever/data/dpr-like/el/documents_only_data.jsonl"
             ),
             metadata_fields=["definition"],
             separator=" <def> ",
@@ -68,20 +68,18 @@ if __name__ == "__main__":
     # train_dataset = StreamingGoldenRetrieverDataset(
     #     name="aida_train",
     #     tokenizer=retriever.question_tokenizer,
-    #     local="/leonardo_work/IscrC_MEL/golden-retriever/data/el/mosaic/train",
+    #     local="data/dpr-like/el/mosaic/train",
     #     split="train",
-    #     question_batch_size=64,
+    #     question_batch_size=32,
     #     passage_batch_size=400,
-    #     predownload=64*64,
     # )
     # val_dataset = StreamingGoldenRetrieverDataset(
     #     name="aida_val",
     #     tokenizer=retriever.question_tokenizer,
-    #     local="/leonardo_work/IscrC_MEL/golden-retriever/data/el/mosaic/val",
+    #     local="data/dpr-like/el/mosaic/val",
     #     split="train",
-    #     question_batch_size=64,
+    #     question_batch_size=32,
     #     passage_batch_size=400,
-    #     predownload=64*64,
     # )
     
     trainer = Trainer(
@@ -89,15 +87,14 @@ if __name__ == "__main__":
         train_dataset=None,
         val_dataset=None,
         # test_dataset=test_dataset,
-        num_workers=8,
+        num_workers=4,
         max_steps=25_000,
         # log_to_wandb=False,
         wandb_online_mode=False,
-        wandb_save_dir="/leonardo_work/IscrC_MEL/golden-retriever/",
         wandb_project_name="golden-retriever-aida",
         wandb_experiment_name="aida-e5-base-topics-from-blink",
         max_hard_negatives_to_mine=15,
-        # strategy="ddp_find_unused_parameters_true",
+        strategy="ddp_find_unused_parameters_true",
         devices=2,
         # accelerator="cuda",
     )

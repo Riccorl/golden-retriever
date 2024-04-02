@@ -16,6 +16,7 @@ from goldenretriever.common.model_inputs import ModelInputs
 from goldenretriever.data.base.datasets import BaseDataset
 from goldenretriever.data.datasets import GoldenRetrieverDataset
 from goldenretriever.indexers.base import BaseDocumentIndex
+from goldenretriever.lightning_modules.pl_modules import GoldenRetrieverPLModule
 from goldenretriever.pytorch_modules.model import GoldenRetriever
 
 logger = get_logger(__name__, level=logging.INFO)
@@ -50,12 +51,10 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
     def __call__(
         self,
         trainer: pl.Trainer,
-        pl_module: pl.LightningModule,
-        datasets: DictConfig
-        | BaseDataset
-        | List[DictConfig]
-        | List[BaseDataset]
-        | None = None,
+        pl_module: pl.LightningModule | GoldenRetrieverPLModule,
+        datasets: (
+            DictConfig | BaseDataset | List[DictConfig] | List[BaseDataset] | None
+        ) = None,
         dataloaders: DataLoader | List[DataLoader] | None = None,
         *args,
         **kwargs,
@@ -82,6 +81,10 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
 
         # set the model to eval mode
         pl_module.eval()
+        # check if the model is distributed and move it to the correct device
+        # pl_module.all_gather()
+        # trainer.barrier()
+        # pl_module.model.
         # get the retriever
         retriever: GoldenRetriever = pl_module.model
 
@@ -89,7 +92,6 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         dataloader_predictions = {}
         # compute the passage embeddings index for each dataloader
         for dataloader_idx, dataloader in enumerate(self.dataloaders):
-            print(dataloader)
             current_dataset: GoldenRetrieverDataset = self.datasets[dataloader_idx]
             if trainer.global_rank == 0:
                 logger.info(
@@ -204,5 +206,4 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
             #     pl_module.to(pl_module_original_device)
 
         # return the predictions
-        print(dataloader_predictions)
         return dataloader_predictions

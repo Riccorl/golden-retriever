@@ -75,8 +75,8 @@ class PredictionCallback(pl.Callback):
     def on_validation_epoch_end(
         self, trainer: pl.Trainer, pl_module: pl.LightningModule
     ):
-        predictions = self(trainer, pl_module)
         if trainer.global_rank == 0:
+            predictions = self(trainer, pl_module)
             for callback in self.other_callbacks:
                 callback(
                     trainer=trainer,
@@ -86,8 +86,8 @@ class PredictionCallback(pl.Callback):
                 )
 
     def on_test_epoch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule):
-        predictions = self(trainer, pl_module)
         if trainer.global_rank == 0:
+            predictions = self(trainer, pl_module)
             for callback in self.other_callbacks:
                 callback(
                     trainer=trainer,
