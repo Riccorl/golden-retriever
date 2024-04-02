@@ -39,6 +39,7 @@ from transformers import PreTrainedTokenizerBase
 
 from goldenretriever.common.log import get_logger
 from goldenretriever.common.model_inputs import ModelInputs
+from goldenretriever.data.utils import HardNegativesManager
 
 logger = get_logger(__name__)
 
@@ -193,6 +194,8 @@ class StreamingGoldenRetrieverDataset(StreamingDataset):
         self.max_question_length = max_question_length
         self.max_passage_length = max_passage_length
 
+        self.hn_manager = HardNegativesManager(tokenizer, max_length=max_passage_length)
+
     # How to tokenize a text sample to a token sample
     def _tokenize(self, sample: Mapping) -> Dict[str, List[int]]:
         if self.tokenizer._pad_token is None:
@@ -330,6 +333,17 @@ class StreamingGoldenRetrieverDataset(StreamingDataset):
             passages_in_batch.update(
                 {tuple(passage["input_ids"]): passage for passage in sample["passage"]}
             )
+            # check for hard negatives and add with a probability of 0.1
+            if self.hn_manager is not None:
+                if sample["id"] in self.hn_manager:
+                    passages_in_batch.update(
+                        {
+                            tuple(passage["input_ids"]): passage
+                            for passage in self.hn_manager.get(sample["id"])
+                        }
+                    )
+                # else:
+                #     print(f"Sample {sample['id']} not in hn_manager")
         # yield from map(self.__getitem__, self._each_sample_id(it))
         wait([prepare_future, ready_future], return_when="FIRST_EXCEPTION")
         it.exit()

@@ -1,10 +1,17 @@
 import os
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Union
+from typing import Any, Callable, Dict, Iterable, List, Literal, Optional, Union
 
 import composer
 from goldenretriever.common.model_inputs import ModelInputs
+from goldenretriever.composer_modules.callbacks import (
+    HardNegativeMiningCallback,
+    PredictionCallback,
+)
+from goldenretriever.composer_modules.callbacks import (
+    RecallAtKEvaluationCallback as ComposerRecallAtKEvaluationCallback,
+)
 from goldenretriever.composer_modules.mosaic_module import GoldenRetrieverComposerModule
 from goldenretriever.data.mosaic_datasets import (
     GoldenRetrieverCollator,
@@ -57,7 +64,15 @@ from goldenretriever.pytorch_modules.model import GoldenRetriever
 from goldenretriever.pytorch_modules.optim import RAdamW
 from goldenretriever.pytorch_modules.scheduler import LinearScheduler
 
-from composer import DataSpec, Trainer as ComposerTrainer
+from composer import (
+    DataSpec,
+    Evaluator,
+    Event,
+    State,
+    Time,
+    TimeUnit,
+    Trainer as ComposerTrainer,
+)
 from composer.utils import reproducibility
 from composer.callbacks import SpeedMonitor
 
@@ -735,7 +750,9 @@ class Trainer(FromConfig):
             logger.info("Instantiating the Trainer")
             # we hack the ProgressBarLogger._build_pbar method
             # to replace it with a custom one
-            composer.loggers.progress_bar_logger.ProgressBarLogger._build_pbar = _golden_retriever_build_pbar
+            composer.loggers.progress_bar_logger.ProgressBarLogger._build_pbar = (
+                _golden_retriever_build_pbar
+            )
             self.trainer = ComposerTrainer(
                 model=self.composer_module,
                 device_train_microbatch_size=32,
@@ -746,17 +763,27 @@ class Trainer(FromConfig):
                 #         blur_first=True
                 #     ),
                 # ],
+                progress_bar=True,
+                # log_to_console=True,
                 device="gpu",
                 precision="amp_fp16",
                 optimizers=self.optimizer,
                 schedulers=self.lr_scheduler,
                 step_schedulers_every_batch=True,  # interval should be step
                 max_duration="1ep",
-                eval_interval="1ba",
+                # eval_interval="1ba",
                 seed=self.seed,
-                callbacks=[SpeedMonitor(window_size=100)],
+                callbacks=[
+                    SpeedMonitor(window_size=100),
+                    PredictionCallback(
+                        k=100,
+                        other_callbacks=[ComposerRecallAtKEvaluationCallback()],
+                        interval="1000sp",
+                    ),
+                    HardNegativeMiningCallback(k=100, interval="1000sp"),
+                ],
             )
-           
+
             # self.trainer = pl.Trainer(
             #     accelerator=self.accelerator,
             #     devices=self.devices,
@@ -788,12 +815,69 @@ class Trainer(FromConfig):
         #         self.experiment_path / "trainer_config.yaml",
         #     )
 
+        class GoldenRetrieverEvaluator(Evaluator):
+            def __init__(
+                self,
+                *,
+                label: str,
+                dataloader: Union[DataSpec, Iterable, Dict[str, Any]],
+                metric_names: Optional[List[str]] = None,
+                subset_num_batches: Optional[int] = None,
+                eval_interval: Optional[
+                    Union[int, str, Time, Callable[[State, Event], bool]]
+                ] = None,
+                device_eval_microbatch_size: Optional[Union[int, str]] = None,
+            ):
+                super().__init__(
+                    label=label,
+                    dataloader=dataloader,
+                    metric_names=metric_names,
+                    subset_num_batches=subset_num_batches,
+                    eval_interval=eval_interval,
+                    device_eval_microbatch_size=device_eval_microbatch_size,
+                )
+                self.actual_eval_interval = None
+
+            @property
+            def eval_interval(self):
+                return self._eval_interval
+
+            @eval_interval.setter
+            def eval_interval(
+                self,
+                eval_interval: Optional[
+                    Union[int, str, Time, Callable[[State, Event], bool]]
+                ],
+            ):
+                from composer.core import ensure_time
+                from composer.utils import create_interval_scheduler
+
+                if eval_interval is not None:
+                    self.actual_eval_interval = ensure_time(
+                        eval_interval, TimeUnit.EPOCH
+                    )
+
+                if eval_interval is None:
+                    self._eval_interval = None
+                elif not callable(eval_interval):
+                    self._eval_interval = create_interval_scheduler(
+                        eval_interval,
+                        checkpoint_events=False,
+                        final_events={Event.FIT_END},
+                    )
+                else:
+                    self._eval_interval = eval_interval
+
+        evaluators = [
+            GoldenRetrieverEvaluator(
+                label="val_dataset",
+                dataloader=self.val_dataloader,
+            )
+        ]
         self.trainer.fit(
             train_dataloader=self.train_dataloader,
-            eval_dataloader=self.val_dataloader,
-            # self.lightning_module,
-            # datamodule=self.lightning_datamodule,
-            # ckpt_path=self.resume_from_checkpoint_path,
+            eval_dataloader=evaluators,  # self.val_dataloader,
+            eval_interval="1000sp",
         )
 
     def test(

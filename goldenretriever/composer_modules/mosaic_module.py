@@ -25,7 +25,7 @@ class GoldenRetrieverComposerModule(ComposerModel):
         return outputs.loss
 
     # def get_metrics(self, is_train):
-    #     return {"MulticlassAccuracy": self.acc}
+    # return {"MulticlassAccuracy": self.acc}
 
     def forward(self, batch):
         return self.model(**batch, return_loss=True)

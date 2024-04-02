@@ -1,4 +1,5 @@
 import json
+from multiprocessing import synchronize
 import os
 from collections import defaultdict
 from typing import Any, Dict, Iterable, List, Optional, Union
@@ -7,8 +8,50 @@ import numpy as np
 import transformers as tr
 from tqdm import tqdm
 
+import threading
 
-class HardNegativesManager:
+lock = threading.Lock()
+
+class Singleton(type):
+    # _instances = {}
+    # def __call__(cls, *args, **kwargs):
+    #     if cls not in cls._instances:
+    #         cls._instances[cls] = super(Singleton, cls).__call__(*args, **kwargs)
+    #     return cls._instances[cls]
+    _instances = {}
+    def __call__(cls, *args, **kwargs):
+        if cls not in cls._instances:
+            with lock:
+                if cls not in cls._instances:
+                    cls._instances[cls] = super(Singleton, cls).__call__(*args, **kwargs)
+        return cls._instances[cls]
+
+
+class HardNegativesManager(metaclass=Singleton):
+
+    # instance = None
+
+    # # Singleton pattern
+    # def __new__(
+    #     cls,
+    #     tokenizer: tr.PreTrainedTokenizer,
+    #     # data: Union[List[Dict], os.PathLike, Dict[int, List]] = None,
+    #     max_length: int = 64,
+    #     batch_size: int = 1000,
+    #     # lazy: bool = False,
+    # ):
+    #     if cls.instance is None:
+    #         cls.instance = cls.__new__(
+    #             cls, tokenizer, max_length, batch_size
+    #         )
+    #     return cls.instance
+        # if cls.instance is None:
+        #     cls.instance = super(HardNegativesManager, cls).__new__(
+        #         cls, tokenizer, data, max_length, batch_size, lazy
+        #     )
+        #     cls.instance.__initialized = False
+        # return cls.instance
+
     def __init__(
         self,
         tokenizer: tr.PreTrainedTokenizer,
@@ -19,6 +62,8 @@ class HardNegativesManager:
     ) -> None:
         self._db: dict = None
         self.tokenizer = tokenizer
+        self.max_length = max_length
+        self.batch_size = batch_size
 
         if data is None:
             self._db = {}
@@ -42,24 +87,24 @@ class HardNegativesManager:
                 self._passage_db[passage].add(sample_idx)
 
         self._passage_hard_negatives = {}
-        if not lazy:
-            # create a dictionary of passage -> hard_negative mapping
-            batch_size = min(batch_size, len(self._passage_db))
-            unique_passages = list(self._passage_db.keys())
-            for i in tqdm(
-                range(0, len(unique_passages), batch_size),
-                desc="Tokenizing Hard Negatives",
-            ):
-                batch = unique_passages[i : i + batch_size]
-                tokenized_passages = self.tokenizer(
-                    batch,
-                    max_length=max_length,
-                    truncation=True,
-                )
-                for i, passage in enumerate(batch):
-                    self._passage_hard_negatives[passage] = {
-                        k: tokenized_passages[k][i] for k in tokenized_passages.keys()
-                    }
+        # if not lazy and len(self._db) > 0:
+        #     # create a dictionary of passage -> hard_negative mapping
+        #     batch_size = min(batch_size, len(self._passage_db))
+        #     unique_passages = list(self._passage_db.keys())
+        #     for i in tqdm(
+        #         range(0, len(unique_passages), batch_size),
+        #         desc="Tokenizing Hard Negatives",
+        #     ):
+        #         batch = unique_passages[i : i + batch_size]
+        #         tokenized_passages = self.tokenizer(
+        #             batch,
+        #             max_length=max_length,
+        #             truncation=True,
+        #         )
+        #         for i, passage in enumerate(batch):
+        #             self._passage_hard_negatives[passage] = {
+        #                 k: tokenized_passages[k][i] for k in tokenized_passages.keys()
+        #             }
 
     def __len__(self) -> int:
         return len(self._db)
@@ -73,6 +118,56 @@ class HardNegativesManager:
 
     def __contains__(self, idx: int) -> bool:
         return idx in self._db
+    
+    def tokenize(self):
+        # create a dictionary of passage -> hard_negative mapping
+        batch_size = min(self.batch_size, len(self._passage_db))
+        unique_passages = list(self._passage_db.keys())
+        for i in tqdm(
+            range(0, len(unique_passages), batch_size),
+            desc="Tokenizing Hard Negatives",
+        ):
+            batch = unique_passages[i : i + batch_size]
+            tokenized_passages = self.tokenizer(
+                batch,
+                max_length=self.max_length,
+                truncation=True,
+            )
+            for i, passage in enumerate(batch):
+                self._passage_hard_negatives[passage] = {
+                    k: tokenized_passages[k][i] for k in tokenized_passages.keys()
+                }
+    
+    def _add(self, idx: int, passages: List[str]) -> int:
+        """
+        Add a sample to the database.
+        
+        Args:
+            idx (`int`): sample index
+            passages (`List[str]`): list of passages
+        """
+        if idx in self._db:
+            return idx
+        self._db[idx] = passages
+        for passage in passages:
+            self._passage_db[passage].add(idx)
+        return idx
+    
+    def add(self, idx: int | List[int], passages: List[List[str]]) -> List[int]:
+        """
+        Add multiple samples to the database.
+        
+        Args:
+            idx (`int` | `List[int]`): sample index
+            passages (`List[List[str]]`): list of passages
+        """
+        if isinstance(idx, int):
+            idx = [idx]
+            passages = [passages]
+        if len(idx) != len(passages):
+            raise ValueError("Length of idx and passages should be the same.")
+        return [self._add(i, p) for i, p in zip(idx, passages)]
+    
 
     def get(self, idx: int) -> List[str]:
         """Get the hard negatives for a given sample index."""
@@ -88,6 +183,11 @@ class HardNegativesManager:
             output.append(self._passage_hard_negatives[passage])
 
         return output
+    
+    def reset(self):
+        self._db = {}
+        self._passage_db = defaultdict(set)
+        self._passage_hard_negatives = {}
 
     def _tokenize(self, passage: str) -> Dict:
         return self.tokenizer(passage, max_length=self.max_length, truncation=True)
@@ -174,4 +274,3 @@ def batch_generator(samples: Iterable[Any], batch_size: int) -> Iterable[Any]:
     # leftover batch
     if len(batch) > 0:
         yield batch
-
