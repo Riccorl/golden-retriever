@@ -2,7 +2,8 @@ import os
 from copy import deepcopy
 from pathlib import Path
 from typing import List, Literal
-from goldenretriever.trainer import PRECISION_INPUT_STR_ALIAS_CONVERSION
+from goldenretriever.data.streaming_dataset import StreamingGoldenRetrieverDataset
+from goldenretriever.trainer.utils import PRECISION_INPUT_STR_ALIAS_CONVERSION
 
 import hydra
 import lightning as pl
@@ -308,11 +309,11 @@ class Trainer(FromConfig):
     def configure_lightning_datamodule(self, *args, **kwargs):
         # lightning data module declaration
         if self.val_dataset is not None and isinstance(
-            self.val_dataset, GoldenRetrieverDataset
+            self.val_dataset, (GoldenRetrieverDataset, StreamingGoldenRetrieverDataset)
         ):
             self.val_dataset = [self.val_dataset]
         if self.test_dataset is not None and isinstance(
-            self.test_dataset, GoldenRetrieverDataset
+            self.test_dataset, (GoldenRetrieverDataset, StreamingGoldenRetrieverDataset)
         ):
             self.test_dataset = [self.test_dataset]
 
@@ -664,7 +665,11 @@ class Trainer(FromConfig):
             # log the args to wandb
             # logger.info(pformat(self.wandb_kwargs))
             self.wandb_logger = self.configure_logger(**self.wandb_kwargs)
-            self.experiment_path = Path(self.wandb_logger.experiment.dir)
+            self.experiment_path = None
+            try:
+                self.experiment_path = Path(self.wandb_logger.experiment.dir)
+            except Exception as e:
+                logger.info(f"Failed to get the experiment path: {e}")
 
         # set-up training specific callbacks
         self.callbacks_store = self.training_callbacks()
@@ -702,6 +707,7 @@ class Trainer(FromConfig):
                 reload_dataloaders_every_n_epochs=self.reload_dataloaders_every_n_epochs,
                 callbacks=self.callbacks_store,
                 logger=self.wandb_logger,
+                # use_distributed_sampler=False,
                 **self.trainer_kwargs,
             )
 
@@ -717,6 +723,7 @@ class Trainer(FromConfig):
             self.lightning_module,
             datamodule=self.lightning_datamodule,
             ckpt_path=self.resume_from_checkpoint_path,
+
         )
 
     def test(

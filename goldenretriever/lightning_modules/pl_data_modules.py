@@ -9,6 +9,8 @@ from torch.utils.data import DataLoader
 
 from goldenretriever.common.log import get_logger
 from goldenretriever.data.datasets import GoldenRetrieverDataset
+from goldenretriever.data.streaming_dataset import GoldenRetrieverCollator
+from goldenretriever.data.utils import GoldenDistributedSampler
 
 logger = get_logger()
 
@@ -64,15 +66,19 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
                 ]
 
     def train_dataloader(self, *args, **kwargs) -> DataLoader:
-        torch_dataset = self.train_dataset.to_torch_dataset()
+        # torch_dataset = self.train_dataset.to_torch_dataset()
         return DataLoader(
-            # self.train_dataset.to_torch_dataset(),
-            torch_dataset,
+            self.train_dataset.to_torch_dataset(),
+            # torch_dataset,
+            # self.train_dataset,
             shuffle=False,
             batch_size=None,
             num_workers=self.num_workers.train,
             pin_memory=False,
             collate_fn=lambda x: x,
+            # collate_fn=GoldenRetrieverCollator(tokenizer=self.train_dataset.tokenizer),
+            # user a custom distributed sampler
+            # sampler=GoldenDistributedSampler
         )
 
     def val_dataloader(self, *args, **kwargs) -> Union[DataLoader, List[DataLoader]]:
@@ -82,11 +88,14 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
             dataloaders.append(
                 DataLoader(
                     torch_dataset,
+                    # dataset,
                     shuffle=False,
                     batch_size=None,
                     num_workers=self.num_workers.val,
                     pin_memory=False,
                     collate_fn=lambda x: x,
+                    # collate_fn=GoldenRetrieverCollator(tokenizer=dataset.tokenizer),
+                    # sampler=GoldenDistributedSampler
                 )
             )
         return dataloaders

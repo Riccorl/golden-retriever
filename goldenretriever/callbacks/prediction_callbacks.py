@@ -61,7 +61,8 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         **kwargs,
     ) -> dict:
         stage = trainer.state.stage
-        logger.info(f"Computing predictions for stage {stage.value}")
+        if trainer.global_rank == 0:
+            logger.info(f"Computing predictions for stage {stage.value}")
         if stage not in self.stages:
             raise ValueError(
                 f"Stage `{stage}` not supported, only {self.stages} are supported"
@@ -89,9 +90,10 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         # compute the passage embeddings index for each dataloader
         for dataloader_idx, dataloader in enumerate(self.dataloaders):
             current_dataset: GoldenRetrieverDataset = self.datasets[dataloader_idx]
-            logger.info(
-                f"Computing passage embeddings for dataset {current_dataset.name}"
-            )
+            if trainer.global_rank == 0:
+                logger.info(
+                    f"Computing passage embeddings for dataset {current_dataset.name}"
+                )
 
             tokenizer = current_dataset.tokenizer
 
@@ -159,11 +161,12 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                                 retriever.get_index_from_passage(passage)
                             )
                         except ValueError:
-                            logger.warning(
-                                f"Passage `{passage}` not found in the index. "
-                                "We will skip it, but the results might not reflect the "
-                                "actual performance."
-                            )
+                            if trainer.global_rank == 0:
+                                logger.warning(
+                                    f"Passage `{passage}` not found in the index. "
+                                    "We will skip it, but the results might not reflect the "
+                                    "actual performance."
+                                )
                             pass
                     retrieved_indices = [r.document.id for r in retrieved_samples if r]
                     retrieved_passages = [
@@ -189,7 +192,8 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                     )
                     predictions.append(prediction_output)
             end = time.time()
-            logger.info(f"Time to retrieve: {str(end - start)}")
+            if trainer.global_rank == 0:
+                logger.info(f"Time to retrieve: {str(end - start)}")
 
             dataloader_predictions[dataloader_idx] = predictions
 

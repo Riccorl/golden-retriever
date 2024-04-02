@@ -39,10 +39,11 @@ class SavePredictionsCallback(NLPTemplateCallback):
     ) -> dict:
         # write the predictions to a file inside the experiment folder
         if self.saving_dir is None and trainer.logger is None:
-            logger.info(
-                "You need to specify an output directory (`saving_dir`) or a logger to save the predictions.\n"
-                "Skipping saving predictions."
-            )
+            if trainer.global_rank == 0:
+                logger.info(
+                    "You need to specify an output directory (`saving_dir`) or a logger to save the predictions.\n"
+                    "Skipping saving predictions."
+                )
             return {}
         datasets = callback.datasets
         for dataloader_idx, dataloader_predictions in predictions.items():
@@ -55,10 +56,11 @@ class SavePredictionsCallback(NLPTemplateCallback):
                         Path(trainer.logger.experiment.dir) / "predictions"
                     )
                 except Exception:
-                    logger.info(
-                        "You need to specify an output directory (`saving_dir`) or a logger to save the predictions.\n"
-                        "Skipping saving predictions."
-                    )
+                    if trainer.global_rank == 0:
+                        logger.info(
+                            "You need to specify an output directory (`saving_dir`) or a logger to save the predictions.\n"
+                            "Skipping saving predictions."
+                        )
                     return {}
                 prediction_folder.mkdir(exist_ok=True)
             predictions_path = (
@@ -66,7 +68,8 @@ class SavePredictionsCallback(NLPTemplateCallback):
                 / f"{datasets[dataloader_idx].name}_{dataloader_idx}.json"
             )
             if self.verbose:
-                logger.info(f"Saving predictions to {predictions_path}")
+                if trainer.global_rank == 0:
+                    logger.info(f"Saving predictions to {predictions_path}")
             with open(predictions_path, "w") as f:
                 for prediction in dataloader_predictions:
                     for k, v in prediction.items():
@@ -92,11 +95,13 @@ class ResetModelCallback(pl.Callback):
     ) -> None:
         if trainer.current_epoch == 0:
             if self.verbose:
-                logger.info("Current epoch is 0, skipping resetting model")
+                if trainer.global_rank == 0:
+                    logger.info("Current epoch is 0, skipping resetting model")
             return
 
         if self.verbose:
-            logger.info("Resetting model, optimizer and lr scheduler")
+            if trainer.global_rank == 0:
+                logger.info("Resetting model, optimizer and lr scheduler")
         # reload model from scratch
         previous_device = pl_module.device
         trainer.model.model.question_encoder = GoldenRetrieverModel.from_pretrained(
@@ -119,6 +124,8 @@ class FreeUpIndexerVRAMCallback(pl.Callback):
         *args,
         **kwargs,
     ) -> Any:
+        # if trainer.global_rank == 0:
+            # pl_module.trainer.global_rank == 
         logger.info("Freeing up GPU memory")
 
         # remove the index from the GPU memory
@@ -160,7 +167,8 @@ class ShuffleTrainDatasetCallback(pl.Callback):
     def on_validation_epoch_end(self, trainer: pl.Trainer, *args, **kwargs):
         if self.verbose:
             if trainer.current_epoch != self.previous_epoch:
-                logger.info(f"Shuffling train dataset at epoch {trainer.current_epoch}")
+                if trainer.global_rank == 0:
+                    logger.info(f"Shuffling train dataset at epoch {trainer.current_epoch}")
 
             # logger.info(f"Shuffling train dataset at epoch {trainer.current_epoch}")
         if trainer.current_epoch != self.previous_epoch:
@@ -180,9 +188,10 @@ class PrefetchTrainDatasetCallback(pl.Callback):
         if trainer.datamodule.train_dataset.prefetch_batches:
             if self.verbose:
                 # if trainer.current_epoch != self.previous_epoch:
-                logger.info(
-                    f"Prefetching train dataset at epoch {trainer.current_epoch}"
-                )
+                if trainer.global_rank == 0:
+                    logger.info(
+                        f"Prefetching train dataset at epoch {trainer.current_epoch}"
+                    )
             # if trainer.current_epoch != self.previous_epoch:
             trainer.datamodule.train_dataset.prefetch()
             self.previous_epoch = trainer.current_epoch
@@ -196,10 +205,11 @@ class SubsampleTrainDatasetCallback(pl.Callback):
 
     def on_validation_epoch_end(self, trainer: pl.Trainer, *args, **kwargs):
         if self.verbose:
-            logger.info(f"Subsampling train dataset at epoch {trainer.current_epoch}")
-            trainer.datamodule.train_dataset.random_subsample(
-                seed=self.seed + trainer.current_epoch + 1
-            )
+            if trainer.global_rank == 0:
+                logger.info(f"Subsampling train dataset at epoch {trainer.current_epoch}")
+                trainer.datamodule.train_dataset.random_subsample(
+                    seed=self.seed + trainer.current_epoch + 1
+                )
 
 
 class SaveRetrieverCallback(pl.Callback):
@@ -224,10 +234,11 @@ class SaveRetrieverCallback(pl.Callback):
         **kwargs,
     ):
         if self.saving_dir is None and trainer.logger is None:
-            logger.info(
-                "You need to specify an output directory (`saving_dir`) or a logger to save the retriever.\n"
-                "Skipping saving retriever."
-            )
+            if trainer.global_rank == 0:
+                logger.info(
+                    "You need to specify an output directory (`saving_dir`) or a logger to save the retriever.\n"
+                    "Skipping saving retriever."
+                )
             return
         if self.saving_dir is not None:
             retriever_folder = Path(self.saving_dir)
@@ -235,10 +246,11 @@ class SaveRetrieverCallback(pl.Callback):
             try:
                 retriever_folder = Path(trainer.logger.experiment.dir) / "retriever"
             except Exception:
-                logger.info(
-                    "You need to specify an output directory (`saving_dir`) or a logger to save the "
-                    "retriever.\nSkipping saving retriever."
-                )
+                if trainer.global_rank == 0:
+                    logger.info(
+                        "You need to specify an output directory (`saving_dir`) or a logger to save the "
+                        "retriever.\nSkipping saving retriever."
+                    )
                 return
         retriever_folder.mkdir(exist_ok=True, parents=True)
         if self.verbose:

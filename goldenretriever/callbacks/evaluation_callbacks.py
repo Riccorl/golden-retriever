@@ -95,13 +95,14 @@ class RecallAtKEvaluationCallback(NLPTemplateCallback):
         else:
             metrics = {f"{stage.value}_{k}": v for k, v in metrics.items()}
         pl_module.log_dict(
-            metrics, on_step=False, on_epoch=True, prog_bar=self.prog_bar
+            metrics, on_step=False, on_epoch=True, prog_bar=self.prog_bar, sync_dist=True
         )
 
         if self.verbose:
-            logger.info(
-                f"Recall@{self.k} on {stage.value}: {metrics[f'{stage.value}_recall@{self.k}']}"
-            )
+            if trainer.global_rank == 0:
+                logger.info(
+                    f"Recall@{self.k} on {stage.value}: {metrics[f'{stage.value}_recall@{self.k}']}"
+                )
 
         return metrics
 
@@ -163,11 +164,13 @@ class AvgRankingEvaluationCallback(NLPTemplateCallback):
             :obj:`Dict`: The computed metrics.
         """
         if not predictions:
-            logger.warning("No predictions to compute the AVG Ranking metrics.")
+            if trainer.global_rank == 0:
+                logger.warning("No predictions to compute the AVG Ranking metrics.")
             return {}
 
         if self.verbose:
-            logger.info(f"Computing AVG Ranking@{self.k}")
+            if trainer.global_rank == 0:
+                logger.info(f"Computing AVG Ranking@{self.k}")
 
         # metrics to return
         metrics = {}
@@ -202,9 +205,10 @@ class AvgRankingEvaluationCallback(NLPTemplateCallback):
         pl_module.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=False)
 
         if self.verbose:
-            logger.info(
-                f"AVG Ranking@{self.k} on {prefix}: {metrics[f'{prefix}_avg_ranking@{self.k}']}"
-            )
+            if trainer.global_rank == 0:
+                logger.info(
+                    f"AVG Ranking@{self.k} on {prefix}: {metrics[f'{prefix}_avg_ranking@{self.k}']}"
+                )
 
         return metrics
 
@@ -235,7 +239,8 @@ class LRAPEvaluationCallback(NLPTemplateCallback):
         **kwargs,
     ) -> dict:
         if self.verbose:
-            logger.info(f"Computing recall@{self.k}")
+            if trainer.global_rank == 0:
+                logger.info(f"Computing recall@{self.k}")
 
         # metrics to return
         metrics = {}
@@ -265,8 +270,9 @@ class LRAPEvaluationCallback(NLPTemplateCallback):
         )
 
         if self.verbose:
-            logger.info(
-                f"Recall@{self.k} on {stage.value}: {metrics[f'{stage.value}_recall@{self.k}']}"
-            )
+            if trainer.global_rank == 0:
+                logger.info(
+                    f"Recall@{self.k} on {stage.value}: {metrics[f'{stage.value}_recall@{self.k}']}"
+                )
 
         return metrics

@@ -17,6 +17,7 @@ from goldenretriever.callbacks.prediction_callbacks import (
 )
 from goldenretriever.common.log import get_logger
 from goldenretriever.data.base.datasets import BaseDataset
+from goldenretriever.data.streaming_dataset import GoldenRetrieverCollator
 from goldenretriever.data.utils import HardNegativesManager
 
 logger = get_logger(__name__, level=logging.INFO)
@@ -125,10 +126,11 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
             return {}
 
         if self.metrics_to_monitor not in trainer.logged_metrics:
-            logger.warning(
-                f"Metric `{self.metrics_to_monitor}` not found in trainer.logged_metrics. "
-                f"Available metrics: {trainer.logged_metrics.keys()}"
-            )
+            if trainer.global_rank == 0:
+                logger.warning(
+                    f"Metric `{self.metrics_to_monitor}` not found in trainer.logged_metrics. "
+                    f"Available metrics: {trainer.logged_metrics.keys()}"
+                )
             return {}
 
         if trainer.logged_metrics[self.metrics_to_monitor] < self.threshold:
@@ -160,10 +162,11 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
         if trainer.current_epoch % self.refresh_every_n_epochs != 0:
             return {}
 
-        logger.info(
-            f"At least one metric from {self.metrics_to_monitor} is above threshold "
-            f"{self.threshold}. Computing hard negatives."
-        )
+        if trainer.global_rank == 0:
+            logger.info(
+                f"At least one metric from {self.metrics_to_monitor} is above threshold "
+                f"{self.threshold}. Computing hard negatives."
+            )
 
         # make a copy of the dataset to avoid modifying the original one
         trainer.datamodule.train_dataset.hn_manager = None
@@ -173,17 +176,19 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
             pl_module,
             datasets=dataset_copy,
             dataloaders=DataLoader(
-                dataset_copy.to_torch_dataset(),
+                dataset_copy, #.to_torch_dataset(),
                 shuffle=False,
                 batch_size=None,
                 num_workers=self.num_workers,
                 pin_memory=True,
-                collate_fn=lambda x: x,
+                # collate_fn=lambda x: x,
+                collate_fn=GoldenRetrieverCollator(tokenizer=dataset_copy.tokenizer),
             ),
             *args,
             **kwargs,
         )
-        logger.info(f"Computing hard negatives for epoch {trainer.current_epoch}")
+        if trainer.global_rank == 0:
+            logger.info(f"Computing hard negatives for epoch {trainer.current_epoch}")
         # predictions is a dict with the dataloader index as key and the predictions as value
         # since we only have one dataloader, we can get the predictions directly
         predictions = list(predictions.values())[0]

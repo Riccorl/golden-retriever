@@ -1,5 +1,6 @@
 from tqdm import tqdm
 from goldenretriever.common.log import get_logger
+from goldenretriever.data.streaming_dataset import StreamingGoldenRetrieverDataset
 from goldenretriever.indexers.document import DocumentStore
 from goldenretriever.trainer import Trainer
 from goldenretriever import GoldenRetriever
@@ -11,10 +12,10 @@ logger = get_logger(__name__)
 if __name__ == "__main__":
     # instantiate retriever
     retriever = GoldenRetriever(
-        question_encoder="/root/golden-retriever/wandb/blink-first1M-e5-base-topics/files/retriever/question_encoder",
+        question_encoder="intfloat/e5-small-v2",
         document_index=InMemoryDocumentIndex(
             documents=DocumentStore.from_file(
-                "/root/golden-retriever/data/entitylinking/documents.jsonl"
+                "/home/ric/Projects/golden-retriever/data/dpr-like/el/documents_only_data.jsonl"
             ),
             metadata_fields=["definition"],
             separator=" <def> ",
@@ -25,32 +26,34 @@ if __name__ == "__main__":
 
     train_dataset = AidaInBatchNegativesDataset(
         name="aida_train",
-        path="/root/golden-retriever/data/entitylinking/aida_32_tokens_topic/train.jsonl",
+        path="/home/ric/Projects/golden-retriever/data/dpr-like/el/aida_32_tokens_topic/train.jsonl",
         tokenizer=retriever.question_tokenizer,
         question_batch_size=64,
         passage_batch_size=400,
         max_passage_length=64,
         shuffle=True,
         use_topics=True,
+        prefetch=False,
     )
     val_dataset = AidaInBatchNegativesDataset(
         name="aida_val",
-        path="/root/golden-retriever/data/entitylinking/aida_32_tokens_topic/val.jsonl",
+        path="/home/ric/Projects/golden-retriever/data/dpr-like/el/aida_32_tokens_topic/val.jsonl",
         tokenizer=retriever.question_tokenizer,
         question_batch_size=64,
         passage_batch_size=400,
         max_passage_length=64,
         use_topics=True,
+        # prefetch=False,
     )
-    test_dataset = AidaInBatchNegativesDataset(
-        name="aida_test",
-        path="/root/golden-retriever/data/entitylinking/aida_32_tokens_topic/test.jsonl",
-        tokenizer=retriever.question_tokenizer,
-        question_batch_size=64,
-        passage_batch_size=400,
-        max_passage_length=64,
-        use_topics=True,
-    )
+    # test_dataset = AidaInBatchNegativesDataset(
+    #     name="aida_test",
+    #     path="/root/golden-retriever/data/entitylinking/aida_32_tokens_topic/test.jsonl",
+    #     tokenizer=retriever.question_tokenizer,
+    #     question_batch_size=64,
+    #     passage_batch_size=400,
+    #     max_passage_length=64,
+    #     use_topics=True,
+    # )
 
     # logger.info("Loading document index")
     # document_index = InMemoryDocumentIndex(
@@ -62,18 +65,39 @@ if __name__ == "__main__":
     # )
     # retriever.document_index = document_index
 
+    # train_dataset = StreamingGoldenRetrieverDataset(
+    #     name="aida_train",
+    #     tokenizer=retriever.question_tokenizer,
+    #     local="data/dpr-like/el/mosaic/train",
+    #     split="train",
+    #     question_batch_size=32,
+    #     passage_batch_size=400,
+    # )
+    # val_dataset = StreamingGoldenRetrieverDataset(
+    #     name="aida_val",
+    #     tokenizer=retriever.question_tokenizer,
+    #     local="data/dpr-like/el/mosaic/val",
+    #     split="train",
+    #     question_batch_size=32,
+    #     passage_batch_size=400,
+    # )
+    
     trainer = Trainer(
         retriever=retriever,
         train_dataset=train_dataset,
         val_dataset=val_dataset,
-        test_dataset=test_dataset,
+        # test_dataset=test_dataset,
         num_workers=4,
         max_steps=25_000,
-        wandb_online_mode=True,
+        # log_to_wandb=False,
+        wandb_online_mode=False,
         wandb_project_name="golden-retriever-aida",
         wandb_experiment_name="aida-e5-base-topics-from-blink",
         max_hard_negatives_to_mine=15,
+        strategy="ddp_find_unused_parameters_true",
+        devices=2,
+        accelerator="cuda",
     )
 
     trainer.train()
-    trainer.test()
+    # trainer.test()

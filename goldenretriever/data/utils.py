@@ -7,6 +7,8 @@ import numpy as np
 import transformers as tr
 from tqdm import tqdm
 
+from goldenretriever.common.model_inputs import ModelInputs
+
 
 class HardNegativesManager:
     def __init__(
@@ -174,3 +176,223 @@ def batch_generator(samples: Iterable[Any], batch_size: int) -> Iterable[Any]:
     # leftover batch
     if len(batch) > 0:
         yield batch
+
+
+import math
+from typing import TypeVar, Optional, Iterator
+
+import torch
+# from . import Sampler, Dataset
+import torch.distributed as dist
+from torch.utils.data.distributed import DistributedSampler
+from torch.utils.data import Dataset
+from torch.utils.data.sampler import BatchSampler, Sampler, SubsetRandomSampler
+
+
+T_co = TypeVar("T_co", covariant=True)
+
+class BatchNegatives(Sampler):
+    pass
+    # def __init__(self, dataset) #, batch_size, indices=None, shuffle=True):
+        # self.batch_size = batch_size
+        # self.shuffle = shuffle
+        # # get the indicies and length
+        # self.indices = [(i, src_len) for i, (src, src_len, trg, trg_len) in enumerate(dataset)]
+        # # if indices are passed, then use only the ones passed (for ddp)
+        # if indices is not None:
+        #     self.indices = torch.tensor(self.indices)[indices].tolist()
+
+    # def __iter__(self):
+        # if self.shuffle:
+        #     random.shuffle(self.indices)
+
+        # pooled_indices = []
+        # # create pool of indices with similar lengths
+        # for i in range(0, len(self.indices), self.batch_size * 100):
+        #     pooled_indices.extend(sorted(self.indices[i:i + self.batch_size * 100], key=lambda x: x[1]))
+        # self.pooled_indices = [x[0] for x in pooled_indices]
+
+        # # yield indices for current batch
+        # batches = [self.pooled_indices[i:i + self.batch_size] for i in
+        #            range(0, len(self.pooled_indices), self.batch_size)]
+
+        # if self.shuffle:
+        #     random.shuffle(batches)
+        # for batch in batches:
+        #     yield batch
+
+
+class GoldenDistributedSampler(DistributedSampler):
+    def __init__(
+        self,
+        dataset: Dataset,
+        num_replicas: Optional[int] = None,
+        rank: Optional[int] = None,
+        shuffle: bool = True,
+        seed: int = 0,
+        drop_last: bool = False,
+        question_batch_size: int = 32,
+        passage_batch_size: int = 400,
+    ) -> None:
+        super().__init__(self, dataset, num_replicas, rank, shuffle, seed, drop_last)
+        self.question_batch_size = question_batch_size
+        self.passage_batch_size = passage_batch_size
+
+    def __iter__(self) -> Iterator[T_co]:
+        if self.shuffle:
+            # deterministically shuffle based on epoch and seed
+            g = torch.Generator()
+            g.manual_seed(self.seed + self.epoch)
+            indices = torch.randperm(len(self.dataset), generator=g).tolist()  # type: ignore[arg-type]
+        else:
+            indices = list(range(len(self.dataset)))  # type: ignore[arg-type]
+
+        if not self.drop_last:
+            # add extra samples to make it evenly divisible
+            padding_size = self.total_size - len(indices)
+            if padding_size <= len(indices):
+                indices += indices[:padding_size]
+            else:
+                indices += (indices * math.ceil(padding_size / len(indices)))[
+                    :padding_size
+                ]
+        else:
+            # remove tail of data to make it evenly divisible.
+            indices = indices[: self.total_size]
+        assert len(indices) == self.total_size
+
+        # subsample
+        indices = indices[self.rank : self.total_size : self.num_replicas]
+        assert len(indices) == self.num_samples
+
+        # return iter(self._create_batches(indices))
+
+        return iter(indices)
+
+    def __len__(self) -> int:
+        return self.num_samples
+
+    def _create_batches(self, indices):
+        batch = []
+        batches = []
+        passages_in_batch = {}
+        for index in indices:
+            sample = self.dataset[index]
+            if len(passages_in_batch) >= self.passage_batch_size:
+                # create the batch dict
+                batch_dict = ModelInputs(
+                    dict(
+                        sample_idx=[s["id"] for s in batch],
+                        questions=[s["question"] for s in batch],
+                        passages=list(passages_in_batch.values()),
+                        positives_pssgs=[s["positive_pssgs"] for s in batch],
+                        positives=[s["positives"] for s in batch],
+                    )
+                )
+                # split the batch if needed
+                if len(batch) > self.question_batch_size:
+                    for splited_batch in self.split_batch(
+                        batch_dict, self.question_batch_size
+                    ):
+                        batches.append(splited_batch)
+                else:
+                    batches.append(batch_dict)
+
+                # reset batch
+                batch = []
+                passages_in_batch = {}
+
+            batch.append(sample)
+            # yes it's a bit ugly but it works :)
+            # count the number of passages in the batch and stop if we reach the limit
+            # we use a set to avoid counting the same passage twice
+            # we use a tuple because set doesn't support lists
+            # we use input_ids as discriminator
+            passages_in_batch.update(
+                {tuple(passage["input_ids"]): passage for passage in sample["passage"]}
+            )
+            # check for hard negatives and add with a probability of 0.1
+            # if self.hn_manager is not None:
+            #     if sample["id"] in self.hn_manager:
+            #         passages_in_batch.update(
+            #             {
+            #                 tuple(passage["input_ids"]): passage
+            #                 for passage in self.hn_manager.get(sample["id"])
+            #             }
+            #         )
+            #     else:
+            #         print(f"Sample {sample['id']} not in hn_manager")
+
+        if len(batch) > 0:
+            # create the batch dict
+            batch_dict = ModelInputs(
+                dict(
+                    sample_idx=[s["id"] for s in batch],
+                    questions=[s["question"] for s in batch],
+                    passages=list(passages_in_batch.values()),
+                    positives_pssgs=[s["positive_pssgs"] for s in batch],
+                    positives=[s["positives"] for s in batch],
+                )
+            )
+            # split the batch if needed
+            if len(batch) > self.question_batch_size:
+                for splited_batch in self.split_batch(
+                    batch_dict, self.question_batch_size
+                ):
+                    batches.append(splited_batch)
+            else:
+                batches.append(batch_dict)
+
+        return batches
+
+    @staticmethod
+    def split_batch(
+        batch: Union[Dict[str, Any], ModelInputs], microbatch_size: int
+    ) -> List[ModelInputs]:
+        """
+        Split a batch into multiple batches of size `question_batch_size` while keeping
+        the same number of passages.
+        """
+
+        def split_fn(x):
+            return [
+                x[i : i + microbatch_size] for i in range(0, len(x), microbatch_size)
+            ]
+
+        # split the sample_idx
+        sample_idx = split_fn(batch["sample_idx"])
+        # split the questions
+        questions = split_fn(batch["questions"])
+        # split the positives
+        positives = split_fn(batch["positives"])
+        # split the positives_pssgs
+        positives_pssgs = split_fn(batch["positives_pssgs"])
+
+        # collect the new batches
+        batches = []
+        for i in range(len(questions)):
+            batches.append(
+                ModelInputs(
+                    dict(
+                        sample_idx=sample_idx[i],
+                        questions=questions[i],
+                        passages=batch["passages"],
+                        positives=positives[i],
+                        positives_pssgs=positives_pssgs[i],
+                    )
+                )
+            )
+        return batches
+
+    def set_epoch(self, epoch: int) -> None:
+        r"""
+        Set the epoch for this sampler.
+
+        When :attr:`shuffle=True`, this ensures all replicas
+        use a different random ordering for each epoch. Otherwise, the next iteration of this
+        sampler will yield the same ordering.
+
+        Args:
+            epoch (int): Epoch number.
+        """
+        self.epoch = epoch
