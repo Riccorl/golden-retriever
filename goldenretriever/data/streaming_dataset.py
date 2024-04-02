@@ -309,54 +309,54 @@ class StreamingGoldenRetrieverDataset(StreamingDataset):
         ready_future = self._executor.submit(self._ready_thread, it)
         ready_future.add_done_callback(self.on_exception)
         # Iterate over the samples and accumulate passage_batch_size samples at a time
-        batch = []
-        passages_in_batch = {}
-        for sample in map(self.__getitem__, self._each_sample_id(it)):
-            if len(passages_in_batch) >= self.passage_batch_size:
-                # create the batch dict
-                batch_dict = ModelInputs(
-                    dict(
-                        sample_idx=[s["id"] for s in batch],
-                        questions=[s["question"] for s in batch],
-                        passages=list(passages_in_batch.values()),
-                        positives_pssgs=[s["positive_pssgs"] for s in batch],
-                        positives=[s["positives"] for s in batch],
-                    )
-                )
-                # split the batch if needed
-                if len(batch) > self.question_batch_size:
-                    for splited_batch in self.split_batch(
-                        batch_dict, self.question_batch_size
-                    ):
-                        yield splited_batch
-                else:
-                    yield batch_dict
+        # batch = []
+        # passages_in_batch = {}
+        # for sample in map(self.__getitem__, self._each_sample_id(it)):
+        #     if len(passages_in_batch) >= self.passage_batch_size:
+        #         # create the batch dict
+        #         batch_dict = ModelInputs(
+        #             dict(
+        #                 sample_idx=[s["id"] for s in batch],
+        #                 questions=[s["question"] for s in batch],
+        #                 passages=list(passages_in_batch.values()),
+        #                 positives_pssgs=[s["positive_pssgs"] for s in batch],
+        #                 positives=[s["positives"] for s in batch],
+        #             )
+        #         )
+        #         # split the batch if needed
+        #         if len(batch) > self.question_batch_size:
+        #             for splited_batch in self.split_batch(
+        #                 batch_dict, self.question_batch_size
+        #             ):
+        #                 yield splited_batch
+        #         else:
+        #             yield batch_dict
 
-                # reset batch
-                batch = []
-                passages_in_batch = {}
+        #         # reset batch
+        #         batch = []
+        #         passages_in_batch = {}
 
-            batch.append(sample)
-            # yes it's a bit ugly but it works :)
-            # count the number of passages in the batch and stop if we reach the limit
-            # we use a set to avoid counting the same passage twice
-            # we use a tuple because set doesn't support lists
-            # we use input_ids as discriminator
-            passages_in_batch.update(
-                {tuple(passage["input_ids"]): passage for passage in sample["passage"]}
-            )
-            # check for hard negatives and add with a probability of 0.1
-            if self.hn_manager is not None:
-                if sample["id"] in self.hn_manager:
-                    passages_in_batch.update(
-                        {
-                            tuple(passage["input_ids"]): passage
-                            for passage in self.hn_manager.get(sample["id"])
-                        }
-                    )
-                else:
-                    print(f"Sample {sample['id']} not in hn_manager")
-        # yield from map(self.__getitem__, self._each_sample_id(it))
+        #     batch.append(sample)
+        #     # yes it's a bit ugly but it works :)
+        #     # count the number of passages in the batch and stop if we reach the limit
+        #     # we use a set to avoid counting the same passage twice
+        #     # we use a tuple because set doesn't support lists
+        #     # we use input_ids as discriminator
+        #     passages_in_batch.update(
+        #         {tuple(passage["input_ids"]): passage for passage in sample["passage"]}
+        #     )
+        #     # check for hard negatives and add with a probability of 0.1
+        #     if self.hn_manager is not None:
+        #         if sample["id"] in self.hn_manager:
+        #             passages_in_batch.update(
+        #                 {
+        #                     tuple(passage["input_ids"]): passage
+        #                     for passage in self.hn_manager.get(sample["id"])
+        #                 }
+        #             )
+        #         else:
+        #             print(f"Sample {sample['id']} not in hn_manager")
+        yield from map(self.__getitem__, self._each_sample_id(it))
         wait([prepare_future, ready_future], return_when="FIRST_EXCEPTION")
         it.exit()
 
@@ -563,7 +563,46 @@ class GoldenRetrieverCollator:
 
     def __call__(self, batch: Any, *args, **kwargs) -> Any:
         # convert questions and passages to a batch
-        batch = ModelInputs(batch)
+        # batch = ModelInputs(batch)
+
+        # for sample in batch:
+            # if len(passages_in_batch) >= self.passage_batch_size:
+                # create the batch dict
+        passages_in_batch = {}
+        for sample in batch:
+            passages_in_batch.update(
+                {tuple(passage["input_ids"]): passage for passage in sample["passage"]}
+            )
+        batch = ModelInputs(
+            dict(
+                sample_idx=[s["id"] for s in batch],
+                questions=[s["question"] for s in batch],
+                passages=list(passages_in_batch.values()),
+                positives_pssgs=[s["positive_pssgs"] for s in batch],
+                positives=[s["positives"] for s in batch],
+            )
+        )
+                # # split the batch if needed
+                # if len(batch) > self.question_batch_size:
+                #     for splited_batch in self.split_batch(
+                #         batch_dict, self.question_batch_size
+                #     ):
+                #         yield splited_batch
+                # else:
+                #     yield batch_dict
+
+                # reset batch
+                # batch = []
+                # passages_in_batch = {}
+
+            # batch.append(sample)
+            # yes it's a bit ugly but it works :)
+            # count the number of passages in the batch and stop if we reach the limit
+            # we use a set to avoid counting the same passage twice
+            # we use a tuple because set doesn't support lists
+            # we use input_ids as discriminator
+            
+
         questions = self.convert_to_batch(batch.questions)
         passages = self.convert_to_batch(batch.passages)
 
