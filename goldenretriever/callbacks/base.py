@@ -76,23 +76,25 @@ class PredictionCallback(pl.Callback):
         self, trainer: pl.Trainer, pl_module: pl.LightningModule
     ):
         predictions = self(trainer, pl_module)
-        for callback in self.other_callbacks:
-            callback(
-                trainer=trainer,
-                pl_module=pl_module,
-                callback=self,
-                predictions=predictions,
-            )
+        if trainer.global_rank == 0:
+            for callback in self.other_callbacks:
+                callback(
+                    trainer=trainer,
+                    pl_module=pl_module,
+                    callback=self,
+                    predictions=predictions,
+                )
 
     def on_test_epoch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule):
         predictions = self(trainer, pl_module)
-        for callback in self.other_callbacks:
-            callback(
-                trainer=trainer,
-                pl_module=pl_module,
-                callback=self,
-                predictions=predictions,
-            )
+        if trainer.global_rank == 0:
+            for callback in self.other_callbacks:
+                callback(
+                    trainer=trainer,
+                    pl_module=pl_module,
+                    callback=self,
+                    predictions=predictions,
+                )
 
     @staticmethod
     def _get_datasets_and_dataloaders(

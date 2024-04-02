@@ -32,7 +32,7 @@ import transformers
 # from composer.utils import dist, get_file, parse_uri
 # from omegaconf import DictConfig
 from omegaconf import OmegaConf as om
-from streaming import Stream, StreamingDataset
+from streaming import Stream, StreamingDataLoader, StreamingDataset
 from streaming.base.dataset import _Iterator
 from streaming.base.world import World
 from torch.utils.data import DataLoader
@@ -301,7 +301,7 @@ class StreamingGoldenRetrieverDataset(StreamingDataset):
         sample_ids = self._get_work(world, epoch, sample_in_epoch)
         if not len(sample_ids):  # Resumed at end of epoch, out of samples.
             return
-
+ 
         # Iterate over the samples while downloading ahead.
         self._iterator = it = _Iterator(sample_ids)
         prepare_future = self._executor.submit(self._prepare_thread, it)
@@ -593,22 +593,7 @@ class GoldenRetrieverCollator:
         )
         return model_inputs
 
-# Copyright 2022-2024 MosaicML Streaming authors
-# SPDX-License-Identifier: Apache-2.0
-
-"""Streaming DataLoader."""
-
-from typing import Any, Dict, Iterator, Optional
-
-from torch import Tensor
-from torch.utils.data import DataLoader
-# from transformers import BatchEncoding, BatchFeature
-
-from streaming.base.dataset import StreamingDataset
-from streaming.base.world import World
-
-
-class StreamingDataLoader(DataLoader):
+class GoldenStreamingDataLoader(StreamingDataLoader):
     """A streaming data loader.
 
     Provides an additional checkpoint/resumption interface, for which it tracks the number of
@@ -640,6 +625,7 @@ class StreamingDataLoader(DataLoader):
         #     return len(batch)
         # else:
         #     return len(batch[0])
+        return batch["questions"]["input_ids"].get_size(0)
 
     def __iter__(self) -> Iterator[Any]:
         """Iterate over this DataLoader, yielding batches.
@@ -651,7 +637,7 @@ class StreamingDataLoader(DataLoader):
         """
         self.num_samples_yielded = 0
         batch = []
-        for sample in super().__iter__():
+        for batch in super().__iter__():
             self.num_samples_yielded += self._get_batch_size(batch)
             yield batch
 

@@ -9,7 +9,7 @@ from torch.utils.data import DataLoader
 
 from goldenretriever.common.log import get_logger
 from goldenretriever.data.datasets import GoldenRetrieverDataset
-from goldenretriever.data.streaming_dataset import GoldenRetrieverCollator
+from goldenretriever.data.streaming_dataset import GoldenRetrieverCollator, StreamingGoldenRetrieverDataset
 from goldenretriever.data.utils import GoldenDistributedSampler
 
 logger = get_logger()
@@ -23,6 +23,7 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
         test_datasets: Optional[Sequence[GoldenRetrieverDataset]] = None,
         num_workers: Optional[Union[DictConfig, int]] = None,
         datasets: Optional[DictConfig] = None,
+        tokenizer=None,
         *args,
         **kwargs,
     ):
@@ -39,6 +40,7 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
         self.train_dataset: Optional[GoldenRetrieverDataset] = train_dataset
         self.val_datasets: Optional[Sequence[GoldenRetrieverDataset]] = val_datasets
         self.test_datasets: Optional[Sequence[GoldenRetrieverDataset]] = test_datasets
+        self.tokenizer = tokenizer
 
     def prepare_data(self, *args, **kwargs):
         """
@@ -52,12 +54,31 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
             # usually there is only one dataset for train
             # if you need more train loader, you can follow
             # the same logic as val and test datasets
-            if self.train_dataset is None:
-                self.train_dataset = hydra.utils.instantiate(self.datasets.train)
-                self.val_datasets = [
-                    hydra.utils.instantiate(dataset_cfg)
-                    for dataset_cfg in self.datasets.val
-                ]
+            # if self.train_dataset is None:
+            #     self.train_dataset = hydra.utils.instantiate(self.datasets.train)
+            #     self.val_datasets = [
+            #         hydra.utils.instantiate(dataset_cfg)
+            #         for dataset_cfg in self.datasets.val
+            #     ]
+            self.train_dataset = StreamingGoldenRetrieverDataset(
+                name="aida_train",
+                tokenizer=self.tokenizer,
+                local="/leonardo_work/IscrC_MEL/golden-retriever/data/el/mosaic/train",
+                split="train",
+                question_batch_size=64,
+                passage_batch_size=400,
+                predownload=64*64,
+            )
+            self.val_dataset = StreamingGoldenRetrieverDataset(
+                name="aida_val",
+                tokenizer=self.tokenizer,
+                local="/leonardo_work/IscrC_MEL/golden-retriever/data/el/mosaic/val",
+                split="train",
+                question_batch_size=64,
+                passage_batch_size=400,
+                predownload=64*64,
+            )
+            self.val_datasets = [self.val_dataset]
         if stage == "test":
             if self.test_datasets is None:
                 self.test_datasets = [
@@ -68,15 +89,17 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
     def train_dataloader(self, *args, **kwargs) -> DataLoader:
         # torch_dataset = self.train_dataset.to_torch_dataset()
         return DataLoader(
-            self.train_dataset.to_torch_dataset(),
+            # self.train_dataset.to_torch_dataset(),
             # torch_dataset,
-            # self.train_dataset,
+            self.train_dataset,
             shuffle=False,
             batch_size=None,
             num_workers=self.num_workers.train,
             pin_memory=False,
-            collate_fn=lambda x: x,
-            # collate_fn=GoldenRetrieverCollator(tokenizer=self.train_dataset.tokenizer),
+            prefetch_factor=2,
+            # persistent_workers=True,
+            # collate_fn=lambda x: x,
+            collate_fn=GoldenRetrieverCollator(tokenizer=self.train_dataset.tokenizer),
             # user a custom distributed sampler
             # sampler=GoldenDistributedSampler
         )
@@ -84,17 +107,19 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
     def val_dataloader(self, *args, **kwargs) -> Union[DataLoader, List[DataLoader]]:
         dataloaders = []
         for dataset in self.val_datasets:
-            torch_dataset = dataset.to_torch_dataset()
+            # torch_dataset = dataset.to_torch_dataset()
             dataloaders.append(
                 DataLoader(
-                    torch_dataset,
-                    # dataset,
+                    # torch_dataset,
+                    dataset,
                     shuffle=False,
                     batch_size=None,
                     num_workers=self.num_workers.val,
                     pin_memory=False,
-                    collate_fn=lambda x: x,
-                    # collate_fn=GoldenRetrieverCollator(tokenizer=dataset.tokenizer),
+                    prefetch_factor=2,
+                    # persistent_workers=True,
+                    # collate_fn=lambda x: x,
+                    collate_fn=GoldenRetrieverCollator(tokenizer=dataset.tokenizer),
                     # sampler=GoldenDistributedSampler
                 )
             )

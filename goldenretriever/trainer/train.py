@@ -322,6 +322,7 @@ class Trainer(FromConfig):
             val_datasets=self.val_dataset,
             test_datasets=self.test_dataset,
             num_workers=self.num_workers,
+            tokenizer=self.retriever.question_tokenizer,
             *args,
             **kwargs,
         )

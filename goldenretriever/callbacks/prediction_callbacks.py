@@ -89,6 +89,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         dataloader_predictions = {}
         # compute the passage embeddings index for each dataloader
         for dataloader_idx, dataloader in enumerate(self.dataloaders):
+            print(dataloader)
             current_dataset: GoldenRetrieverDataset = self.datasets[dataloader_idx]
             if trainer.global_rank == 0:
                 logger.info(
@@ -143,7 +144,9 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
             for batch in tqdm(
                 dataloader,
                 desc=f"Computing predictions for dataset {current_dataset.name}",
+                disable=trainer.global_rank != 0,
             ):
+                # print(batch)
                 batch = batch.to(pl_module.device)
                 # get the top-k indices
                 retriever_output = retriever.retrieve(
@@ -201,4 +204,5 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
             #     pl_module.to(pl_module_original_device)
 
         # return the predictions
+        print(dataloader_predictions)
         return dataloader_predictions
