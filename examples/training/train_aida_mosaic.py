@@ -1,6 +1,9 @@
 from tqdm import tqdm
 from goldenretriever.common.log import get_logger
-from goldenretriever.data.mosaic_datasets import StreamingGoldenRetrieverDataset
+from goldenretriever.data.mosaic_datasets import (
+    StreamingGoldenRetrieverDataset,
+    build_from_hf,
+)
 from goldenretriever.indexers.document import DocumentStore
 from goldenretriever.trainer.train_mosaic import Trainer
 from goldenretriever import GoldenRetriever
@@ -36,19 +39,35 @@ if __name__ == "__main__":
     # )
 
     train_dataset = StreamingGoldenRetrieverDataset(
+        name="aida_train",
         tokenizer=retriever.question_tokenizer,
         local="data/dpr-like/el/mosaic/train",
         split="train",
-        question_batch_size=32,
-        passage_batch_size=400,
+        question_batch_size=64,
+        # passage_batch_size=400,
     )
     val_dataset = StreamingGoldenRetrieverDataset(
+        name="aida_val",
         tokenizer=retriever.question_tokenizer,
         local="data/dpr-like/el/mosaic/val",
         split="train",
-        question_batch_size=32,
-        passage_batch_size=400,
+        question_batch_size=64,
+        # passage_batch_size=400,
     )
+    # train_dataset = build_from_hf(
+    #     dataset_name="/home/ric/Projects/golden-retriever/data/dpr-like/el/aida_32_tokens_topic/train.jsonl",
+    #     split="train",
+    #     safe_load=False,
+    #     tokenizer=retriever.question_tokenizer,
+    #     hf_kwargs={}
+    # )
+    # val_dataset = build_from_hf(
+    #     dataset_name="/home/ric/Projects/golden-retriever/data/dpr-like/el/aida_32_tokens_topic/val.jsonl",
+    #     split="train",
+    #     safe_load=False,
+    #     tokenizer=retriever.question_tokenizer,
+    #     hf_kwargs={}
+    # )
 
     # logger.info("Loading document index")
     # document_index = InMemoryDocumentIndex(

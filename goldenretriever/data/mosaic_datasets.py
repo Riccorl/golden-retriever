@@ -3,6 +3,7 @@
 
 """Build a StreamingTextDataset dataset and dataloader for training."""
 
+from glob import glob
 import os
 from concurrent.futures import ThreadPoolExecutor, wait
 from functools import partial
@@ -26,12 +27,13 @@ import datasets as hf_datasets
 import numpy as np
 import torch
 import transformers
-from composer.core.data_spec import DataSpec
-from composer.core.types import Batch
-from composer.utils import dist, get_file, parse_uri
-from omegaconf import DictConfig
+
+# from composer.core.data_spec import DataSpec
+# from composer.core.types import Batch
+# from composer.utils import dist, get_file, parse_uri
+# from omegaconf import DictConfig
 from omegaconf import OmegaConf as om
-from streaming import Stream, StreamingDataset
+from streaming import Stream, StreamingDataLoader, StreamingDataset
 from streaming.base.dataset import _Iterator
 from streaming.base.world import World
 from torch.utils.data import DataLoader
@@ -108,6 +110,7 @@ class StreamingGoldenRetrieverDataset(StreamingDataset):
 
     def __init__(
         self,
+        name: str,
         tokenizer: PreTrainedTokenizerBase,
         # max_seq_len: int,
         streams: Optional[Sequence[Stream]] = None,
@@ -184,6 +187,7 @@ class StreamingGoldenRetrieverDataset(StreamingDataset):
             sampling_granularity=sampling_granularity,
             batching_method=batching_method,
         )
+        self.name = name
         self.tokenizer = tokenizer
         self.question_batch_size = question_batch_size
         self.passage_batch_size = passage_batch_size
@@ -194,7 +198,7 @@ class StreamingGoldenRetrieverDataset(StreamingDataset):
         self.max_question_length = max_question_length
         self.max_passage_length = max_passage_length
 
-        self.hn_manager = HardNegativesManager(tokenizer, max_length=max_passage_length)
+        # self.hn_manager = HardNegativesManager(tokenizer, max_length=max_passage_length)
 
     # How to tokenize a text sample to a token sample
     def _tokenize(self, sample: Mapping) -> Dict[str, List[int]]:
@@ -261,6 +265,15 @@ class StreamingGoldenRetrieverDataset(StreamingDataset):
         #     )
         return token_sample
 
+    # def __len__(self) -> int:
+    #     """Get the length as a PyTorch IterableDataset.
+
+    #     Returns:
+    #         int: Dataset length.
+    #     """
+    #     # raise NotImplementedError("StreamingDataset does not support __len__")
+    #     return None
+
     def __iter__(self) -> Iterator[Dict[str, Any]]:
         """Iterate over all the samples in our partition.
 
@@ -297,54 +310,54 @@ class StreamingGoldenRetrieverDataset(StreamingDataset):
         ready_future = self._executor.submit(self._ready_thread, it)
         ready_future.add_done_callback(self.on_exception)
         # Iterate over the samples and accumulate passage_batch_size samples at a time
-        batch = []
-        passages_in_batch = {}
-        for sample in map(self.__getitem__, self._each_sample_id(it)):
-            if len(passages_in_batch) >= self.passage_batch_size:
-                # create the batch dict
-                batch_dict = ModelInputs(
-                    dict(
-                        sample_idx=[s["id"] for s in batch],
-                        questions=[s["question"] for s in batch],
-                        passages=list(passages_in_batch.values()),
-                        positives_pssgs=[s["positive_pssgs"] for s in batch],
-                        positives=[s["positives"] for s in batch],
-                    )
-                )
-                # split the batch if needed
-                # if len(batch) > self.question_batch_size:
-                #     for splited_batch in self.split_batch(
-                #         batch_dict, self.question_batch_size
-                #     ):
-                #         yield splited_batch
-                # else:
-                yield batch_dict
+        # batch = []
+        # passages_in_batch = {}
+        # for sample in map(self.__getitem__, self._each_sample_id(it)):
+        #     if len(passages_in_batch) >= self.passage_batch_size:
+        #         # create the batch dict
+        #         batch_dict = ModelInputs(
+        #             dict(
+        #                 sample_idx=[s["id"] for s in batch],
+        #                 questions=[s["question"] for s in batch],
+        #                 passages=list(passages_in_batch.values()),
+        #                 positives_pssgs=[s["positive_pssgs"] for s in batch],
+        #                 positives=[s["positives"] for s in batch],
+        #             )
+        #         )
+        #         # split the batch if needed
+        #         if len(batch) > self.question_batch_size:
+        #             for splited_batch in self.split_batch(
+        #                 batch_dict, self.question_batch_size
+        #             ):
+        #                 yield splited_batch
+        #         else:
+        #             yield batch_dict
 
-                # reset batch
-                batch = []
-                passages_in_batch = {}
+        #         # reset batch
+        #         batch = []
+        #         passages_in_batch = {}
 
-            batch.append(sample)
-            # yes it's a bit ugly but it works :)
-            # count the number of passages in the batch and stop if we reach the limit
-            # we use a set to avoid counting the same passage twice
-            # we use a tuple because set doesn't support lists
-            # we use input_ids as discriminator
-            passages_in_batch.update(
-                {tuple(passage["input_ids"]): passage for passage in sample["passage"]}
-            )
-            # check for hard negatives and add with a probability of 0.1
-            if self.hn_manager is not None:
-                if sample["id"] in self.hn_manager:
-                    passages_in_batch.update(
-                        {
-                            tuple(passage["input_ids"]): passage
-                            for passage in self.hn_manager.get(sample["id"])
-                        }
-                    )
-                # else:
-                #     print(f"Sample {sample['id']} not in hn_manager")
-        # yield from map(self.__getitem__, self._each_sample_id(it))
+        #     batch.append(sample)
+        #     # yes it's a bit ugly but it works :)
+        #     # count the number of passages in the batch and stop if we reach the limit
+        #     # we use a set to avoid counting the same passage twice
+        #     # we use a tuple because set doesn't support lists
+        #     # we use input_ids as discriminator
+        #     passages_in_batch.update(
+        #         {tuple(passage["input_ids"]): passage for passage in sample["passage"]}
+        #     )
+        #     # check for hard negatives and add with a probability of 0.1
+        #     if self.hn_manager is not None:
+        #         if sample["id"] in self.hn_manager:
+        #             passages_in_batch.update(
+        #                 {
+        #                     tuple(passage["input_ids"]): passage
+        #                     for passage in self.hn_manager.get(sample["id"])
+        #                 }
+        #             )
+        #         else:
+        #             print(f"Sample {sample['id']} not in hn_manager")
+        yield from map(self.__getitem__, self._each_sample_id(it))
         wait([prepare_future, ready_future], return_when="FIRST_EXCEPTION")
         it.exit()
 
@@ -549,8 +562,60 @@ class GoldenRetrieverCollator:
                 )
         return samples
 
+    # def hard_negatives_augmentation(self, batch: Any, *args, **kwargs) -> Any:
+    #     for sample in batch:
+    #         if sample["id"] in self.hn_manager:
+    #             batch["passages"].extend(self.hn_manager.get(sample["id"]))
+    #             # passages_in_batch.update(
+    #             #     {
+    #             #         tuple(passage["input_ids"]): passage
+    #             #         for passage in self.hn_manager.get(sample["id"])
+    #             #     }
+    #             # )
+
     def __call__(self, batch: Any, *args, **kwargs) -> Any:
         # convert questions and passages to a batch
+        # batch = ModelInputs(batch)
+
+        # for sample in batch:
+        # if len(passages_in_batch) >= self.passage_batch_size:
+        # create the batch dict
+        # self.hard_negatives_augmentation(batch)
+
+        passages_in_batch = {}
+        for sample in batch:
+            passages_in_batch.update(
+                {tuple(passage["input_ids"]): passage for passage in sample["passage"]}
+            )
+        batch = ModelInputs(
+            dict(
+                sample_idx=[s["id"] for s in batch],
+                questions=[s["question"] for s in batch],
+                passages=list(passages_in_batch.values()),
+                positives_pssgs=[s["positive_pssgs"] for s in batch],
+                positives=[s["positives"] for s in batch],
+            )
+        )
+        # # split the batch if needed
+        # if len(batch) > self.question_batch_size:
+        #     for splited_batch in self.split_batch(
+        #         batch_dict, self.question_batch_size
+        #     ):
+        #         yield splited_batch
+        # else:
+        #     yield batch_dict
+
+        # reset batch
+        # batch = []
+        # passages_in_batch = {}
+
+        # batch.append(sample)
+        # yes it's a bit ugly but it works :)
+        # count the number of passages in the batch and stop if we reach the limit
+        # we use a set to avoid counting the same passage twice
+        # we use a tuple because set doesn't support lists
+        # we use input_ids as discriminator
+
         questions = self.convert_to_batch(batch.questions)
         passages = self.convert_to_batch(batch.passages)
 
@@ -581,78 +646,438 @@ class GoldenRetrieverCollator:
         return model_inputs
 
 
+class GoldenStreamingDataLoader(StreamingDataLoader):
+    """A streaming data loader.
+
+    Provides an additional checkpoint/resumption interface, for which it tracks the number of
+    samples seen by the model this rank.
+
+    Args:
+        *args: List arguments.
+        **kwargs: Keyword arguments.
+    """
+
+    def __init__(self, *args, **kwargs) -> None:  # pyright: ignore
+        super().__init__(*args, **kwargs)
+        self.num_samples_yielded = 0
+
+    def _get_batch_size(self, batch: Any) -> int:
+        """Get the number of samples in a batch.
+
+        Args:
+            batch (Any): The batch.
+
+        Returns:
+            int: Number of samples.
+        """
+        # if isinstance(batch, (dict, BatchEncoding, BatchFeature)):
+        #     for value in batch.values():
+        #         return len(value)
+        #     raise ValueError('Batch is empty')
+        # elif isinstance(batch, Tensor):
+        #     return len(batch)
+        # else:
+        #     return len(batch[0])
+        return batch["questions"]["input_ids"].get_size(0)
+
+    def __iter__(self) -> Iterator[Any]:
+        """Iterate over this DataLoader, yielding batches.
+
+        Also tracks the number of samples seen this rank.
+
+        Returns:
+            Iterator[Any]: Each batch.
+        """
+        self.num_samples_yielded = 0
+        batch = []
+        for batch in super().__iter__():
+            self.num_samples_yielded += self._get_batch_size(batch)
+            yield batch
+
+    def state_dict(self) -> Optional[Dict[str, Any]]:
+        """Get a dict containing training state (called from non-worker process).
+
+        This is called on rank zero.
+
+        Args:
+            samples_in_epoch (int): The number of samples processed so far in the current epoch.
+
+        Returns:
+            Optional[Dict[str, Any]]: The state, if a streaming dataset.
+        """
+        if isinstance(self.dataset, StreamingDataset):
+            world = World()
+            num_samples = self.num_samples_yielded * world.num_ranks
+            return self.dataset.state_dict(num_samples, False)
+        return None
+
+    def load_state_dict(self, obj: Dict[str, Any]) -> None:
+        """Load a dict containing training state (called from non-worker process).
+
+        This is called on each copy of the dataset when resuming.
+
+        Args:
+            obj (Dict[str, Any]): The state.
+        """
+        if isinstance(self.dataset, StreamingDataset):
+            self.dataset.load_state_dict(obj)
+
+    def __del__(self) -> None:
+        """Terminate the workers during cleanup."""
+        if self._iterator is not None:
+            self._iterator._shutdown_workers()  # type: ignore [reportGeneralTypeIssues]
+
+
 # Helpful to test if your dataloader is working locally
 # Run `python data.py  --local_path [local] [--remote_path remote, optional]` and verify that batches are printed out
-if __name__ == "__main__":
-    import argparse
+# if __name__ == "__main__":
+#     import argparse
 
-    from llmfoundry.utils.builders import build_tokenizer
+#     from llmfoundry.utils.builders import build_tokenizer
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--tokenizer",
-        type=str,
-        default="EleutherAI/gpt-neox-20b",
-        help="the name of the tokenizer to use",
-    )
-    parser.add_argument(
-        "--local_path",
-        type=str,
-        required=True,
-        help="the path to the local copy of the dataset",
-    )
-    parser.add_argument(
-        "--remote_path",
-        type=str,
-        default=None,
-        help="the path to the remote copy to stream from (optional)",
-    )
-    parser.add_argument(
-        "--split", type=str, default="val", help="which split of the dataset to use"
-    )
-    parser.add_argument(
-        "--max_seq_len", type=int, default=32, help="max sequence length to test"
+#     parser = argparse.ArgumentParser()
+#     parser.add_argument(
+#         "--tokenizer",
+#         type=str,
+#         default="EleutherAI/gpt-neox-20b",
+#         help="the name of the tokenizer to use",
+#     )
+#     parser.add_argument(
+#         "--local_path",
+#         type=str,
+#         required=True,
+#         help="the path to the local copy of the dataset",
+#     )
+#     parser.add_argument(
+#         "--remote_path",
+#         type=str,
+#         default=None,
+#         help="the path to the remote copy to stream from (optional)",
+#     )
+#     parser.add_argument(
+#         "--split", type=str, default="val", help="which split of the dataset to use"
+#     )
+#     parser.add_argument(
+#         "--max_seq_len", type=int, default=32, help="max sequence length to test"
+#     )
+
+#     args = parser.parse_args()
+
+#     if args.remote_path is not None:
+#         print(
+#             f"Reading {args.split} split from {args.local_path} <- streamed from <- {args.remote_path}"
+#         )
+#     else:
+#         print(f"Reading {args.split} split from {args.local_path}")
+
+#     cfg = {
+#         "name": "text",
+#         "dataset": {
+#             "local": args.local_path,
+#             "remote": args.remote_path,
+#             "split": args.split,
+#             "shuffle": False,
+#             "max_seq_len": args.max_seq_len,
+#             "keep_zip": True,  # in case we need compressed files after testing
+#         },
+#         "drop_last": False,
+#         "num_workers": 4,
+#     }
+#     cfg = om.create(cfg)
+#     device_batch_size = 2
+
+#     tokenizer_name = args.tokenizer
+#     tokenizer_kwargs = {"model_max_length": args.max_seq_len}
+#     tokenizer = build_tokenizer(tokenizer_name, tokenizer_kwargs)
+
+#     loader = build_text_dataloader(cfg, tokenizer, device_batch_size).dataloader
+#     assert isinstance(loader, DataLoader)
+#     assert isinstance(loader.dataset, StreamingTextDataset)
+#     tokenizer = loader.dataset.tokenizer
+
+#     for batch_ix, batch in enumerate(islice(loader, 5)):
+#         print("\n")
+#         print("#" * 20, f"Batch {batch_ix}", "#" * 20)
+#         for k, v in batch.items():
+#             print(k, v.shape, v.dtype)
+#         for sample_ix, token_sample in enumerate(batch["input_ids"]):
+#             print("-" * 20, f" Sample {sample_ix} ", "-" * 20)
+#             print(tokenizer.decode(token_sample))
+
+import importlib
+import logging
+import os
+import warnings
+from collections.abc import Mapping
+from functools import partial
+from pathlib import Path
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Literal,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    Union,
+    cast,
+)
+
+import datasets as hf_datasets
+import huggingface_hub as hf_hub
+import numpy as np
+from composer.utils import dist
+
+
+DOWNLOADED_FT_DATASETS_DIRPATH = os.path.join(
+    os.path.expanduser("~"), ".cache", "huggingface", "datasets"
+)
+SUPPORTED_EXTENSIONS = [".csv", ".jsonl", ".parquet"]
+
+
+def _is_empty_or_nonexistent(dirpath: str) -> bool:
+    """Check if a directory is empty or non-existent.
+
+    Args:
+        dirpath (str): Directory path to check.
+
+    Returns
+        True if directory is empty or non-existent. False otherwise.
+    """
+    return not os.path.isdir(dirpath) or len(os.listdir(dirpath)) == 0
+
+
+def tokenize(
+    sample: Mapping,
+    tokenizer,
+    max_positives,
+    max_negatives,
+    max_hard_negatives,
+    max_question_length,
+    max_passages,
+    max_passage_length,
+) -> Dict[str, List[int]]:
+    # remove duplicates and limit the number of passages
+    positives = list(set([p["text"] for p in sample["positive_ctxs"]]))
+    if max_positives != -1:
+        positives = positives[:max_positives]
+
+    negatives = list(set([n["text"] for n in sample["negative_ctxs"]]))
+    if max_negatives != -1:
+        negatives = negatives[:max_negatives]
+
+    hard_negatives = list(set([h["text"] for h in sample["hard_negative_ctxs"]]))
+    if max_hard_negatives != -1:
+        hard_negatives = hard_negatives[:max_hard_negatives]
+
+    question = tokenizer(
+        sample["question"], max_length=max_question_length, truncation=True
     )
 
-    args = parser.parse_args()
+    passage = positives + negatives + hard_negatives
+    if max_passages != -1:
+        passage = passage[: max_passages]
 
-    if args.remote_path is not None:
-        print(
-            f"Reading {args.split} split from {args.local_path} <- streamed from <- {args.remote_path}"
+    passage = tokenizer(
+        passage, max_length=max_passage_length, truncation=True
+    )
+
+    # invert the passage data structure from a dict of lists to a list of dicts
+    passage = [dict(zip(passage, t)) for t in zip(*passage.values())]
+
+    output = dict(
+        id=sample["id"],
+        question=question,
+        passage=passage,
+        positive_pssgs=passage[: len(positives)],
+        positives=positives,
+        negatives=negatives,
+        hard_negatives=hard_negatives,
+    )
+    return output
+
+
+def build_from_hf(
+    dataset_name: str,
+    split: Optional[str],
+    safe_load: bool,
+    tokenizer: PreTrainedTokenizerBase,
+    hf_kwargs: Dict[str, Any],
+) -> Union[
+    hf_datasets.DatasetDict,
+    hf_datasets.Dataset,
+    hf_datasets.IterableDatasetDict,
+    hf_datasets.IterableDataset,
+]:
+    """Load a HuggingFace Datasets, preprocess, and tokenize.
+
+    Note: This function will drop examples where the prompt is longer than the max_seq_len
+
+    Args:
+        cfg (DictConfig): The dataset configuration.
+        max_seq_len (int): The maximum sequence length. Examples with prompts longer than this will be dropped.
+        tokenizer (Tokenizer): The tokenizer to be used for tokenizing the dataset.
+
+    Returns:
+        Dataset: The tokenized dataset.
+    """
+    signal_file_path = f".node_{dist.get_node_rank()}_local_rank0_data_prep_completed"
+
+    # Non local rank 0 ranks will wait here for local rank 0 to finish the data processing.
+    # Once local rank 0 is done, the datasets are all cached on disk, and all other ranks
+    # can just read them.
+    if dist.get_local_rank() != 0:
+        logger.debug("Waiting for local_rank 0 to finish data prep")
+        with dist.local_rank_zero_download_and_wait(signal_file_path):
+            pass
+
+    # hf_tokenization_logger = logging.getLogger("transformers.tokenization_utils_base")
+    # sequence_length_warning_filter = SpecificWarningFilter(
+    #     "Token indices sequence length is longer than the specified maximum sequence length"
+    # )
+
+    # We will trim examples later in the collate_fn, so we want to silence this warning from Hugging Face
+    # hf_tokenization_logger.addFilter(sequence_length_warning_filter)
+
+    error: Optional[Exception] = None
+
+    detected_cpu_count = os.cpu_count() or 1
+    detected_cpus_with_margin = detected_cpu_count - 8
+    num_cpus_to_use = max(1, detected_cpus_with_margin)
+    # filtered_dataset = None
+    try:
+        # if safe_load:
+        #     if not os.path.isdir(dataset_name):
+        #         # dataset_name is not a local dir path, download if needed.
+        #         local_dataset_dir = os.path.join(
+        #             DOWNLOADED_FT_DATASETS_DIRPATH, dataset_name
+        #         )
+
+        #         if _is_empty_or_nonexistent(dirpath=local_dataset_dir):
+        #             # Safely load a dataset from HF Hub with restricted file types.
+        #             hf_hub.snapshot_download(
+        #                 dataset_name,
+        #                 repo_type="dataset",
+        #                 allow_patterns=["*" + ext for ext in SUPPORTED_EXTENSIONS],
+        #                 token=hf_kwargs.get("token", None),
+        #                 revision=hf_kwargs.get("revision", None),
+        #                 local_dir_use_symlinks=False,
+        #                 local_dir=local_dataset_dir,
+        #             )
+        #             if _is_empty_or_nonexistent(dirpath=local_dataset_dir):
+        #                 raise FileNotFoundError(
+        #                     f"safe_load is set to True. No data files with safe extensions {SUPPORTED_EXTENSIONS} "
+        #                     + f"found for dataset {dataset_name}. "
+        #                 )
+        #         # Set dataset_name to the downloaded location.
+        #         dataset_name = local_dataset_dir
+
+        #     # dataset_name is a local dir path. Use the abspath to prevent confusion.
+        #     dataset_name = os.path.abspath(dataset_name)
+
+        #     # Ensure that the local dir contains only allowed file types.
+        #     dataset_files = [f for _, _, files in os.walk(dataset_name) for f in files]
+        #     if not all(Path(f).suffix in SUPPORTED_EXTENSIONS for f in dataset_files):
+        #         raise ValueError(
+        #             f"Dataset at local path {dataset_name} contains invalid file types. "
+        #             + f"Allowed file types are: {SUPPORTED_EXTENSIONS}"
+        #         )
+        # dataset = hf_datasets.load_dataset(dataset_name, split=split, **hf_kwargs)
+        if os.path.isdir(dataset_name):
+            # only jsonl for now
+            data_files = glob(f'{dataset_name}/*.jsonl')
+        else:
+            data_files = dataset_name
+        dataset = hf_datasets.load_dataset(
+            "json",
+            data_files=data_files,
+            split=split,
+            # streaming=streaming,
+            num_proc=num_cpus_to_use,
         )
-    else:
-        print(f"Reading {args.split} split from {args.local_path}")
 
-    cfg = {
-        "name": "text",
-        "dataset": {
-            "local": args.local_path,
-            "remote": args.remote_path,
-            "split": args.split,
-            "shuffle": False,
-            "max_seq_len": args.max_seq_len,
-            "keep_zip": True,  # in case we need compressed files after testing
-        },
-        "drop_last": False,
-        "num_workers": 4,
-    }
-    cfg = om.create(cfg)
-    device_batch_size = 2
+        # def dataset_mapper(example: Dict):
+        #     if preprocessing_fn is not None:
+        #         example = preprocessing_fn(example)
+        #     return tokenize_formatted_example(example, tokenizer)
 
-    tokenizer_name = args.tokenizer
-    tokenizer_kwargs = {"model_max_length": args.max_seq_len}
-    tokenizer = build_tokenizer(tokenizer_name, tokenizer_kwargs)
+        # columns_to_remove = list(dataset[0].keys())
+        tokenized_dataset = dataset.map(
+            partial(
+                tokenize,
+                tokenizer=tokenizer,
+                max_positives=-1,
+                max_negatives=-1,
+                max_hard_negatives=-1,
+                max_passages=-1,
+                max_question_length=40,
+                max_passage_length=40,
+            ),
+            batched=False,
+            # remove_columns=columns_to_remove,
+            num_proc=num_cpus_to_use,
+            desc="Tokenizing dataset",
+        )
 
-    loader = build_text_dataloader(cfg, tokenizer, device_batch_size).dataloader
-    assert isinstance(loader, DataLoader)
-    assert isinstance(loader.dataset, StreamingTextDataset)
-    tokenizer = loader.dataset.tokenizer
+        # filtered_dataset = tokenized_dataset.filter(
+        #     partial(
+        #         is_valid_ift_example,
+        #         max_seq_len,
+        #         target_prompts,
+        #         target_responses,
+        #         decoder_only_format,
+        #     ),
+        #     num_proc=num_cpus_to_use,
+        #     desc="Filtering out long prompts",
+        # )
 
-    for batch_ix, batch in enumerate(islice(loader, 5)):
-        print("\n")
-        print("#" * 20, f"Batch {batch_ix}", "#" * 20)
-        for k, v in batch.items():
-            print(k, v.shape, v.dtype)
-        for sample_ix, token_sample in enumerate(batch["input_ids"]):
-            print("-" * 20, f" Sample {sample_ix} ", "-" * 20)
-            print(tokenizer.decode(token_sample))
+        # examples_removed = len(tokenized_dataset) - len(filtered_dataset)
+        # if examples_removed > 0:
+        #     warnings.warn(
+        #         f"Dropped {examples_removed} examples where the prompt was longer than {max_seq_len}, "
+        #         + "the prompt or response was empty, or the response was all padding tokens."
+        #     )
+    except Exception as e:
+        error = e
+    # Now local rank 0 indicates to the other ranks that it is done
+    if dist.get_local_rank() == 0:
+        logger.debug("Local rank 0 finished data prep")
+        with open(signal_file_path, "wb") as f:
+            f.write(b"local_rank0_completed_data_prep")
+
+    # All ranks sync up at this barrier, having completed data processing
+    dist.barrier()
+
+    # Last, local rank 0 cleans up the signal file
+    if dist.get_local_rank() == 0:
+        os.remove(signal_file_path)
+
+    if error is not None:
+        logger.error("Error during data prep")
+        raise error
+    logger.debug("All ranks finished data prep")
+
+    # hf_tokenization_logger.removeFilter(sequence_length_warning_filter)
+
+    assert tokenized_dataset is not None
+    return tokenized_dataset
+
+    # dl = DataLoader(
+    #     dataset,
+    #     collate_fn=collate_fn,
+    #     batch_size=dataloader_batch_size,
+    #     drop_last=cfg.drop_last,
+    #     sampler=sampler,
+    #     num_workers=cfg.num_workers,
+    #     pin_memory=cfg.get('pin_memory', True),
+    #     prefetch_factor=cfg.get('prefetch_factor', 2),
+    #     persistent_workers=cfg.get('persistent_workers', True),
+    #     timeout=cfg.get('timeout', 0),
+    # )
+
+    # token_counting_func = get_tokens_per_batch_func()
+
+    # return DataSpec(dataloader=dl, get_num_tokens_in_batch=token_counting_func)
+

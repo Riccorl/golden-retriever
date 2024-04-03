@@ -5,6 +5,7 @@ from typing import Any, Callable, Dict, Iterable, List, Literal, Optional, Union
 
 import composer
 from goldenretriever.common.model_inputs import ModelInputs
+from goldenretriever.composer_modules.algo import HardNegativeAlgo
 from goldenretriever.composer_modules.callbacks import (
     HardNegativeMiningCallback,
     PredictionCallback,
@@ -73,8 +74,10 @@ from composer import (
     TimeUnit,
     Trainer as ComposerTrainer,
 )
-from composer.utils import reproducibility
+from composer.utils import reproducibility, dist
 from composer.callbacks import SpeedMonitor
+
+from goldenretriever.trainer.composer_trainer import GoldenComposerTrainer
 
 logger = get_logger()
 
@@ -356,40 +359,50 @@ class Trainer(FromConfig):
         return self.lightning_datamodule
 
     def configure_dataloader(self, *args, **kwargs):
-        collator = GoldenRetrieverCollator(tokenizer=self.train_dataset.tokenizer)
         self.train_dataloader = torch.utils.data.DataLoader(
             self.train_dataset,
-            collate_fn=collator,
-            batch_size=None,
+            collate_fn=GoldenRetrieverCollator(
+                tokenizer=self.retriever.question_tokenizer
+            ),
+            batch_size=64,
             drop_last=False,
-            num_workers=self.num_workers,
+            num_workers=0, #self.num_workers,
             pin_memory=True,
-            prefetch_factor=2,
-            persistent_workers=True,
+            # prefetch_factor=2,
+            # persistent_workers=True,
             timeout=0,
+            # sampler=dist.get_sampler(
+            #     self.train_dataset, drop_last=False, shuffle=False
+            # ),
         )
         self.train_dataloader = DataSpec(
             self.train_dataloader,
-            split_batch=self.train_dataset.split_batch,
-            get_num_samples_in_batch=self.train_dataset.get_num_samples_in_batch,
-            get_num_tokens_in_batch=self.train_dataset.get_num_tokens_in_batch,
+            split_batch=StreamingGoldenRetrieverDataset.split_batch,
+            get_num_samples_in_batch=StreamingGoldenRetrieverDataset.get_num_samples_in_batch,
+            get_num_tokens_in_batch=StreamingGoldenRetrieverDataset.get_num_tokens_in_batch,
         )
+
         self.val_dataloader = torch.utils.data.DataLoader(
             self.val_dataset,
-            collate_fn=collator,
-            batch_size=None,
+            collate_fn=GoldenRetrieverCollator(
+                tokenizer=self.retriever.question_tokenizer
+            ),
+            batch_size=64,
             drop_last=False,
-            num_workers=self.num_workers,
+            num_workers=0, #self.num_workers,
             pin_memory=True,
-            prefetch_factor=2,
-            persistent_workers=True,
+            # prefetch_factor=2,
+            # persistent_workers=True,
             timeout=0,
+            # sampler=dist.get_sampler(
+            #     self.val_dataset, drop_last=False, shuffle=False
+            # )
         )
         self.val_dataloader = DataSpec(
             self.val_dataloader,
-            split_batch=self.val_dataset.split_batch,
-            get_num_samples_in_batch=self.val_dataset.get_num_samples_in_batch,
-            get_num_tokens_in_batch=self.val_dataset.get_num_tokens_in_batch,
+            split_batch=StreamingGoldenRetrieverDataset.split_batch,
+            get_num_samples_in_batch=StreamingGoldenRetrieverDataset.get_num_samples_in_batch,
+            get_num_tokens_in_batch=StreamingGoldenRetrieverDataset.get_num_tokens_in_batch,
         )
 
     def configure_lightning_module(self, *args, **kwargs):
@@ -750,19 +763,18 @@ class Trainer(FromConfig):
             logger.info("Instantiating the Trainer")
             # we hack the ProgressBarLogger._build_pbar method
             # to replace it with a custom one
-            composer.loggers.progress_bar_logger.ProgressBarLogger._build_pbar = (
-                _golden_retriever_build_pbar
-            )
+            # composer.loggers.progress_bar_logger.ProgressBarLogger._build_pbar = (
+            #     _golden_retriever_build_pbar
+            # )
             self.trainer = ComposerTrainer(
                 model=self.composer_module,
-                device_train_microbatch_size=32,
-                # algorithms=[
-                #     BlurPool(
-                #         replace_convs=True,
-                #         replace_maxpools=True,
-                #         blur_first=True
-                #     ),
-                # ],
+                device_train_microbatch_size=8,
+                algorithms=[
+                    HardNegativeAlgo(
+                        self.train_dataset.tokenizer,
+                        max_length=self.train_dataset.max_passage_length,
+                    )
+                ],
                 progress_bar=True,
                 # log_to_console=True,
                 device="gpu",
@@ -770,7 +782,7 @@ class Trainer(FromConfig):
                 optimizers=self.optimizer,
                 schedulers=self.lr_scheduler,
                 step_schedulers_every_batch=True,  # interval should be step
-                max_duration="1ep",
+                max_duration="230ba",
                 # eval_interval="1ba",
                 seed=self.seed,
                 callbacks=[
@@ -778,9 +790,11 @@ class Trainer(FromConfig):
                     PredictionCallback(
                         k=100,
                         other_callbacks=[ComposerRecallAtKEvaluationCallback()],
-                        interval="1000sp",
+                        interval="10ba",
                     ),
-                    HardNegativeMiningCallback(k=100, interval="1000sp"),
+                    HardNegativeMiningCallback(
+                        k=100, interval=10
+                    ),  # golden_retriever_trainer=self),
                 ],
             )
 
@@ -877,7 +891,7 @@ class Trainer(FromConfig):
         self.trainer.fit(
             train_dataloader=self.train_dataloader,
             eval_dataloader=evaluators,  # self.val_dataloader,
-            eval_interval="1000sp",
+            eval_interval="10ba",
         )
 
     def test(
