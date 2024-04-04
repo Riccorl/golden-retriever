@@ -17,7 +17,7 @@ from torch.utils.data import DataLoader, DistributedSampler
 
 from goldenretriever.callbacks.base import NLPTemplateCallback
 
-from composer.utils import reproducibility
+from composer.utils import reproducibility, dist
 
 from goldenretriever.common.log import get_logger
 from goldenretriever.common.model_inputs import ModelInputs
@@ -79,7 +79,16 @@ class PredictionCallback(Callback):
             # if state.get_elapsed_duration(
             # ) is not None and self.check_interval(state, event) and self.last_generate_batch != state.timestamp.batch:
             start = time.time()
-            self(event, state, logger)
+            predictions = self(event, state, logger)
+            # run the inner callbacks
+            # TODO: check if we need rank 0 only
+            for callback in self.other_callbacks:
+                callback(
+                    state=state,
+                    logger=logger,
+                    predictions=predictions,
+                    callback=self,
+                )
             diff = time.time() - start
             program_logger.info(f"Prediction callback ran in {diff} seconds.")
 
@@ -107,8 +116,15 @@ class PredictionCallback(Callback):
 
         program_logger.info(f"Computing predictions for event `{event}`")
         # get model from state
-        composer_model: GoldenRetrieverComposerModule = state.model
+        composer_model: GoldenRetrieverComposerModule = (
+            state.model.module if state.is_model_ddp else state.model
+        )
+        # Set to evaluation mode and stash the original mode.
+        original_mode = composer_model.training
+        # device = state.device
         composer_model.eval()
+        # dummy forward call needed for FSDP to work consistently
+        composer_model.dummy_forward_called = False
         # get the retriever
         retriever: GoldenRetriever = composer_model.model
         # get the current eval dataloader
@@ -168,60 +184,70 @@ class PredictionCallback(Callback):
             dataloader,
             desc=f"Computing predictions for dataset {state.dataloader_label}",
         )
+        retriever_outputs = []
         for batch in progress_bar:
             batch = batch.to(state.device._device)
             # get the top-k indices
             retriever_output = retriever.retrieve(
                 **batch.questions, k=self.k, precision=self.precision
             )
-            # compute recall at k
-            for batch_idx, retrieved_samples in enumerate(retriever_output):
-                # get the positive passages
-                gold_passages = batch["positives"][batch_idx]
-                # get the index of the gold passages in the retrieved passages
-                gold_passage_indices = []
-                for passage in gold_passages:
-                    try:
-                        gold_passage_indices.append(
-                            retriever.get_index_from_passage(passage)
-                        )
-                    except ValueError:
-                        logger.warning(
-                            f"Passage `{passage}` not found in the index. "
-                            "We will skip it, but the results might not reflect the "
-                            "actual performance."
-                        )
-                        pass
-                retrieved_indices = [r.document.id for r in retrieved_samples if r]
-                retrieved_passages = [
-                    retriever.get_passage_from_index(i) for i in retrieved_indices
-                ]
-                retrieved_scores = [r.score for r in retrieved_samples]
-                # correct predictions are the passages that are in the top-k and are gold
-                correct_indices = set(gold_passage_indices) & set(retrieved_indices)
-                # wrong predictions are the passages that are in the top-k and are not gold
-                wrong_indices = set(retrieved_indices) - set(gold_passage_indices)
-                # add the predictions to the list
-                prediction_output = dict(
-                    sample_idx=batch.sample_idx[batch_idx],
-                    gold=gold_passages,
-                    predictions=retrieved_passages,
-                    scores=retrieved_scores,
-                    correct=[
-                        retriever.get_passage_from_index(i) for i in correct_indices
-                    ],
-                    wrong=[retriever.get_passage_from_index(i) for i in wrong_indices],
-                )
-                predictions.append(prediction_output)
-                progress_bar.update(batch.questions["input_ids"].size(0))
+            retriever_outputs.append((batch, retriever_output))
+            progress_bar.update(batch.questions["input_ids"].size(0))
 
-        for callback in self.other_callbacks:
-            callback(
-                state=state,
-                logger=logger,
-                predictions=predictions,
-                callback=self,
-            )
+        if dist.get_global_rank() == 0:
+            # compute recall at k
+            for batch, retriever_output in retriever_outputs:
+                for batch_idx, retrieved_samples in enumerate(retriever_output):
+                    # get the positive passages
+                    gold_passages = batch["positives"][batch_idx]
+                    # get the index of the gold passages in the retrieved passages
+                    gold_passage_indices = []
+                    for passage in gold_passages:
+                        try:
+                            gold_passage_indices.append(
+                                retriever.get_index_from_passage(passage)
+                            )
+                        except ValueError:
+                            logger.warning(
+                                f"Passage `{passage}` not found in the index. "
+                                "We will skip it, but the results might not reflect the "
+                                "actual performance."
+                            )
+                            pass
+                    retrieved_indices = [r.document.id for r in retrieved_samples if r]
+                    retrieved_passages = [
+                        retriever.get_passage_from_index(i) for i in retrieved_indices
+                    ]
+                    retrieved_scores = [r.score for r in retrieved_samples]
+                    # correct predictions are the passages that are in the top-k and are gold
+                    correct_indices = set(gold_passage_indices) & set(retrieved_indices)
+                    # wrong predictions are the passages that are in the top-k and are not gold
+                    wrong_indices = set(retrieved_indices) - set(gold_passage_indices)
+                    # add the predictions to the list
+                    prediction_output = dict(
+                        sample_idx=batch.sample_idx[batch_idx],
+                        gold=gold_passages,
+                        predictions=retrieved_passages,
+                        scores=retrieved_scores,
+                        correct=[
+                            retriever.get_passage_from_index(i) for i in correct_indices
+                        ],
+                        wrong=[
+                            retriever.get_passage_from_index(i) for i in wrong_indices
+                        ],
+                    )
+                    predictions.append(prediction_output)
+
+        # for callback in self.other_callbacks:
+        #     callback(
+        #         state=state,
+        #         logger=logger,
+        #         predictions=predictions,
+        #         callback=self,
+        #     )
+
+        composer_model.train(mode=original_mode)
+        return predictions
 
     # def eval_end(self, state: State, logger: Logger):
 
@@ -293,8 +319,15 @@ class HardNegativeMiningCallback(Callback):
 
         program_logger.info(f"Computing hard negatives predictions for event `{event}`")
         # get model from state
-        composer_model: GoldenRetrieverComposerModule = state.model
+        composer_model: GoldenRetrieverComposerModule = (
+            state.model.module if state.is_model_ddp else state.model
+        )
+        # Set to evaluation mode and stash the original mode.
+        original_mode = composer_model.training
+        # device = state.device
         composer_model.eval()
+        # dummy forward call needed for FSDP to work consistently
+        composer_model.dummy_forward_called = False
         # get the retriever
         retriever = composer_model.model
         # get the current train dataloader
@@ -492,6 +525,9 @@ class HardNegativeMiningCallback(Callback):
         hn_manager.reset()
         hn_manager.add(hard_negatives_list.keys(), hard_negatives_list.values())
         hn_manager.tokenize()
+
+        composer_model.train(mode=original_mode)
+        return predictions
 
         # dataset.hn_manager = hn_manager
 

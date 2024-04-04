@@ -364,12 +364,12 @@ class Trainer(FromConfig):
             collate_fn=GoldenRetrieverCollator(
                 tokenizer=self.retriever.question_tokenizer
             ),
-            batch_size=64,
+            batch_size=32,
             drop_last=False,
-            num_workers=0, #self.num_workers,
+            num_workers=self.num_workers,
             pin_memory=True,
-            # prefetch_factor=2,
-            # persistent_workers=True,
+            prefetch_factor=2,
+            persistent_workers=True,
             timeout=0,
             # sampler=dist.get_sampler(
             #     self.train_dataset, drop_last=False, shuffle=False
@@ -387,12 +387,12 @@ class Trainer(FromConfig):
             collate_fn=GoldenRetrieverCollator(
                 tokenizer=self.retriever.question_tokenizer
             ),
-            batch_size=64,
+            batch_size=32,
             drop_last=False,
-            num_workers=0, #self.num_workers,
+            num_workers=self.num_workers,
             pin_memory=True,
-            # prefetch_factor=2,
-            # persistent_workers=True,
+            prefetch_factor=2,
+            persistent_workers=True,
             timeout=0,
             # sampler=dist.get_sampler(
             #     self.val_dataset, drop_last=False, shuffle=False
@@ -768,7 +768,8 @@ class Trainer(FromConfig):
             # )
             self.trainer = ComposerTrainer(
                 model=self.composer_module,
-                device_train_microbatch_size=8,
+                train_dataloader=self.train_dataloader,
+                device_train_microbatch_size=32,
                 algorithms=[
                     HardNegativeAlgo(
                         self.train_dataset.tokenizer,
@@ -777,12 +778,13 @@ class Trainer(FromConfig):
                 ],
                 progress_bar=True,
                 # log_to_console=True,
-                device="gpu",
-                precision="amp_fp16",
+                # device="gpu",
+                precision="amp_bf16",
                 optimizers=self.optimizer,
                 schedulers=self.lr_scheduler,
                 step_schedulers_every_batch=True,  # interval should be step
                 max_duration="230ba",
+                dist_timeout=300,
                 # eval_interval="1ba",
                 seed=self.seed,
                 callbacks=[
@@ -796,6 +798,16 @@ class Trainer(FromConfig):
                         k=100, interval=10
                     ),  # golden_retriever_trainer=self),
                 ],
+                # deepspeed_config={
+                #     "train_batch_size": 64,
+                #     "train_micro_batch_size_per_gpu": 32,
+                #     "gradient_accumulation_steps": 1,
+                #     "bf16": {"enabled": True},
+                #     "zero_optimization": {
+                #         "stage": 1,
+                #         # "offload_optimizer": {"device": "cpu", "pin_memory": True},
+                #     },
+                # },
             )
 
             # self.trainer = pl.Trainer(
@@ -889,7 +901,7 @@ class Trainer(FromConfig):
             )
         ]
         self.trainer.fit(
-            train_dataloader=self.train_dataloader,
+            # train_dataloader=self.train_dataloader,
             eval_dataloader=evaluators,  # self.val_dataloader,
             eval_interval="10ba",
         )

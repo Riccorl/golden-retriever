@@ -10,15 +10,18 @@ from goldenretriever import GoldenRetriever
 from goldenretriever.indexers.inmemory import InMemoryDocumentIndex
 from goldenretriever.data.datasets import AidaInBatchNegativesDataset
 
+from composer.utils import dist, get_device
+
 logger = get_logger(__name__)
 
 if __name__ == "__main__":
+    dist.initialize_dist(get_device(None)) #, timeout=600)
     # instantiate retriever
     retriever = GoldenRetriever(
         question_encoder="intfloat/e5-small-v2",
         document_index=InMemoryDocumentIndex(
             documents=DocumentStore.from_file(
-                "/home/ric/Projects/golden-retriever/data/dpr-like/el/documents_only_data.jsonl"
+                "/leonardo_scratch/large/userexternal/rorland1/golden-retriever/data/el/documents_only_data.jsonl"
             ),
             metadata_fields=["definition"],
             separator=" <def> ",
@@ -41,7 +44,7 @@ if __name__ == "__main__":
     train_dataset = StreamingGoldenRetrieverDataset(
         name="aida_train",
         tokenizer=retriever.question_tokenizer,
-        local="data/dpr-like/el/mosaic/train",
+        local="/leonardo_scratch/large/userexternal/rorland1/golden-retriever/data/el/mosaic/train",
         split="train",
         question_batch_size=64,
         # passage_batch_size=400,
@@ -49,7 +52,7 @@ if __name__ == "__main__":
     val_dataset = StreamingGoldenRetrieverDataset(
         name="aida_val",
         tokenizer=retriever.question_tokenizer,
-        local="data/dpr-like/el/mosaic/val",
+        local="/leonardo_scratch/large/userexternal/rorland1/golden-retriever/data/el/mosaic/val",
         split="train",
         question_batch_size=64,
         # passage_batch_size=400,
