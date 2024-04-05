@@ -4,27 +4,31 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Literal, Optional, Union
 
 import composer
-from goldenretriever.common.model_inputs import ModelInputs
-from goldenretriever.composer_modules.algo import HardNegativeAlgo
-from goldenretriever.composer_modules.callbacks import (
-    HardNegativeMiningCallback,
-    PredictionCallback,
-)
-from goldenretriever.composer_modules.callbacks import (
-    RecallAtKEvaluationCallback as ComposerRecallAtKEvaluationCallback,
-)
-from goldenretriever.composer_modules.mosaic_module import GoldenRetrieverComposerModule
-from goldenretriever.data.mosaic_datasets import (
-    GoldenRetrieverCollator,
-    GoldenStreamingDataLoader,
-    StreamingGoldenRetrieverDataset,
-)
-from goldenretriever.trainer import PRECISION_INPUT_STR_ALIAS_CONVERSION
-
+import composer.callbacks
 import hydra
 import lightning as pl
 import omegaconf
 import torch
+from composer import (
+    DataSpec,
+    Evaluator,
+    Event,
+    State,
+    Time,
+    TimeUnit,
+)
+from composer import (
+    Trainer as ComposerTrainer,
+)
+from composer.callbacks import (
+    CheckpointSaver,
+    EarlyStopper,
+    LRMonitor,
+    MemoryMonitor,
+    SpeedMonitor,
+)
+from composer.loggers import WandBLogger
+from composer.utils import dist, reproducibility
 
 # from lightning import Trainer
 from lightning.pytorch.callbacks import (
@@ -37,6 +41,7 @@ from lightning.pytorch.callbacks import (
 # from lightning.pytorch.loggers import WandbLogger
 from omegaconf import OmegaConf
 from pprintpp import pformat
+from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from goldenretriever.callbacks.base import NLPTemplateCallback
@@ -55,8 +60,24 @@ from goldenretriever.callbacks.utils_callbacks import (
 )
 from goldenretriever.common.from_config import FromConfig
 from goldenretriever.common.log import _golden_retriever_build_pbar, get_logger
+from goldenretriever.common.model_inputs import ModelInputs
 from goldenretriever.common.utils import to_config
+from goldenretriever.composer_modules.algo import HardNegativeAlgo
+from goldenretriever.composer_modules.callbacks import (
+    HardNegativeMiningCallback,
+    PredictionCallback,
+)
+from goldenretriever.composer_modules.callbacks import (
+    RecallAtKEvaluationCallback as ComposerRecallAtKEvaluationCallback,
+)
+from goldenretriever.composer_modules.checkpoint_saver import MetricCheckpointSaver
+from goldenretriever.composer_modules.mosaic_module import GoldenRetrieverComposerModule
 from goldenretriever.data.datasets import GoldenRetrieverDataset
+from goldenretriever.data.mosaic_datasets import (
+    GoldenRetrieverCollator,
+    GoldenStreamingDataLoader,
+    StreamingGoldenRetrieverDataset,
+)
 from goldenretriever.indexers.base import BaseDocumentIndex
 from goldenretriever.lightning_modules.pl_data_modules import (
     GoldenRetrieverPLDataModule,
@@ -66,23 +87,8 @@ from goldenretriever.pytorch_modules.loss import MultiLabelNCELoss
 from goldenretriever.pytorch_modules.model import GoldenRetriever
 from goldenretriever.pytorch_modules.optim import RAdamW
 from goldenretriever.pytorch_modules.scheduler import LinearScheduler
-
-from composer import (
-    DataSpec,
-    Evaluator,
-    Event,
-    State,
-    Time,
-    TimeUnit,
-    Trainer as ComposerTrainer,
-)
-from composer.utils import reproducibility, dist
-from composer.callbacks import SpeedMonitor
-
+from goldenretriever.trainer import PRECISION_INPUT_STR_ALIAS_CONVERSION
 from goldenretriever.trainer.composer_trainer import GoldenComposerTrainer
-
-from torch.utils.data import DataLoader
-from composer.loggers import WandBLogger
 
 logger = get_logger()
 
@@ -295,91 +301,108 @@ class Trainer(FromConfig):
             self.top_k = [self.top_k]
         # save the target top_k
         self.target_top_k = self.top_k[0]
+        logger.info(
+            f"Monitor top-k value is recall@{self.target_top_k}. \n"
+            "If you provided a list of top-k values, the first one will be used."
+        )
         self.metric_to_monitor = self.metric_to_monitor.format(top_k=self.target_top_k)
 
         # explicitly configure some callbacks that will be needed not only by the
         # pl.Trainer but also in this class
         # model checkpoint callback
-        if self.save_last:
-            logger.warning(
-                "We will override the `save_last` of `ModelCheckpoint` to `False`. "
-                "Instead, we will use a separate `ModelCheckpoint` callback to save the last checkpoint"
-            )
+        # if self.save_last:
+        #     logger.warning(
+        #         "We will override the `save_last` of `ModelCheckpoint` to `False`. "
+        #         "Instead, we will use a separate `ModelCheckpoint` callback to save the last checkpoint"
+        #     )
+        # checkpoint_kwargs = dict(
+        #     monitor=self.metric_to_monitor,
+        #     mode=self.monitor_mode,
+        #     verbose=True,
+        #     save_top_k=self.save_top_k,
+        #     filename=self.checkpoint_filename,
+        #     dirpath=self.checkpoint_dir,
+        #     auto_insert_metric_name=False,
+        # )
+        # if self.checkpoint_kwargs is not None:
+        #     checkpoint_kwargs.update(self.checkpoint_kwargs)
         checkpoint_kwargs = dict(
+            folder=self.checkpoint_dir,
+            filename=self.checkpoint_filename,
+            save_interval=self.save_interval,
+            num_checkpoints_to_keep=self.save_top_k,
             monitor=self.metric_to_monitor,
             mode=self.monitor_mode,
-            verbose=True,
-            save_top_k=self.save_top_k,
-            filename=self.checkpoint_filename,
-            dirpath=self.checkpoint_dir,
-            auto_insert_metric_name=False,
         )
         if self.checkpoint_kwargs is not None:
             checkpoint_kwargs.update(self.checkpoint_kwargs)
         self.checkpoint_kwargs = checkpoint_kwargs
-        self.model_checkpoint_callback: ModelCheckpoint | None = None
+        self.model_checkpoint_callback: MetricCheckpointSaver | None = None
         self.checkpoint_path: str | os.PathLike | None = None
         # last checkpoint callback
-        self.latest_model_checkpoint_callback: ModelCheckpoint | None = None
+        self.latest_model_checkpoint_callback: MetricCheckpointSaver | None = None
         self.last_checkpoint_kwargs: dict | None = None
         if self.save_last:
             last_checkpoint_kwargs = deepcopy(self.checkpoint_kwargs)
-            last_checkpoint_kwargs["save_top_k"] = 1
+            last_checkpoint_kwargs["num_checkpoints_to_keep"] = 1
             last_checkpoint_kwargs["filename"] = "last-{epoch}-{step}"
-            last_checkpoint_kwargs["monitor"] = "step"
-            last_checkpoint_kwargs["mode"] = "max"
             self.last_checkpoint_kwargs = last_checkpoint_kwargs
 
         # early stopping callback
         early_stopping_kwargs = dict(
+            # monitor=self.metric_to_monitor,
+            # mode=self.monitor_mode,
+            # patience=self.early_stopping_patience,
             monitor=self.metric_to_monitor,
-            mode=self.monitor_mode,
+            dataloader_label="validate",
             patience=self.early_stopping_patience,
         )
         if self.early_stopping_kwargs is not None:
             early_stopping_kwargs.update(self.early_stopping_kwargs)
         self.early_stopping_kwargs = early_stopping_kwargs
-        self.early_stopping_callback: EarlyStopping | None = None
+        self.early_stopping_callback: EarlyStopper | None = None
 
         # other callbacks declaration
-        self.callbacks_store: List[pl.Callback] = []  # self.configure_callbacks()
+        self.callbacks_store: List[composer.Callback] = []  # self.configure_callbacks()
         # add default callbacks
         self.callbacks_store += [
-            ModelSummary(max_depth=2),
-            LearningRateMonitor(logging_interval="step"),
+            SpeedMonitor(window_size=100),
+            LRMonitor(),
+            MemoryMonitor(),
         ]
 
         # lazy trainer declaration
         self.trainer: ComposerTrainer | None = None
 
-    def configure_lightning_datamodule(self, *args, **kwargs):
-        # lightning data module declaration
-        if self.val_dataset is not None and isinstance(
-            self.val_dataset, GoldenRetrieverDataset
-        ):
-            self.val_dataset = [self.val_dataset]
-        if self.test_dataset is not None and isinstance(
-            self.test_dataset, GoldenRetrieverDataset
-        ):
-            self.test_dataset = [self.test_dataset]
+    # def configure_lightning_datamodule(self, *args, **kwargs):
+    #     # lightning data module declaration
+    #     if self.val_dataset is not None and isinstance(
+    #         self.val_dataset, GoldenRetrieverDataset
+    #     ):
+    #         self.val_dataset = [self.val_dataset]
+    #     if self.test_dataset is not None and isinstance(
+    #         self.test_dataset, GoldenRetrieverDataset
+    #     ):
+    #         self.test_dataset = [self.test_dataset]
 
-        self.lightning_datamodule = GoldenRetrieverPLDataModule(
-            train_dataset=self.train_dataset,
-            val_datasets=self.val_dataset,
-            test_datasets=self.test_dataset,
-            num_workers=self.num_workers,
-            *args,
-            **kwargs,
-        )
-        return self.lightning_datamodule
+    #     self.lightning_datamodule = GoldenRetrieverPLDataModule(
+    #         train_dataset=self.train_dataset,
+    #         val_datasets=self.val_dataset,
+    #         test_datasets=self.test_dataset,
+    #         num_workers=self.num_workers,
+    #         *args,
+    #         **kwargs,
+    #     )
+    #     return self.lightning_datamodule
 
     def configure_dataloader(self, *args, **kwargs):
 
+        train_collator = GoldenRetrieverCollator(
+            tokenizer=self.retriever.question_tokenizer
+        )
         self.train_dataloader = DataLoader(
             self.train_dataset,
-            collate_fn=GoldenRetrieverCollator(
-                tokenizer=self.retriever.question_tokenizer
-            ),
+            collate_fn=train_collator,
             batch_size=32,
             drop_last=False,
             num_workers=self.num_workers,
@@ -387,9 +410,6 @@ class Trainer(FromConfig):
             # prefetch_factor=2,
             # persistent_workers=True,
             # timeout=0,
-            # sampler=dist.get_sampler(
-            #     self.train_dataset, drop_last=False, shuffle=False
-            # ),
         )
         self.train_dataloader = DataSpec(
             self.train_dataloader,
@@ -399,11 +419,12 @@ class Trainer(FromConfig):
         )
 
         # self.val_dataloader = GoldenStreamingDataLoader(
+        val_collator = GoldenRetrieverCollator(
+            tokenizer=self.retriever.question_tokenizer
+        )
         self.val_dataloader = DataLoader(
             self.val_dataset,
-            collate_fn=GoldenRetrieverCollator(
-                tokenizer=self.retriever.question_tokenizer
-            ),
+            collate_fn=val_collator,
             batch_size=32,
             drop_last=False,
             num_workers=self.num_workers,
@@ -411,9 +432,6 @@ class Trainer(FromConfig):
             prefetch_factor=2,
             persistent_workers=True,
             timeout=0,
-            # sampler=dist.get_sampler(
-            #     self.val_dataset, drop_last=False, shuffle=False
-            # )
         )
         self.val_dataloader = DataSpec(
             self.val_dataloader,
@@ -520,75 +538,52 @@ class Trainer(FromConfig):
 
     @staticmethod
     def configure_logger(
-        name: str,
-        save_dir: str | os.PathLike,
-        offline: bool,
-        entity: str,
-        project: str,
-        log_model: Literal["all"] | bool,
-        watch: str | None = None,
-        lightning_module: torch.nn.Module | None = None,
-        *args,
-        **kwargs,
-    ) -> WandbLogger:
+        project: Optional[str] = None,
+        group: Optional[str] = None,
+        name: Optional[str] = None,
+        entity: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+        log_artifacts: bool = False,
+        rank_zero_only: bool = True,
+        init_kwargs: Optional[Dict[str, Any]] = None,
+    ) -> WandBLogger:
         """
         Configure the wandb logger
 
         Args:
-            name (`str`):
-                The name of the experiment
-            save_dir (`str`, `os.PathLike`):
-                The directory where to save the experiment
-            offline (`bool`):
-                Whether to run wandb offline
-            entity (`str`):
-                The wandb entity
-            project (`str`):
-                The wandb project name
-            log_model (`Literal["all"]`, `bool`):
-                Whether to log the model to wandb
-            watch (`str`, optional, defaults to `None`):
-                The mode to watch the model
-            lightning_module (`torch.nn.Module`, optional, defaults to `None`):
-                The lightning module to watch
-            *args:
-                Additional args
-            **kwargs:
-                Additional kwargs
+
 
         Returns:
-            `lightning.loggers.WandbLogger`:
-                The wandb logger
         """
-        wandb_logger = WandbLogger(
-            name=name,
-            save_dir=save_dir,
-            offline=offline,
+        wandb_logger = WandBLogger(
             project=project,
-            log_model=log_model and not offline,
+            group=group,
+            name=name,
             entity=entity,
-            *args,
-            **kwargs,
+            tags=tags,
+            log_artifacts=log_artifacts,
+            rank_zero_only=rank_zero_only,
+            init_kwargs=init_kwargs,
         )
-        if watch is not None and lightning_module is not None:
-            watch_kwargs = dict(model=lightning_module)
-            if watch is not None:
-                watch_kwargs["log"] = watch
-            wandb_logger.watch(**watch_kwargs)
+        # if watch is not None and lightning_module is not None:
+        #     watch_kwargs = dict(model=lightning_module)
+        #     if watch is not None:
+        #         watch_kwargs["log"] = watch
+        #     wandb_logger.watch(**watch_kwargs)
         return wandb_logger
 
     @staticmethod
     def configure_early_stopping(
         monitor: str,
-        mode: str,
+        dataloader_label: str,
         patience: int = 3,
         *args,
         **kwargs,
     ) -> EarlyStopping:
         logger.info(f"Enabling EarlyStopping callback with patience: {patience}")
-        early_stopping_callback = EarlyStopping(
+        early_stopping_callback = EarlyStopper(
             monitor=monitor,
-            mode=mode,
+            dataloader_label=dataloader_label,
             patience=patience,
             *args,
             **kwargs,
@@ -597,39 +592,43 @@ class Trainer(FromConfig):
 
     def configure_model_checkpoint(
         self,
-        monitor: str,
-        mode: str,
-        verbose: bool = True,
-        save_top_k: int = 1,
-        save_last: bool = False,
-        filename: str | os.PathLike | None = None,
-        dirpath: str | os.PathLike | None = None,
-        auto_insert_metric_name: bool = False,
+        # monitor: str,
+        # mode: str,
+        # verbose: bool = True,
+        # save_top_k: int = 1,
+        # save_last: bool = False,
+        # filename: str | os.PathLike | None = None,
+        # dirpath: str | os.PathLike | None = None,
+        # auto_insert_metric_name: bool = False,
+        folder: Union[str, os.PathLike],
+        filename: Union[str, os.PathLike],
+        save_interval: Union[Time, str, int, Callable[[State, Event], bool]],
+        num_checkpoints_to_keep: int,
+        monitor: Optional[str] = None,
+        mode: Optional[str] = None,
         *args,
         **kwargs,
-    ) -> ModelCheckpoint:
+    ) -> CheckpointSaver:
         logger.info("Enabling Model Checkpointing")
-        if dirpath is None:
-            dirpath = (
+        if folder is None:
+            folder = (
                 self.experiment_path / "checkpoints" if self.experiment_path else None
             )
         if filename is None:
             filename = (
                 "checkpoint-" + monitor + "_{" + monitor + ":.4f}-epoch_{epoch:02d}"
             )
-        self.checkpoint_path = dirpath / filename if dirpath is not None else None
-        logger.info(f"Checkpoint directory: {dirpath}")
+        self.checkpoint_path = folder / filename if folder is not None else None
+        logger.info(f"Checkpoint directory: {folder}")
         logger.info(f"Checkpoint filename: {filename}")
 
         kwargs = dict(
+            folder=folder,
+            filename=filename,
+            save_interval=save_interval,
+            num_checkpoints_to_keep=num_checkpoints_to_keep,
             monitor=monitor,
             mode=mode,
-            verbose=verbose,
-            save_top_k=save_top_k,
-            save_last=save_last,
-            filename=filename,
-            dirpath=dirpath,
-            auto_insert_metric_name=auto_insert_metric_name,
             *args,
             **kwargs,
         )
@@ -645,7 +644,7 @@ class Trainer(FromConfig):
         #     filename=self.checkpoint_filename,
         # )
         # modelcheckpoint_kwargs.update(kwargs)
-        self.model_checkpoint_callback = ModelCheckpoint(**kwargs)
+        self.model_checkpoint_callback = CheckpointSaver(**kwargs)
         return self.model_checkpoint_callback
 
     def configure_hard_negatives_callback(self):
@@ -759,8 +758,6 @@ class Trainer(FromConfig):
             self.wandb_logger = self.configure_logger(**self.wandb_kwargs)
             self.experiment_path = Path(self.wandb_logger.experiment.dir)
 
-        # set-up training specific callbacks
-        self.callbacks_store = self.training_callbacks()
         # add the evaluation callbacks
         self.callbacks_store.append(
             self.configure_prediction_callbacks(
@@ -772,7 +769,10 @@ class Trainer(FromConfig):
         if self.max_hard_negatives_to_mine > 0:
             self.callbacks_store.append(self.configure_hard_negatives_callback())
 
-        self.callbacks_store.append(FreeUpIndexerVRAMCallback())
+        # set-up training specific callbacks
+        self.callbacks_store = self.training_callbacks()
+
+        # self.callbacks_store.append(FreeUpIndexerVRAMCallback())
 
         self.configure_dataloader()
         if self.trainer is None:

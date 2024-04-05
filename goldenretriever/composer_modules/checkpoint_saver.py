@@ -198,9 +198,15 @@ class MetricCheckpointSaver(CheckpointSaver):  # noqa: D101
             self.save_interval(state, Event.BATCH_CHECKPOINT)
             and self.last_checkpoint_batch != state.timestamp.batch
         ):
-            self._save_checkpoint(
-                state,
-                logger,
+            if self.monitor is not None:
+                self._save_monitor_checkpoint(
+                    state,
+                    logger,
+                )
+            else:
+                self._save_checkpoint(
+                    state,
+                    logger,
             )
 
     def epoch_checkpoint(self, state: State, logger: Logger):
@@ -209,9 +215,15 @@ class MetricCheckpointSaver(CheckpointSaver):  # noqa: D101
             self.save_interval(state, Event.EPOCH_CHECKPOINT)
             and self.last_checkpoint_batch != state.timestamp.batch
         ):
-            self._save_checkpoint(
-                state,
-                logger,
+            if self.monitor is not None:
+                self._save_monitor_checkpoint(
+                    state,
+                    logger,
+                )
+            else:
+                self._save_checkpoint(
+                    state,
+                    logger,
             )
 
     def iteration_checkpoint(self, state: State, logger: Logger):
@@ -220,9 +232,15 @@ class MetricCheckpointSaver(CheckpointSaver):  # noqa: D101
             self.save_interval(state, Event.ITERATION_CHECKPOINT)
             and self.last_checkpoint_batch != state.timestamp.batch
         ):
-            self._save_checkpoint(
-                state,
-                logger,
+            if self.monitor is not None:
+                self._save_monitor_checkpoint(
+                    state,
+                    logger,
+                )
+            else:
+                self._save_checkpoint(
+                    state,
+                    logger,
             )
 
     def state_dict(self) -> Dict[str, Any]:

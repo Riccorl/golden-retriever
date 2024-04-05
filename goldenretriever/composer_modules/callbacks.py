@@ -436,56 +436,6 @@ class HardNegativeMiningCallback(Callback):
         # )
         predictions = []
 
-        # move the dataloader iterator to `current_train_epoch`
-        # for epoch in range(int(state.timestamp.epoch)):
-        #         if isinstance(dataloader, DataLoader) and isinstance(dataloader.sampler, DistributedSampler):
-        #             dataloader.sampler.set_epoch(epoch)
-        #         for _ in dataloader:
-        #             break
-        # hn_dataloader = DataLoader(
-        #     dataset,
-        #     shuffle=False,
-        #     batch_size=dataloader.batch_size,
-        #     num_workers=self.num_workers,
-        #     # pin_memory=True,
-        #     collate_fn=dataloader.collate_fn,
-        # )
-
-        # if state.dataloader_len is None:
-        #     dataloader_iter = iter(dl)
-        # else:
-        #     dataloader_iter = itertools.islice(dl, int(state.dataloader_len))
-
-        # _rng_state = state.state_dict().get("rng", None)
-        # epoch = 0
-        # # for epoch in range(int(state.timestamp.epoch)):
-        # #     if isinstance(dl, DataLoader) and isinstance(dl.sampler, DistributedSampler):
-        # #         dl.sampler.set_epoch(epoch)
-        # while epoch < int(state.timestamp.epoch):
-        #     if isinstance(dl, DataLoader) and isinstance(dl.sampler, DistributedSampler):
-        #         dl.sampler.set_epoch(epoch)
-        #     epoch += 1
-        #     for _ in dl:
-        #         break
-        # for batch_idx, batch in enumerate(dataloader_iter):
-        #     # Spin dataloader forward unless dataloader handles internally with dataset_resumption
-        #     if (
-        #         "train" not in state.dataset_resumption
-        #         and batch_idx < int(state.timestamp.batch_in_epoch)
-        #     ):
-        #         if "29_449" in batch["sample_idx"]:
-        #             print("debug here")
-        #         # Restore the RNG state immediately before the next batch is yielded from the dataloader
-        #         if (
-        #             batch_idx + 1
-        #             == int(state.timestamp.batch_in_epoch)
-        #             and _rng_state is not None
-        #         ):
-        #             reproducibility.load_rng_state(_rng_state)
-        #             _rng_state = None
-        #         continue
-        #     break
-
         reproducibility.seed_all(state.seed)
 
         # start = time.time()
@@ -583,63 +533,6 @@ class HardNegativeMiningCallback(Callback):
         composer_model.train(mode=original_mode)
         return predictions
 
-        # dataset.hn_manager = hn_manager
-
-        # new_dataloader = torch.utils.data.DataLoader(
-        #     dataset,
-        #     collate_fn=GoldenRetrieverCollator(tokenizer=tokenizer),
-        #     batch_size=64,
-        #     drop_last=False,
-        #     num_workers=4,
-        #     pin_memory=True,
-        #     prefetch_factor=2,
-        #     persistent_workers=True,
-        #     timeout=0,
-        #     # sampler=dist.get_sampler(
-        #     #     self.train_dataset, drop_last=False, shuffle=False
-        #     # ),
-        # )
-        # new_dataloader = DataSpec(
-        #     new_dataloader,
-        #     split_batch=dataset.split_batch,
-        #     get_num_samples_in_batch=dataset.get_num_samples_in_batch,
-        #     get_num_tokens_in_batch=dataset.get_num_tokens_in_batch,
-        # )
-
-        # state.set_dataloader(
-        #     new_dataloader, state.dataloader_label, state.dataloader_len
-        # )
-
-        # def update_fn(sample, hn_manager):
-        #     # sample.update(updates[sample["sample_idx"]])
-        #     if sample["id"] in hn_manager:
-        #         sample["hard_negatives"] += hn_manager.get(sample["id"])
-        #     return sample
-
-        # dataloader.dataset.map(
-        #     partial(update_fn, hn_manager=hn_manager),
-        #     batched=False,
-        # )
-
-        # # for callback in self.other_callbacks:
-        # #     callback(
-        # #         state=state,
-        # #         logger=logger,
-        # #         predictions=predictions,
-        # #         callback=self,
-        # #     )
-
-        # # move the model back to train mode
-        # composer_model.train()
-        # move back the dataloader iterator to `current_train_epoch`
-        # for epoch in range(int(current_train_epoch)):
-        #     if isinstance(dataloader, DataLoader) and isinstance(
-        #         dataloader.sampler, DistributedSampler
-        #     ):
-        #         dataloader.sampler.set_epoch(epoch)
-        #     for _ in dataloader:
-        #         break
-
 
 class RecallAtKEvaluationCallback(NLPTemplateCallback):
     """
@@ -732,30 +625,10 @@ class RecallAtKEvaluationCallback(NLPTemplateCallback):
         # )
         logger.log_metrics({f"metrics/{dataloader_label}/recall@{self.k}": recall_at_k})
         state.eval_metrics[f"metrics/{dataloader_label}/recall@{self.k}"] = recall_at_k
+        state.eval_metrics[f"metrics/recall@{self.k}"] = recall_at_k
         if self.verbose:
             program_logger.info(
                 f"metrics/{dataloader_label}/recall@{self.k}: {recall_at_k}"
             )
 
         return metrics
-
-
-class HardNegativeBatchAugmentator(Callback):
-    def __init__(self):
-        self.hn_manager: HardNegativesManager | None = None
-
-    def before_train_batch(self, state: State, logger: Logger) -> None:
-        """Called on the :attr:`.Event.BEFORE_TRAIN_BATCH` event.
-
-        Args:
-            state (State): The training state.
-            logger (Logger): The logger.
-        """
-        tokenizer = state.train_dataloader.dataset.tokenizer
-        max_passage_length = state.train_dataloader.dataset.max_passage_length
-        # update the hard negatives manager with the singleton instance
-        self.hn_manager = HardNegativesManager(
-            tokenizer=tokenizer,
-            max_length=max_passage_length,
-        )
-        batch = state.batch
