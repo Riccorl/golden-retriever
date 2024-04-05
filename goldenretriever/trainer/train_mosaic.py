@@ -10,6 +10,7 @@ import lightning as pl
 import omegaconf
 import torch
 from composer import (
+    Algorithm,
     DataSpec,
     Evaluator,
     Event,
@@ -87,8 +88,12 @@ from goldenretriever.pytorch_modules.loss import MultiLabelNCELoss
 from goldenretriever.pytorch_modules.model import GoldenRetriever
 from goldenretriever.pytorch_modules.optim import RAdamW
 from goldenretriever.pytorch_modules.scheduler import LinearScheduler
-from goldenretriever.trainer import PRECISION_INPUT_STR_ALIAS_CONVERSION
+from goldenretriever.trainer import (
+    COMPOSER_PRECISION_INPUT_STR_ALIAS_CONVERSION,
+    PRECISION_INPUT_STR_ALIAS_CONVERSION,
+)
 from goldenretriever.trainer.composer_trainer import GoldenComposerTrainer
+from goldenretriever.trainer.evaluator import GoldenRetrieverEvaluator
 
 logger = get_logger()
 
@@ -112,21 +117,23 @@ class Trainer(FromConfig):
         num_warmup_steps: int = 0,
         loss: torch.nn.Module = MultiLabelNCELoss,
         callbacks: list | None = None,
-        accelerator: str = "auto",
-        devices: int = 1,
-        num_nodes: int = 1,
-        strategy: str = "auto",
-        accumulate_grad_batches: int = 1,
-        gradient_clip_val: float = 1.0,
-        val_check_interval: float = 1.0,
-        check_val_every_n_epoch: int = 1,
+        device: str = "gpu",
+        precision: int | str = "amp",
+        # accelerator: str = "auto",
+        # devices: int = 1,
+        # accumulate_grad_batches: int = 1,
+        # gradient_clip_val: float = 1.0,
+        # val_check_interval: float = 1.0,
+        # check_val_every_n_epoch: int = 1,
         max_steps: int | None = None,
         max_epochs: int | None = None,
+        eval_interval: int | str | Time | Callable[[State, Event], bool] = "1ba",
         deterministic: bool = True,
         fast_dev_run: bool = False,
-        precision: int | str = 16,
-        reload_dataloaders_every_n_epochs: int = 1,
         resume_from_checkpoint_path: str | os.PathLike | None = None,
+        deepspeed_config: dict | None = None,
+        fsdp_config: dict | None = None,
+        dist_timeout: int = 300,
         composer_trainer_kwargs: dict | None = None,
         # eval parameters
         metric_to_monitor: str = "validate_recall@{top_k}",
@@ -180,22 +187,18 @@ class Trainer(FromConfig):
         self.num_warmup_steps = num_warmup_steps
         self.loss = loss
         self.callbacks = callbacks
-        self.accelerator = accelerator
-        self.devices = devices
-        self.num_nodes = num_nodes
-        self.strategy = strategy
-        self.accumulate_grad_batches = accumulate_grad_batches
-        self.gradient_clip_val = gradient_clip_val
-        self.val_check_interval = val_check_interval
-        self.check_val_every_n_epoch = check_val_every_n_epoch
+        self.device = device
+        self.precision = precision
         self.max_steps = max_steps
         self.max_epochs = max_epochs
+        self.eval_interval = eval_interval
         self.deterministic = deterministic
         self.fast_dev_run = fast_dev_run
-        self.precision = precision
-        self.reload_dataloaders_every_n_epochs = reload_dataloaders_every_n_epochs
         self.resume_from_checkpoint_path = resume_from_checkpoint_path
-        self.trainer_kwargs = composer_trainer_kwargs or {}
+        self.deepspeed_config = deepspeed_config
+        self.fsdp_config = fsdp_config
+        self.dist_timeout = dist_timeout
+        self.composer_trainer_kwargs = composer_trainer_kwargs or {}
         # eval parameters
         self.metric_to_monitor = metric_to_monitor
         self.monitor_mode = monitor_mode
@@ -343,6 +346,9 @@ class Trainer(FromConfig):
             LRMonitor(),
             MemoryMonitor(),
         ]
+
+        # algorithms declaration
+        self.agorithms: List[Algorithm] = []
 
         # lazy trainer declaration
         self.trainer: ComposerTrainer | None = None
@@ -544,14 +550,6 @@ class Trainer(FromConfig):
 
     def configure_model_checkpoint(
         self,
-        # monitor: str,
-        # mode: str,
-        # verbose: bool = True,
-        # save_top_k: int = 1,
-        # save_last: bool = False,
-        # filename: str | os.PathLike | None = None,
-        # dirpath: str | os.PathLike | None = None,
-        # auto_insert_metric_name: bool = False,
         folder: Union[str, os.PathLike],
         filename: Union[str, os.PathLike],
         save_interval: Union[Time, str, int, Callable[[State, Event], bool]],
@@ -600,20 +598,30 @@ class Trainer(FromConfig):
         return self.model_checkpoint_callback
 
     def configure_hard_negatives_callback(self):
+        # TODO: use new callback and algorithm for composer
         metrics_to_monitor = (
             self.metrics_to_monitor_for_hard_negatives or self.metric_to_monitor
         )
-        hard_negatives_callback = NegativeAugmentationCallback(
-            k=self.target_top_k,
-            batch_size=self.prediction_batch_size,
-            precision=self.precision,
-            stages=["validate"],
-            metrics_to_monitor=metrics_to_monitor,
-            threshold=self.hard_negatives_threshold,
-            max_negatives=self.max_hard_negatives_to_mine,
-            add_with_probability=self.mine_hard_negatives_with_probability,
-            refresh_every_n_epochs=1,
+        # hard_negatives_callback = NegativeAugmentationCallback(
+        #     k=self.target_top_k,
+        #     batch_size=self.prediction_batch_size,
+        #     precision=self.precision,
+        #     stages=["validate"],
+        #     metrics_to_monitor=metrics_to_monitor,
+        #     threshold=self.hard_negatives_threshold,
+        #     max_negatives=self.max_hard_negatives_to_mine,
+        #     add_with_probability=self.mine_hard_negatives_with_probability,
+        #     refresh_every_n_epochs=1,
+        # )
+        hard_negatives_callback = HardNegativeMiningCallback(
+            k=self.target_top_k, interval=self.eval_interval
         )
+        hard_negative_algo = HardNegativeAlgo(
+            self.train_dataset.tokenizer,
+            max_length=self.train_dataset.max_passage_length,
+        )
+        self.algorithms.append(hard_negative_algo)
+
         return hard_negatives_callback
 
     def training_callbacks(self):
@@ -668,6 +676,7 @@ class Trainer(FromConfig):
         precision: int | str = 32,
         k: int | None = None,
         force_reindex: bool = True,
+        interval: Union[int, str, Time, Callable[[State, Event], bool]] = "1ep",
         metrics_callbacks: list[NLPTemplateCallback] | None = None,
         *args,
         **kwargs,
@@ -677,17 +686,29 @@ class Trainer(FromConfig):
             # get the max top_k for the prediction callback
             k = sorted(self.top_k, reverse=True)[0]
         if metrics_callbacks is None:
+            # TODO: convert the metrics_callbacks to the new callbacks
             metrics_callbacks = self.configure_metrics_callbacks()
 
-        prediction_callback = GoldenRetrieverPredictionCallback(
+        # prediction_callback = GoldenRetrieverPredictionCallback(
+        #     batch_size=batch_size,
+        #     precision=precision,
+        #     k=k,
+        #     force_reindex=force_reindex,
+        #     other_callbacks=metrics_callbacks,
+        #     *args,
+        #     **kwargs,
+        # )
+
+        prediction_callback = PredictionCallback(
+            k=k,
             batch_size=batch_size,
             precision=precision,
-            k=k,
             force_reindex=force_reindex,
             other_callbacks=metrics_callbacks,
-            *args,
-            **kwargs,
+            # other_callbacks=[ComposerRecallAtKEvaluationCallback()],
+            interval=interval,
         )
+
         return prediction_callback
 
     def train(self, *args, **kwargs):
@@ -727,45 +748,37 @@ class Trainer(FromConfig):
         # self.callbacks_store.append(FreeUpIndexerVRAMCallback())
 
         self.configure_dataloader()
+        evaluators = [
+            GoldenRetrieverEvaluator(
+                label="val_dataset",
+                dataloader=self.val_dataloader,
+            )
+        ]
         if self.trainer is None:
             logger.info("Instantiating the Trainer")
-            # we hack the ProgressBarLogger._build_pbar method
-            # to replace it with a custom one
-            # composer.loggers.progress_bar_logger.ProgressBarLogger._build_pbar = (
-            #     _golden_retriever_build_pbar
-            # )
             self.trainer = ComposerTrainer(
                 model=self.composer_module,
                 train_dataloader=self.train_dataloader,
-                device_train_microbatch_size=32,
-                algorithms=[
-                    HardNegativeAlgo(
-                        self.train_dataset.tokenizer,
-                        max_length=self.train_dataset.max_passage_length,
-                    )
-                ],
-                progress_bar=True,
-                # log_to_console=True,
-                # device="gpu",
-                precision="amp_fp16",
+                eval_dataloader=evaluators,
+                device_train_microbatch_size=self.device_train_microbatch_size,
+                algorithms=self.agorithms,
+                progress_bar=self.progress_bar,
+                log_to_console=self.log_to_console,
+                device=self.device,
+                precision=COMPOSER_PRECISION_INPUT_STR_ALIAS_CONVERSION.get(
+                    self.precision, self.precision
+                ),
                 optimizers=self.optimizer,
                 schedulers=self.lr_scheduler,
-                step_schedulers_every_batch=True,  # interval should be step
+                step_schedulers_every_batch=self.step_schedulers_every_batch,  # interval should be step
                 max_duration="230ba",
-                dist_timeout=300,
-                # eval_interval="1ba",
+                eval_interval=self.eval_interval,
+                dist_timeout=self.dist_timeout,
+                load_path=self.resume_from_checkpoint_path,
                 seed=self.seed,
-                callbacks=[
-                    SpeedMonitor(window_size=100),
-                    PredictionCallback(
-                        k=100,
-                        other_callbacks=[ComposerRecallAtKEvaluationCallback()],
-                        interval="100ba",
-                    ),
-                    HardNegativeMiningCallback(
-                        k=100, interval=100
-                    ),  # golden_retriever_trainer=self),
-                ],
+                callbacks=self.callbacks_store,
+                deepspeed_config=self.deepspeed_config,
+                fsdp_config=self.fsdp_config,
                 # deepspeed_config={
                 #     "train_batch_size": 64,
                 #     "train_micro_batch_size_per_gpu": 32,
@@ -800,79 +813,7 @@ class Trainer(FromConfig):
             #     **self.trainer_kwargs,
             # )
 
-        # # save this class as config to file
-        # if self.experiment_path is not None:
-        #     logger.info("Saving the configuration to file")
-        #     self.experiment_path.mkdir(parents=True, exist_ok=True)
-        #     OmegaConf.save(
-        #         OmegaConf.create(to_config(self)),
-        #         self.experiment_path / "trainer_config.yaml",
-        #     )
-
-        class GoldenRetrieverEvaluator(Evaluator):
-            def __init__(
-                self,
-                *,
-                label: str,
-                dataloader: Union[DataSpec, Iterable, Dict[str, Any]],
-                metric_names: Optional[List[str]] = None,
-                subset_num_batches: Optional[int] = None,
-                eval_interval: Optional[
-                    Union[int, str, Time, Callable[[State, Event], bool]]
-                ] = None,
-                device_eval_microbatch_size: Optional[Union[int, str]] = None,
-            ):
-                super().__init__(
-                    label=label,
-                    dataloader=dataloader,
-                    metric_names=metric_names,
-                    subset_num_batches=subset_num_batches,
-                    eval_interval=eval_interval,
-                    device_eval_microbatch_size=device_eval_microbatch_size,
-                )
-                self.actual_eval_interval = None
-
-            @property
-            def eval_interval(self):
-                return self._eval_interval
-
-            @eval_interval.setter
-            def eval_interval(
-                self,
-                eval_interval: Optional[
-                    Union[int, str, Time, Callable[[State, Event], bool]]
-                ],
-            ):
-                from composer.core import ensure_time
-                from composer.utils import create_interval_scheduler
-
-                if eval_interval is not None:
-                    self.actual_eval_interval = ensure_time(
-                        eval_interval, TimeUnit.EPOCH
-                    )
-
-                if eval_interval is None:
-                    self._eval_interval = None
-                elif not callable(eval_interval):
-                    self._eval_interval = create_interval_scheduler(
-                        eval_interval,
-                        checkpoint_events=False,
-                        final_events={Event.FIT_END},
-                    )
-                else:
-                    self._eval_interval = eval_interval
-
-        evaluators = [
-            GoldenRetrieverEvaluator(
-                label="val_dataset",
-                dataloader=self.val_dataloader,
-            )
-        ]
-        self.trainer.fit(
-            # train_dataloader=self.train_dataloader,
-            eval_dataloader=evaluators,  # self.val_dataloader,
-            eval_interval="100ba",
-        )
+        self.trainer.fit()
 
     def test(
         self,
@@ -921,7 +862,7 @@ class Trainer(FromConfig):
                         force_reindex=force_reindex,
                     )
                 ],
-                **self.trainer_kwargs,
+                **self.composer_trainer_kwargs,
             )
         if lightning_module is not None:
             best_lightning_module = lightning_module
@@ -998,257 +939,18 @@ class Trainer(FromConfig):
             "fast_dev_run": cls.fast_dev_run,
             "precision": cls.precision,
             "reload_dataloaders_every_n_epochs": cls.reload_dataloaders_every_n_epochs,
-            "trainer_kwargs": to_config(cls.trainer_kwargs),
+            "trainer_kwargs": to_config(cls.composer_trainer_kwargs),
         }
-
-
-def train(conf: omegaconf.DictConfig) -> None:
-    logger.info("Starting training with config:")
-    logger.info(pformat(OmegaConf.to_container(conf)))
-
-    logger.info("Instantiating the Retriever")
-    retriever: GoldenRetriever = hydra.utils.instantiate(
-        conf.retriever, _recursive_=False
-    )
-
-    logger.info("Instantiating datasets")
-    train_dataset: GoldenRetrieverDataset = hydra.utils.instantiate(
-        conf.data.train_dataset, _recursive_=False
-    )
-    val_dataset: GoldenRetrieverDataset = hydra.utils.instantiate(
-        conf.data.val_dataset, _recursive_=False
-    )
-    test_dataset: GoldenRetrieverDataset = hydra.utils.instantiate(
-        conf.data.test_dataset, _recursive_=False
-    )
-
-    logger.info("Loading the document index")
-    document_index: BaseDocumentIndex = hydra.utils.instantiate(
-        conf.data.document_index, _recursive_=False
-    )
-    retriever.document_index = document_index
-
-    logger.info("Instantiating the Trainer")
-    trainer: Trainer = hydra.utils.instantiate(
-        conf.train,
-        retriever=retriever,
-        train_dataset=train_dataset,
-        val_dataset=val_dataset,
-        test_dataset=test_dataset,
-        _recursive_=False,
-    )
-
-    logger.info("Starting training")
-    trainer.train()
-
-    logger.info("Starting testing")
-    trainer.test()
-
-    logger.info("Training and testing completed")
 
 
 @hydra.main(config_path="../../conf", config_name="default", version_base="1.3")
 def main(conf: omegaconf.DictConfig):
-    train(conf)
+    train_hydra(conf)
 
 
 def train_hydra(conf: omegaconf.DictConfig) -> None:
-    # reproducibility
-    pl.seed_everything(conf.train.seed)
-    torch.set_float32_matmul_precision(conf.train.float32_matmul_precision)
-
-    logger.info(f"Starting training for [bold cyan]{conf.model_name}[/bold cyan] model")
-    if conf.train.pl_trainer.fast_dev_run:
-        logger.info(
-            f"Debug mode {conf.train.pl_trainer.fast_dev_run}. Forcing debugger configuration"
-        )
-        # Debuggers don't like GPUs nor multiprocessing
-        # conf.train.pl_trainer.accelerator = "cpu"
-        conf.train.pl_trainer.devices = 1
-        conf.train.pl_trainer.strategy = "auto"
-        conf.train.pl_trainer.precision = 32
-        if "num_workers" in conf.data.datamodule:
-            conf.data.datamodule.num_workers = {
-                k: 0 for k in conf.data.datamodule.num_workers
-            }
-        # Switch wandb to offline mode to prevent online logging
-        conf.logging.log = None
-        # remove model checkpoint callback
-        conf.train.model_checkpoint_callback = None
-
-    if "print_config" in conf and conf.print_config:
-        # pprint(OmegaConf.to_container(conf), console=logger, expand_all=True)
-        logger.info(pformat(OmegaConf.to_container(conf)))
-
-    # data module declaration
-    logger.info("Instantiating the Data Module")
-    pl_data_module: GoldenRetrieverPLDataModule = hydra.utils.instantiate(
-        conf.data.datamodule, _recursive_=False
-    )
-    # force setup to get labels initialized for the model
-    pl_data_module.prepare_data()
-    # main module declaration
-    pl_module: GoldenRetrieverPLModule | None = None
-
-    if not conf.train.only_test:
-        pl_data_module.setup("fit")
-
-        # count the number of training steps
-        if (
-            "max_epochs" in conf.train.pl_trainer
-            and conf.train.pl_trainer.max_epochs > 0
-        ):
-            num_training_steps = (
-                len(pl_data_module.train_dataloader())
-                * conf.train.pl_trainer.max_epochs
-            )
-            if "max_steps" in conf.train.pl_trainer:
-                logger.info(
-                    "Both `max_epochs` and `max_steps` are specified in the trainer configuration. "
-                    "Will use `max_epochs` for the number of training steps"
-                )
-                conf.train.pl_trainer.max_steps = None
-        elif (
-            "max_steps" in conf.train.pl_trainer and conf.train.pl_trainer.max_steps > 0
-        ):
-            num_training_steps = conf.train.pl_trainer.max_steps
-            conf.train.pl_trainer.max_epochs = None
-        else:
-            raise ValueError(
-                "Either `max_epochs` or `max_steps` should be specified in the trainer configuration"
-            )
-        logger.info(f"Expected number of training steps: {num_training_steps}")
-
-        if "lr_scheduler" in conf.model.pl_module and conf.model.pl_module.lr_scheduler:
-            # set the number of warmup steps as x% of the total number of training steps
-            if conf.model.pl_module.lr_scheduler.num_warmup_steps is None:
-                if (
-                    "warmup_steps_ratio" in conf.model.pl_module
-                    and conf.model.pl_module.warmup_steps_ratio is not None
-                ):
-                    conf.model.pl_module.lr_scheduler.num_warmup_steps = int(
-                        conf.model.pl_module.lr_scheduler.num_training_steps
-                        * conf.model.pl_module.warmup_steps_ratio
-                    )
-                else:
-                    conf.model.pl_module.lr_scheduler.num_warmup_steps = 0
-            logger.info(
-                f"Number of warmup steps: {conf.model.pl_module.lr_scheduler.num_warmup_steps}"
-            )
-
-        logger.info("Instantiating the Model")
-        pl_module: GoldenRetrieverPLModule = hydra.utils.instantiate(
-            conf.model.pl_module, _recursive_=False
-        )
-        if (
-            "pretrain_ckpt_path" in conf.train
-            and conf.train.pretrain_ckpt_path is not None
-        ):
-            logger.info(
-                f"Loading pretrained checkpoint from {conf.train.pretrain_ckpt_path}"
-            )
-            pl_module.load_state_dict(
-                torch.load(conf.train.pretrain_ckpt_path)["state_dict"], strict=False
-            )
-
-        if "compile" in conf.model.pl_module and conf.model.pl_module.compile:
-            try:
-                pl_module = torch.compile(pl_module, backend="inductor")
-            except Exception:
-                logger.info(
-                    "Failed to compile the model, you may need to install PyTorch 2.0"
-                )
-
-    # callbacks declaration
-    callbacks_store = [ModelSummary(max_depth=2)]
-
-    experiment_logger: WandbLogger | None = None
-    experiment_path: Path | None = None
-    if conf.logging.log:
-        logger.info("Instantiating Wandb Logger")
-        experiment_logger = hydra.utils.instantiate(conf.logging.wandb_arg)
-        if pl_module is not None:
-            # it may happen that the model is not instantiated if we are only testing
-            # in that case, we don't need to watch the model
-            experiment_logger.watch(pl_module, **conf.logging.watch)
-        experiment_path = Path(experiment_logger.experiment.dir)
-        # Store the YaML config separately into the wandb dir
-        yaml_conf: str = OmegaConf.to_yaml(cfg=conf)
-        (experiment_path / "hparams.yaml").write_text(yaml_conf)
-        # Add a Learning Rate Monitor callback to log the learning rate
-        callbacks_store.append(LearningRateMonitor(logging_interval="step"))
-
-    early_stopping_callback: EarlyStopping | None = None
-    if conf.train.early_stopping_callback is not None:
-        early_stopping_callback = hydra.utils.instantiate(
-            conf.train.early_stopping_callback
-        )
-        callbacks_store.append(early_stopping_callback)
-
-    model_checkpoint_callback: ModelCheckpoint | None = None
-    if conf.train.model_checkpoint_callback is not None:
-        model_checkpoint_callback = hydra.utils.instantiate(
-            conf.train.model_checkpoint_callback,
-            dirpath=experiment_path / "checkpoints" if experiment_path else None,
-        )
-        callbacks_store.append(model_checkpoint_callback)
-
-    if "callbacks" in conf.train and conf.train.callbacks is not None:
-        for _, callback in conf.train.callbacks.items():
-            # callback can be a list of callbacks or a single callback
-            if isinstance(callback, omegaconf.listconfig.ListConfig):
-                for cb in callback:
-                    if cb is not None:
-                        callbacks_store.append(
-                            hydra.utils.instantiate(cb, _recursive_=False)
-                        )
-            else:
-                if callback is not None:
-                    callbacks_store.append(hydra.utils.instantiate(callback))
-
-    # trainer
-    logger.info("Instantiating the Trainer")
-    trainer: Trainer = hydra.utils.instantiate(
-        conf.train.pl_trainer, callbacks=callbacks_store, logger=experiment_logger
-    )
-
-    if not conf.train.only_test:
-        # module fit
-        trainer.fit(pl_module, datamodule=pl_data_module)
-
-    if conf.train.pl_trainer.fast_dev_run:
-        best_pl_module = pl_module
-    else:
-        # load best model for testing
-        if conf.train.checkpoint_path:
-            best_model_path = conf.evaluation.checkpoint_path
-        elif model_checkpoint_callback:
-            best_model_path = model_checkpoint_callback.best_model_path
-        else:
-            raise ValueError(
-                "Either `checkpoint_path` or `model_checkpoint_callback` should "
-                "be specified in the evaluation configuration"
-            )
-        logger.info(f"Loading best model from {best_model_path}")
-
-        try:
-            best_pl_module = GoldenRetrieverPLModule.load_from_checkpoint(
-                best_model_path
-            )
-        except Exception as e:
-            logger.info(f"Failed to load the model from checkpoint: {e}")
-            logger.info("Using last model instead")
-            best_pl_module = pl_module
-        if "compile" in conf.model.pl_module and conf.model.pl_module.compile:
-            try:
-                best_pl_module = torch.compile(best_pl_module, backend="inductor")
-            except Exception:
-                logger.info(
-                    "Failed to compile the model, you may need to install PyTorch 2.0"
-                )
-
-    # module test
-    trainer.test(best_pl_module, datamodule=pl_data_module)
+    # TODO: add the ability to pass the config file
+    pass
 
 
 if __name__ == "__main__":
