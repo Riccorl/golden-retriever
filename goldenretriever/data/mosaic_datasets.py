@@ -47,13 +47,76 @@ logger = get_logger(__name__)
 
 
 class StreamingGoldenRetrieverDataset(StreamingDataset):
-    """Generic text dataset using MosaicML's StreamingDataset.
+    """A mid-epoch-resumable streaming/caching pytorch IterableDataset.
+
+    Features elastically deterministic shuffling, which enables fast mid-epoch resumption.
+
+    Checkpoints are represented in JSON as follows:
+
+    .. code-block:: json
+
+        {
+            "epoch" :"int",
+            "sample_in_epoch": "int",
+            "shuffle_seed": "int",
+            "num_canonical_nodes": "int"
+        }
+
+    StreamingDataset init takes two kinds of arguments:
+
+    * What to iterate:
+
+      * One or more streams (you must provide either ``streams`` or ``remote``/``local``):
+
+        * ``streams``
+        * ``remote``
+        * ``local``
+
+      * Knobs to control streaming behavior, which, if multiple streams are provided,
+        become defaults applied to each of them:
+
+        * ``split``
+        * ``download_retry``
+        * ``download_timeout``
+        * ``validate_hash``
+        * ``keep_zip``
+
+      * Absolute dataset size, if streams were weighted relatively:
+
+        * ``epoch_size``
+
+    * How to iterate:
+
+      * Shard lifecycle:
+
+        * ``predownload``
+        * ``cache_limit``
+
+      * Sampling:
+
+        * ``sampling_method``
+        * ``sampling_granularity``
+
+      * Determinism:
+
+        * ``partition_algo``
+        * ``num_canonical_nodes``
+        * ``batch_size``
+
+      * Shuffling:
+
+        * ``shuffle``
+        * ``shuffle_algo``
+        * ``shuffle_seed``
+        * ``shuffle_block_size``
+
+      * Batching:
+
+        * ``batching_method``
+
 
     Args:
-        tokenizer (Tokenizer): HuggingFace tokenizer to
-            tokenize samples.
-        max_seq_len (int): The max sequence length of each sample.
-        streams (Sequence[Stream], optional): One or more Streams to stream/cache samples from,
+        streams (Sequence[Stream], optional): One or more streams to stream/cache samples from,
             which may be upsampled or downsampled. StreamingDataset uses either ``streams`` or
             ``remote``/``local``. Defaults to ``None``.
         remote (str, optional): Remote path or directory to download the dataset from. If ``None``,
@@ -71,32 +134,22 @@ class StreamingGoldenRetrieverDataset(StreamingDataset):
             shards. Defaults to ``None``.
         keep_zip (bool): Whether to keep or delete the compressed form when decompressing
             downloaded shards. If ``False``, keep iff remote is local or no remote. Defaults to
-            `False``.
-        epoch_size (Union[int, str], optional): Number of samples to draw per epoch balanced across all
-            streams. If ``None``, takes its value from the total number of underlying samples.
-            Provide this field if you are weighting streams relatively to target a larger or
-            smaller epoch size. Defaults to ``None``.
-        predownload (int, optional): Target number of samples ahead to download the shards of while
-            iterating. If ``None``, its value is set to ``8 * batch_size``. Defaults to ``None``.
-        cache_limit (Union[int, str], optional) - Maximum size in bytes of this StreamingDataset's
-            shard cache. Before downloading a shard, the least recently used resident shard(s) may
-            be evicted (deleted from the local cache) in order to stay under the limit. Set to None
-            to disable shard eviction. Supports integer bytes as well as string human-readable
-            bytes (e.g., 100b, 64kb, 77mb, and so on). Defaults to None.
-        partition_algo (str): Which partitioning algorithm to use. Defaults to ``orig``.
-        num_canonical_nodes (int, optional): Canonical number of nodes for shuffling with
-            resumption. If ``None``, this is interpreted as 64 times the number of physical
-            nodes of the initial run if ``shuffle_algo`` is ``py1s`` or ``py2s``, and simply the
-            number of physical nodes of the initial run otherwise. Defaults to ``None``.
-        batch_size (int, optional): Batch size of its DataLoader, which affects how the dataset is
-            partitioned over the workers. Defaults to ``None``.
-        shuffle (bool): Whether to iterate over the samples in randomized order. Defaults to
             ``False``.
-        shuffle_algo (str): Which shuffling algorithm to use. Defaults to ``py1e``.
-        shuffle_seed (int): Seed for Deterministic data shuffling. Defaults to ``9176``.
-        shuffle_block_size (int, optional): Unit of shuffle. A canonical node's samples are split
-            into blocks of this size, and samples within each block are shuffled. If ``None``, its
-            value is calculated as ``max(4_000_000 // num_canonical_nodes), 1 << 18)``. Defaults to
+        epoch_size (Union[int, str], optional): Number of samples to draw per epoch balanced
+            across all streams. If ``None``, takes its value from the total number of underlying
+            samples. Provide this field if you are weighting streams relatively to target a larger
+            or smaller epoch size. Defaults to ``None``. Can also take in human-readable number
+            abbreviations (e.g., ``"100k"``, ``"64M"``, ``"77b"``, etc). Defaults to ``None``.
+        predownload (int, optional): Target number of samples to download per worker in advance
+            of current sample. Workers will attempt to download ahead by this many samples during,
+            but not before, training. Recommendation is to provide a value greater than per device
+            batch size to ensure at-least per device batch size number of samples cached locally.
+            If ``None``, its value is set to ``8 * batch_size``. Defaults to ``None``.
+        cache_limit (Union[int, str], optional): Maximum size in bytes of this StreamingDataset's
+            shard cache. Before downloading a shard, the least recently used resident shard(s)
+            may be evicted (deleted from the local cache) in order to stay under the limit.
+            Set to ``None`` to disable shard eviction. Supports integer bytes as well as string
+            human-readable bytes (e.g., ``100b``, ``64kb``, ``77mb``, and so on). Defaults to
             ``None``.
         sampling_method (str): Which sampling method to use, either ``balanced`` or ``fixed``.
             Defaults to ``balanced``.
@@ -104,15 +157,45 @@ class StreamingGoldenRetrieverDataset(StreamingDataset):
             how many samples to pick from the same shard at a time (``1`` for evenly balanced
             across shards, ``1000`` to pick 1000 samples from the same shard at a time, etc).
             Defaults to ``1``.
+        partition_algo (str): Which partitioning algorithm to use. Defaults to ``relaxed``.
+        num_canonical_nodes (int, optional): Canonical number of nodes for shuffling with
+            resumption. The sample space is divided evenly according to the number of canonical
+            nodes. The higher the value, the more independent non-overlapping paths the
+            StreamingDataset replicas take through the shards per model replica (increasing data
+            source diversity). If ``None``, this is interpreted as 64 times the number of physical
+            nodes of the initial run if ``shuffle_algo`` is ``py1s`` or ``py2s``, and simply the
+            number of physical nodes of the initial run otherwise. Defaults to ``None``.
+
+            .. note::
+
+                For sequential sample ordering, set ``shuffle`` to ``False`` and
+                ``num_canonical_nodes`` to 1.
+        batch_size (int, optional): Per-device batch size, the same as what is passed to the
+            DataLoader. This affects how the dataset is partitioned over the workers and is
+            necessary for deterministic resumption and optimal performance. Defaults to ``None``.
+        shuffle (bool): Whether to iterate over the samples in randomized order. Defaults to
+            ``False``.
+        shuffle_algo (str): Which shuffling algorithm to use. Defaults to ``py1e``.
+        shuffle_seed (int): Seed for deterministic data shuffling. Defaults to ``9176``.
+        shuffle_block_size (int, optional): Unit of shuffle. A canonical node's samples are split
+            into blocks of this size, and samples within each block are shuffled. If ``None``, its
+            value is calculated as ``max(4_000_000 // num_canonical_nodes), 1 << 18)``. Defaults to
+            ``None``.
         batching_method (str): Which batching method to use, either ``random``, ``stratified``, or
             ``per_stream``. Defaults to ``random``.
+        allow_unsafe_types (bool): If a shard contains Pickle, which allows arbitrary code
+            execution during deserialization, whether to keep going if ``True`` or raise an error
+            if ``False``. Defaults to ``False``.
+        replication (int, optional): Determines how many consecutive devices will receive the same
+            samples. Useful for training with tensor or sequence parallelism, where multiple
+            devices need to see the same partition of the dataset. Defaults to ``None``.
     """
 
     def __init__(
         self,
+        *,
         name: str,
         tokenizer: PreTrainedTokenizerBase,
-        # max_seq_len: int,
         streams: Optional[Sequence[Stream]] = None,
         remote: Optional[str] = None,
         local: Optional[str] = None,
@@ -124,6 +207,8 @@ class StreamingGoldenRetrieverDataset(StreamingDataset):
         epoch_size: Optional[Union[int, str]] = None,
         predownload: Optional[int] = None,
         cache_limit: Optional[Union[int, str]] = None,
+        sampling_method: str = "balanced",
+        sampling_granularity: int = 1,
         partition_algo: str = "relaxed",
         num_canonical_nodes: Optional[int] = None,
         batch_size: Optional[int] = None,
@@ -131,12 +216,10 @@ class StreamingGoldenRetrieverDataset(StreamingDataset):
         shuffle_algo: str = "py1e",
         shuffle_seed: int = 9176,
         shuffle_block_size: Optional[int] = None,
-        sampling_method: str = "balanced",
-        sampling_granularity: int = 1,
         batching_method: str = "random",
+        allow_unsafe_types: bool = False,
+        replication: Optional[int] = None,
         # golden retriever specific
-        question_batch_size: int = 32,
-        passage_batch_size: int = 32,
         max_positives: int = -1,
         max_negatives: int = -1,
         max_hard_negatives: int = -1,
@@ -186,11 +269,11 @@ class StreamingGoldenRetrieverDataset(StreamingDataset):
             sampling_method=sampling_method,
             sampling_granularity=sampling_granularity,
             batching_method=batching_method,
+            allow_unsafe_types=allow_unsafe_types,
+            replication=replication,
         )
         self.name = name
         self.tokenizer = tokenizer
-        self.question_batch_size = question_batch_size
-        self.passage_batch_size = passage_batch_size
         self.max_positives = max_positives
         self.max_negatives = max_negatives
         self.max_hard_negatives = max_hard_negatives
@@ -274,92 +357,45 @@ class StreamingGoldenRetrieverDataset(StreamingDataset):
     #     # raise NotImplementedError("StreamingDataset does not support __len__")
     #     return None
 
-    def __iter__(self) -> Iterator[Dict[str, Any]]:
-        """Iterate over all the samples in our partition.
+    # def __iter__(self) -> Iterator[Dict[str, Any]]:
+    #     """Iterate over all the samples in our partition.
 
-        Returns:
-            Iterator[Dict[str, Any]]: Each sample.
-        """
-        # Exit the threads that are pre-downloading and iterating the shards for previous epoch, if
-        # it exists.
-        if hasattr(self, "_iterator"):
-            self._iterator.exit()
+    #     Returns:
+    #         Iterator[Dict[str, Any]]: Each sample.
+    #     """
+    #     # Exit the threads that are pre-downloading and iterating the shards for previous epoch, if
+    #     # it exists.
+    #     if hasattr(self, '_iterator'):
+    #         self._iterator.exit()
 
-        # For exception handling.
-        if not hasattr(self, "_executor"):
-            self._executor = ThreadPoolExecutor()
-        if not hasattr(self, "_event"):
-            self._event = Event()
-        elif self._event.is_set():
-            raise RuntimeError("Background thread failed. Check other traceback.")
+    #     # For exception handling.
+    #     if not hasattr(self, '_executor'):
+    #         self._executor = ThreadPoolExecutor()
+    #     if not hasattr(self, '_event'):
+    #         self._event = Event()
+    #     elif self._event.is_set():
+    #         raise RuntimeError('Background thread failed. Check other traceback.')
 
-        # Discover where we left off, if there is a checkpoint, or start at the next epoch.
-        # Also pre-increment the epoch counter.
-        world = World()
-        epoch, sample_in_epoch = self._resume_incr_epoch(world)
+    #     # Discover where we left off, if there is a checkpoint, or start at the next epoch.
+    #     # Also pre-increment the epoch counter.
+    #     self._unique_worker_world = self._unique_rank_world.detect_workers()
+    #     self._parallel_worker_world = self._parallel_rank_world.detect_workers()
+    #     epoch, sample_in_epoch = self._resume_incr_epoch()
 
-        # Get this worker's partition of samples to process.
-        sample_ids = self._get_work(world, epoch, sample_in_epoch)
-        if not len(sample_ids):  # Resumed at end of epoch, out of samples.
-            return
+    #     # Get this worker's partition of samples to process.
+    #     sample_ids = self._get_work(epoch, sample_in_epoch)
+    #     if not len(sample_ids):  # Resumed at end of epoch, out of samples.
+    #         return
 
-        # Iterate over the samples while downloading ahead.
-        self._iterator = it = _Iterator(sample_ids)
-        prepare_future = self._executor.submit(self._prepare_thread, it)
-        prepare_future.add_done_callback(self.on_exception)
-        ready_future = self._executor.submit(self._ready_thread, it)
-        ready_future.add_done_callback(self.on_exception)
-        # Iterate over the samples and accumulate passage_batch_size samples at a time
-        # batch = []
-        # passages_in_batch = {}
-        # for sample in map(self.__getitem__, self._each_sample_id(it)):
-        #     if len(passages_in_batch) >= self.passage_batch_size:
-        #         # create the batch dict
-        #         batch_dict = ModelInputs(
-        #             dict(
-        #                 sample_idx=[s["id"] for s in batch],
-        #                 questions=[s["question"] for s in batch],
-        #                 passages=list(passages_in_batch.values()),
-        #                 positives_pssgs=[s["positive_pssgs"] for s in batch],
-        #                 positives=[s["positives"] for s in batch],
-        #             )
-        #         )
-        #         # split the batch if needed
-        #         if len(batch) > self.question_batch_size:
-        #             for splited_batch in self.split_batch(
-        #                 batch_dict, self.question_batch_size
-        #             ):
-        #                 yield splited_batch
-        #         else:
-        #             yield batch_dict
-
-        #         # reset batch
-        #         batch = []
-        #         passages_in_batch = {}
-
-        #     batch.append(sample)
-        #     # yes it's a bit ugly but it works :)
-        #     # count the number of passages in the batch and stop if we reach the limit
-        #     # we use a set to avoid counting the same passage twice
-        #     # we use a tuple because set doesn't support lists
-        #     # we use input_ids as discriminator
-        #     passages_in_batch.update(
-        #         {tuple(passage["input_ids"]): passage for passage in sample["passage"]}
-        #     )
-        #     # check for hard negatives and add with a probability of 0.1
-        #     if self.hn_manager is not None:
-        #         if sample["id"] in self.hn_manager:
-        #             passages_in_batch.update(
-        #                 {
-        #                     tuple(passage["input_ids"]): passage
-        #                     for passage in self.hn_manager.get(sample["id"])
-        #                 }
-        #             )
-        #         else:
-        #             print(f"Sample {sample['id']} not in hn_manager")
-        yield from map(self.__getitem__, self._each_sample_id(it))
-        wait([prepare_future, ready_future], return_when="FIRST_EXCEPTION")
-        it.exit()
+    #     # Iterate over the samples while downloading ahead.
+    #     self._iterator = it = _Iterator(sample_ids)
+    #     prepare_future = self._executor.submit(self._prepare_thread, it)
+    #     prepare_future.add_done_callback(self.on_exception)
+    #     ready_future = self._executor.submit(self._ready_thread, it)
+    #     ready_future.add_done_callback(self.on_exception)
+    #     yield from map(self.__getitem__, self._each_sample_id(it))
+    #     wait([prepare_future, ready_future], return_when="FIRST_EXCEPTION")
+    #     it.exit()
 
     @staticmethod
     def get_num_samples_in_batch(batch: Dict) -> int:
@@ -439,6 +475,7 @@ class StreamingGoldenRetrieverDataset(StreamingDataset):
             return [batch]
 
         def split_fn(x):
+
             if isinstance(x, list):
                 return [
                     x[i : i + microbatch_size]
@@ -464,6 +501,8 @@ class StreamingGoldenRetrieverDataset(StreamingDataset):
         labels = split_fn(batch["labels"])
         # split the positives
         positives = split_fn(batch["positives"])
+        positives_pssgs = split_fn(batch["positives_pssgs"])
+        # passages_ids = split_fn(batch["passages_ids"])
 
         # collect the new batches
         batches = []
@@ -476,6 +515,8 @@ class StreamingGoldenRetrieverDataset(StreamingDataset):
                         passages=batch["passages"],
                         positives=positives[i],
                         labels=labels[i],
+                        positives_pssgs=positives_pssgs[i],
+                        passages_ids=batch["passages_ids"],
                     )
                 )
             )
@@ -497,6 +538,8 @@ class GoldenRetrieverCollator:
                 value=self.tokenizer.pad_token_type_id,
             ),
         }
+
+        # self.hn_manager = HardNegativesManager(tokenizer, max_length=40)
 
     @staticmethod
     def pad_sequence(
@@ -587,11 +630,21 @@ class GoldenRetrieverCollator:
             passages_in_batch.update(
                 {tuple(passage["input_ids"]): passage for passage in sample["passage"]}
             )
+            if "mined_passages" in sample:
+                passages_in_batch.update(
+                    {
+                        tuple(passage["input_ids"]): passage
+                        for passage in sample["mined_passages"]
+                    }
+                )
+
         batch = ModelInputs(
             dict(
                 sample_idx=[s["id"] for s in batch],
                 questions=[s["question"] for s in batch],
                 passages=list(passages_in_batch.values()),
+                passages_ids=set(passages_in_batch.keys()),
+                # TODO: change the name of the two following keys
                 positives_pssgs=[s["positive_pssgs"] for s in batch],
                 positives=[s["positives"] for s in batch],
             )
@@ -641,6 +694,8 @@ class GoldenRetrieverCollator:
                 "labels": labels,
                 "positives": batch["positives"],
                 "sample_idx": batch["sample_idx"],
+                "positives_pssgs": batch["positives_pssgs"],
+                "passages_ids": batch["passages_ids"],
             }
         )
         return model_inputs
@@ -678,7 +733,7 @@ class GoldenStreamingDataLoader(StreamingDataLoader):
         #     return len(batch)
         # else:
         #     return len(batch[0])
-        return batch["questions"]["input_ids"].get_size(0)
+        return batch["questions"]["input_ids"].size(0)
 
     def __iter__(self) -> Iterator[Any]:
         """Iterate over this DataLoader, yielding batches.
@@ -706,8 +761,15 @@ class GoldenStreamingDataLoader(StreamingDataLoader):
             Optional[Dict[str, Any]]: The state, if a streaming dataset.
         """
         if isinstance(self.dataset, StreamingDataset):
-            world = World()
+            world = World.detect()
             num_samples = self.num_samples_yielded * world.num_ranks
+            if self.dataset.replication is not None:
+                # Check if we are using `replication`. If we are, then we need to adjust the
+                # `num_samples_yielded` to reflect the fact that sample ids are shared across
+                # `replication` consecutive devices. For example, if `replication` is 2, then the
+                # number of samples seen is half the number of samples yielded, since every pair
+                # of devices shares sample ids. So the index into the sample partition is halved.
+                num_samples = num_samples // self.dataset.replication
             return self.dataset.state_dict(num_samples, False)
         return None
 
@@ -719,7 +781,9 @@ class GoldenStreamingDataLoader(StreamingDataLoader):
         Args:
             obj (Dict[str, Any]): The state.
         """
-        if isinstance(self.dataset, StreamingDataset):
+        if isinstance(
+            self.dataset, (StreamingDataset, StreamingGoldenRetrieverDataset)
+        ):
             self.dataset.load_state_dict(obj)
 
     def __del__(self) -> None:
@@ -878,11 +942,9 @@ def tokenize(
 
     passage = positives + negatives + hard_negatives
     if max_passages != -1:
-        passage = passage[: max_passages]
+        passage = passage[:max_passages]
 
-    passage = tokenizer(
-        passage, max_length=max_passage_length, truncation=True
-    )
+    passage = tokenizer(passage, max_length=max_passage_length, truncation=True)
 
     # invert the passage data structure from a dict of lists to a list of dicts
     passage = [dict(zip(passage, t)) for t in zip(*passage.values())]
@@ -987,7 +1049,7 @@ def build_from_hf(
         # dataset = hf_datasets.load_dataset(dataset_name, split=split, **hf_kwargs)
         if os.path.isdir(dataset_name):
             # only jsonl for now
-            data_files = glob(f'{dataset_name}/*.jsonl')
+            data_files = glob(f"{dataset_name}/*.jsonl")
         else:
             data_files = dataset_name
         dataset = hf_datasets.load_dataset(
@@ -1080,4 +1142,3 @@ def build_from_hf(
     # token_counting_func = get_tokens_per_batch_func()
 
     # return DataSpec(dataloader=dl, get_num_tokens_in_batch=token_counting_func)
-

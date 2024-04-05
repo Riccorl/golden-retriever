@@ -1,3 +1,4 @@
+import copy
 from functools import partial
 import itertools
 import logging
@@ -22,7 +23,11 @@ from composer.utils import reproducibility, dist
 from goldenretriever.common.log import get_logger
 from goldenretriever.common.model_inputs import ModelInputs
 from goldenretriever.composer_modules.mosaic_module import GoldenRetrieverComposerModule
-from goldenretriever.data.mosaic_datasets import GoldenRetrieverCollator
+from goldenretriever.data.mosaic_datasets import (
+    GoldenRetrieverCollator,
+    GoldenStreamingDataLoader,
+    StreamingGoldenRetrieverDataset,
+)
 from goldenretriever.data.utils import HardNegativesManager
 from goldenretriever.indexers.base import BaseDocumentIndex
 from goldenretriever.pytorch_modules.model import GoldenRetriever
@@ -331,9 +336,19 @@ class HardNegativeMiningCallback(Callback):
         # get the retriever
         retriever = composer_model.model
         # get the current train dataloader
-        dataloader = state.train_dataloader
+        # dataloader = state.train_dataloader
         # get the current train dataset
-        dataset = dataloader.dataset
+        # dataset = copy.deepcopy(state.train_dataloader.dataset)
+        dataset = StreamingGoldenRetrieverDataset(
+            name="aida_train",
+            tokenizer=retriever.question_tokenizer,
+            local="/home/ric/Projects/golden-retriever/data/dpr-like/el/mosaic/train",
+            split="train",
+            batch_size=32,
+            shuffle=True,
+            shuffle_seed=42,
+            # passage_batch_size=400,
+        )
         # save the current epoch of the training
         current_train_epoch = state.timestamp.epoch
         # get the tokenizer
@@ -348,6 +363,33 @@ class HardNegativeMiningCallback(Callback):
         # # cast to int and get the maximum value
         # n_samples_to_augment = max(
         #     [int(n.value) for n in n_samples_to_augment if n is not None]
+        # )
+
+        # ds = copy.deepcopy(dataset)
+        # dl = GoldenStreamingDataLoader(
+        dl = DataLoader(
+            dataset,
+            collate_fn=GoldenRetrieverCollator(tokenizer=dataset.tokenizer),
+            batch_size=32,
+            drop_last=False,
+            num_workers=8,  # self.num_workers,
+            # pin_memory=True,
+            # prefetch_factor=2,
+            # persistent_workers=True,
+            # timeout=0,
+            # sampler=dist.get_sampler(
+            #     self.train_dataset, drop_last=False, shuffle=False
+            # ),
+        )
+        dl.dataset.load_state_dict(
+            state.train_dataloader.dataset.state_dict(
+                int(state.timestamp.sample_in_epoch.value), True
+            )
+        )
+        # dl.load_state_dict(
+        #     state.train_dataloader.state_dict(
+        #         # int(state.timestamp.sample_in_epoch.value), True
+        #     )
         # )
 
         def collate_fn(x):
@@ -410,18 +452,29 @@ class HardNegativeMiningCallback(Callback):
         # )
 
         # if state.dataloader_len is None:
-        #     dataloader_iter = iter(dataloader)
+        #     dataloader_iter = iter(dl)
         # else:
-        #     dataloader_iter = itertools.islice(dataloader, int(state.dataloader_len))
+        #     dataloader_iter = itertools.islice(dl, int(state.dataloader_len))
 
         # _rng_state = state.state_dict().get("rng", None)
-        # # batch_to_skip = int(state.timestamp.batch_in_epoch)
-        # for batch_idx, _ in enumerate(dataloader_iter):
+        # epoch = 0
+        # # for epoch in range(int(state.timestamp.epoch)):
+        # #     if isinstance(dl, DataLoader) and isinstance(dl.sampler, DistributedSampler):
+        # #         dl.sampler.set_epoch(epoch)
+        # while epoch < int(state.timestamp.epoch):
+        #     if isinstance(dl, DataLoader) and isinstance(dl.sampler, DistributedSampler):
+        #         dl.sampler.set_epoch(epoch)
+        #     epoch += 1
+        #     for _ in dl:
+        #         break
+        # for batch_idx, batch in enumerate(dataloader_iter):
         #     # Spin dataloader forward unless dataloader handles internally with dataset_resumption
         #     if (
         #         "train" not in state.dataset_resumption
         #         and batch_idx < int(state.timestamp.batch_in_epoch)
         #     ):
+        #         if "29_449" in batch["sample_idx"]:
+        #             print("debug here")
         #         # Restore the RNG state immediately before the next batch is yielded from the dataloader
         #         if (
         #             batch_idx + 1
@@ -433,9 +486,11 @@ class HardNegativeMiningCallback(Callback):
         #         continue
         #     break
 
+        reproducibility.seed_all(state.seed)
+
         # start = time.time()
         progress_bar = tqdm(
-            dataloader,
+            dl,
             initial=0,
             total=self.interval,
             desc=f"Computing predictions for dataset {state.dataloader_label}",
@@ -517,7 +572,6 @@ class HardNegativeMiningCallback(Callback):
 
         hn_manager = HardNegativesManager(
             tokenizer=tokenizer,
-            # max_length=40,  # dataset.max_passage_length,
             max_length=dataset.max_passage_length,
             # data=hard_negatives_list,
         )

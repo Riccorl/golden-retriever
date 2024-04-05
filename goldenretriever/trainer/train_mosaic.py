@@ -16,6 +16,7 @@ from goldenretriever.composer_modules.callbacks import (
 from goldenretriever.composer_modules.mosaic_module import GoldenRetrieverComposerModule
 from goldenretriever.data.mosaic_datasets import (
     GoldenRetrieverCollator,
+    GoldenStreamingDataLoader,
     StreamingGoldenRetrieverDataset,
 )
 from goldenretriever.trainer import PRECISION_INPUT_STR_ALIAS_CONVERSION
@@ -32,7 +33,8 @@ from lightning.pytorch.callbacks import (
     ModelCheckpoint,
     ModelSummary,
 )
-from lightning.pytorch.loggers import WandbLogger
+
+# from lightning.pytorch.loggers import WandbLogger
 from omegaconf import OmegaConf
 from pprintpp import pformat
 from tqdm import tqdm
@@ -78,6 +80,9 @@ from composer.utils import reproducibility, dist
 from composer.callbacks import SpeedMonitor
 
 from goldenretriever.trainer.composer_trainer import GoldenComposerTrainer
+
+from torch.utils.data import DataLoader
+from composer.loggers import WandBLogger
 
 logger = get_logger()
 
@@ -243,36 +248,46 @@ class Trainer(FromConfig):
         torch.set_float32_matmul_precision(self.float32_matmul_precision)
 
         # lightning data module declaration
-        self.lightning_datamodule = self.configure_lightning_datamodule()
+        # self.lightning_datamodule = self.configure_lightning_datamodule()
+        self.train_dataloader, self.val_dataloader = self.configure_dataloader()
 
         if self.max_epochs is not None:
             logger.info(f"Number of training epochs: {self.max_epochs}")
-            self.max_steps = (
-                len(self.lightning_datamodule.train_dataloader()) * self.max_epochs
-            )
+            self.max_steps = len(self.train_dataloader) * self.max_epochs
 
         # optimizer declaration
         self.optimizer, self.lr_scheduler = self.configure_optimizers()
 
         # lightning module declaration
-        self.composer_module = self.configure_lightning_module()
+        self.composer_module = self.configure_composer_module()
 
         # logger and experiment declaration
         # update self.wandb_kwargs
         wandb_args = dict(
-            entity=self.wandb_entity,
             project=self.wandb_project_name,
+            group=self.wandb_group,
             name=self.wandb_experiment_name,
-            save_dir=self.wandb_save_dir,
-            log_model=self.wandb_log_model,
-            offline=not self.wandb_online_mode,
-            watch=self.wandb_watch,
-            lightning_module=self.composer_module,
+            entity=self.wandb_entity,
+            tags=self.wandb_tags,
+            log_artifacts=self.wandb_log_artifacts,
+            rank_zero_only=self.wandb_rank_zero_only,
+            # save_dir=self.wandb_save_dir,
+            # log_model=self.wandb_log_model,
+            # offline=not self.wandb_online_mode,
+            # watch=self.wandb_watch,
+            # lightning_module=self.composer_module,
         )
+        wandb_init_kwargs = {
+            "save_dir": self.wandb_save_dir,
+            # TODO: maybe env variables with "dryrun" and "online" would be better
+            "mode": "online" if self.wandb_online_mode else "offline",
+            "dir": self.wandb_save_dir,
+        }
         if self.wandb_kwargs is not None:
-            wandb_args.update(self.wandb_kwargs)
+            wandb_init_kwargs.update(self.wandb_kwargs)
+            wandb_args.update({"init_kwargs": wandb_init_kwargs})
         self.wandb_kwargs = wandb_args
-        self.wandb_logger: WandbLogger | None = None
+        self.wandb_logger: WandBLogger | None = None
         self.experiment_path: Path | None = None
 
         # setup metrics to monitor for a bunch of callbacks
@@ -359,7 +374,8 @@ class Trainer(FromConfig):
         return self.lightning_datamodule
 
     def configure_dataloader(self, *args, **kwargs):
-        self.train_dataloader = torch.utils.data.DataLoader(
+
+        self.train_dataloader = DataLoader(
             self.train_dataset,
             collate_fn=GoldenRetrieverCollator(
                 tokenizer=self.retriever.question_tokenizer
@@ -367,10 +383,10 @@ class Trainer(FromConfig):
             batch_size=32,
             drop_last=False,
             num_workers=self.num_workers,
-            pin_memory=True,
-            prefetch_factor=2,
-            persistent_workers=True,
-            timeout=0,
+            # pin_memory=True,
+            # prefetch_factor=2,
+            # persistent_workers=True,
+            # timeout=0,
             # sampler=dist.get_sampler(
             #     self.train_dataset, drop_last=False, shuffle=False
             # ),
@@ -382,7 +398,8 @@ class Trainer(FromConfig):
             get_num_tokens_in_batch=StreamingGoldenRetrieverDataset.get_num_tokens_in_batch,
         )
 
-        self.val_dataloader = torch.utils.data.DataLoader(
+        # self.val_dataloader = GoldenStreamingDataLoader(
+        self.val_dataloader = DataLoader(
             self.val_dataset,
             collate_fn=GoldenRetrieverCollator(
                 tokenizer=self.retriever.question_tokenizer
@@ -404,8 +421,9 @@ class Trainer(FromConfig):
             get_num_samples_in_batch=StreamingGoldenRetrieverDataset.get_num_samples_in_batch,
             get_num_tokens_in_batch=StreamingGoldenRetrieverDataset.get_num_tokens_in_batch,
         )
+        return self.train_dataloader, self.val_dataloader
 
-    def configure_lightning_module(self, *args, **kwargs):
+    def configure_composer_module(self, *args, **kwargs):
         # # check if Index is empty
         # if len(self.retriever.document_index) == 0:
         #     # add the docs from the datasets
@@ -442,9 +460,7 @@ class Trainer(FromConfig):
 
         # lightning module declaration
         self.composer_module = GoldenRetrieverComposerModule(
-            model=self.retriever,
-            *args,
-            **kwargs,
+            model=self.retriever, *args, **kwargs
         )
 
         return self.composer_module
@@ -779,7 +795,7 @@ class Trainer(FromConfig):
                 progress_bar=True,
                 # log_to_console=True,
                 # device="gpu",
-                precision="amp_bf16",
+                precision="amp_fp16",
                 optimizers=self.optimizer,
                 schedulers=self.lr_scheduler,
                 step_schedulers_every_batch=True,  # interval should be step
@@ -792,10 +808,10 @@ class Trainer(FromConfig):
                     PredictionCallback(
                         k=100,
                         other_callbacks=[ComposerRecallAtKEvaluationCallback()],
-                        interval="10ba",
+                        interval="100ba",
                     ),
                     HardNegativeMiningCallback(
-                        k=100, interval=10
+                        k=100, interval=100
                     ),  # golden_retriever_trainer=self),
                 ],
                 # deepspeed_config={
@@ -903,7 +919,7 @@ class Trainer(FromConfig):
         self.trainer.fit(
             # train_dataloader=self.train_dataloader,
             eval_dataloader=evaluators,  # self.val_dataloader,
-            eval_interval="10ba",
+            eval_interval="100ba",
         )
 
     def test(

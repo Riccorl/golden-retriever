@@ -74,12 +74,16 @@ class GoldenComposerTrainer(ComposerTrainer):
         Args:
             trainer_mode (TrainerMode): Specifies which mode the trainer is in.
         """
-        assert self.state.dataloader is not None, 'the dataloader should be set before calling this method'
+        assert (
+            self.state.dataloader is not None
+        ), "the dataloader should be set before calling this method"
 
         if self.state.dataloader_len is None:
             dataloader_iter = iter(self.state.dataloader)
         else:
-            dataloader_iter = itertools.islice(self.state.dataloader, int(self.state.dataloader_len))
+            dataloader_iter = itertools.islice(
+                self.state.dataloader, int(self.state.dataloader_len)
+            )
 
         current_dataloader = self.state.dataloader
         while True:
@@ -88,14 +92,16 @@ class GoldenComposerTrainer(ComposerTrainer):
                 if trainer_mode == TrainerMode.TRAIN:
                     self.engine.run_event(Event.BEFORE_DATALOADER)
                     # check if we need to reload the dataloader_iter
-                    if  current_dataloader != self.state.dataloader:
+                    if current_dataloader != self.state.dataloader:
                         current_dataloader = self.state.dataloader
                         self._spin_dataloaders_to_cur_epoch()
                         # dataloader_iter = iter(self.state.dataloader)
                         if self.state.dataloader_len is None:
                             dataloader_iter = iter(self.state.dataloader)
                         else:
-                            dataloader_iter = itertools.islice(self.state.dataloader, int(self.state.dataloader_len))
+                            dataloader_iter = itertools.islice(
+                                self.state.dataloader, int(self.state.dataloader_len)
+                            )
                     # if self.reload_dataloader():
                     #     dataloader_iter = iter(self.state.dataloader)
                 batch = next(dataloader_iter)
@@ -186,7 +192,7 @@ class GoldenComposerTrainer(ComposerTrainer):
                 # track stop iteration to break out of the loop
                 # get enumerator and batch
                 try:
-                    batch_idx, self.state.batch  = next(dataload_iter)
+                    batch_idx, self.state.batch = next(dataload_iter)
                 except StopIteration:
                     break
                 if self.state.batch is None:

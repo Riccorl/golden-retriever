@@ -21,7 +21,7 @@ if __name__ == "__main__":
         question_encoder="intfloat/e5-small-v2",
         document_index=InMemoryDocumentIndex(
             documents=DocumentStore.from_file(
-                "/leonardo_scratch/large/userexternal/rorland1/golden-retriever/data/el/documents_only_data.jsonl"
+                "/home/ric/Projects/golden-retriever/data/dpr-like/el/documents_only_data.jsonl"
             ),
             metadata_fields=["definition"],
             separator=" <def> ",
@@ -44,18 +44,18 @@ if __name__ == "__main__":
     train_dataset = StreamingGoldenRetrieverDataset(
         name="aida_train",
         tokenizer=retriever.question_tokenizer,
-        local="/leonardo_scratch/large/userexternal/rorland1/golden-retriever/data/el/mosaic/train",
+        local="/home/ric/Projects/golden-retriever/data/dpr-like/el/mosaic/train",
         split="train",
-        question_batch_size=64,
-        # passage_batch_size=400,
+        batch_size=32,
+        shuffle=True,
+        shuffle_seed=42,
     )
     val_dataset = StreamingGoldenRetrieverDataset(
         name="aida_val",
         tokenizer=retriever.question_tokenizer,
-        local="/leonardo_scratch/large/userexternal/rorland1/golden-retriever/data/el/mosaic/val",
+        local="/home/ric/Projects/golden-retriever/data/dpr-like/el/mosaic/val",
         split="train",
-        question_batch_size=64,
-        # passage_batch_size=400,
+        batch_size=32,
     )
     # train_dataset = build_from_hf(
     #     dataset_name="/home/ric/Projects/golden-retriever/data/dpr-like/el/aida_32_tokens_topic/train.jsonl",

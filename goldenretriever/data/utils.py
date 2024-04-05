@@ -12,6 +12,7 @@ import threading
 
 lock = threading.Lock()
 
+
 class Singleton(type):
     # _instances = {}
     # def __call__(cls, *args, **kwargs):
@@ -19,11 +20,14 @@ class Singleton(type):
     #         cls._instances[cls] = super(Singleton, cls).__call__(*args, **kwargs)
     #     return cls._instances[cls]
     _instances = {}
+
     def __call__(cls, *args, **kwargs):
         if cls not in cls._instances:
             with lock:
                 if cls not in cls._instances:
-                    cls._instances[cls] = super(Singleton, cls).__call__(*args, **kwargs)
+                    cls._instances[cls] = super(Singleton, cls).__call__(
+                        *args, **kwargs
+                    )
         return cls._instances[cls]
 
 
@@ -45,12 +49,12 @@ class HardNegativesManager(metaclass=Singleton):
     #             cls, tokenizer, max_length, batch_size
     #         )
     #     return cls.instance
-        # if cls.instance is None:
-        #     cls.instance = super(HardNegativesManager, cls).__new__(
-        #         cls, tokenizer, data, max_length, batch_size, lazy
-        #     )
-        #     cls.instance.__initialized = False
-        # return cls.instance
+    # if cls.instance is None:
+    #     cls.instance = super(HardNegativesManager, cls).__new__(
+    #         cls, tokenizer, data, max_length, batch_size, lazy
+    #     )
+    #     cls.instance.__initialized = False
+    # return cls.instance
 
     def __init__(
         self,
@@ -118,7 +122,7 @@ class HardNegativesManager(metaclass=Singleton):
 
     def __contains__(self, idx: int) -> bool:
         return idx in self._db
-    
+
     def tokenize(self):
         # create a dictionary of passage -> hard_negative mapping
         batch_size = min(self.batch_size, len(self._passage_db))
@@ -137,11 +141,11 @@ class HardNegativesManager(metaclass=Singleton):
                 self._passage_hard_negatives[passage] = {
                     k: tokenized_passages[k][i] for k in tokenized_passages.keys()
                 }
-    
+
     def _add(self, idx: int, passages: List[str]) -> int:
         """
         Add a sample to the database.
-        
+
         Args:
             idx (`int`): sample index
             passages (`List[str]`): list of passages
@@ -152,11 +156,11 @@ class HardNegativesManager(metaclass=Singleton):
         for passage in passages:
             self._passage_db[passage].add(idx)
         return idx
-    
+
     def add(self, idx: int | List[int], passages: List[List[str]]) -> List[int]:
         """
         Add multiple samples to the database.
-        
+
         Args:
             idx (`int` | `List[int]`): sample index
             passages (`List[List[str]]`): list of passages
@@ -167,7 +171,6 @@ class HardNegativesManager(metaclass=Singleton):
         if len(idx) != len(passages):
             raise ValueError("Length of idx and passages should be the same.")
         return [self._add(i, p) for i, p in zip(idx, passages)]
-    
 
     def get(self, idx: int) -> List[str]:
         """Get the hard negatives for a given sample index."""
@@ -183,7 +186,7 @@ class HardNegativesManager(metaclass=Singleton):
             output.append(self._passage_hard_negatives[passage])
 
         return output
-    
+
     def reset(self):
         self._db = {}
         self._passage_db = defaultdict(set)
