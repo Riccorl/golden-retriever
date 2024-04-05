@@ -127,7 +127,7 @@ class Trainer(FromConfig):
         precision: int | str = 16,
         reload_dataloaders_every_n_epochs: int = 1,
         resume_from_checkpoint_path: str | os.PathLike | None = None,
-        trainer_kwargs: dict | None = None,
+        composer_trainer_kwargs: dict | None = None,
         # eval parameters
         metric_to_monitor: str = "validate_recall@{top_k}",
         monitor_mode: str = "max",
@@ -195,7 +195,7 @@ class Trainer(FromConfig):
         self.precision = precision
         self.reload_dataloaders_every_n_epochs = reload_dataloaders_every_n_epochs
         self.resume_from_checkpoint_path = resume_from_checkpoint_path
-        self.trainer_kwargs = trainer_kwargs or {}
+        self.trainer_kwargs = composer_trainer_kwargs or {}
         # eval parameters
         self.metric_to_monitor = metric_to_monitor
         self.monitor_mode = monitor_mode
@@ -247,14 +247,13 @@ class Trainer(FromConfig):
             self.max_steps = None
 
         # reproducibility
-        # pl.seed_everything(self.seed)
-        reproducibility.configure_deterministic_mode()
+        if self.deterministic:
+            reproducibility.configure_deterministic_mode()
         reproducibility.seed_all(self.seed)
         # set the precision of matmul operations
         torch.set_float32_matmul_precision(self.float32_matmul_precision)
 
-        # lightning data module declaration
-        # self.lightning_datamodule = self.configure_lightning_datamodule()
+        # dataloader declaration
         self.train_dataloader, self.val_dataloader = self.configure_dataloader()
 
         if self.max_epochs is not None:
@@ -264,11 +263,10 @@ class Trainer(FromConfig):
         # optimizer declaration
         self.optimizer, self.lr_scheduler = self.configure_optimizers()
 
-        # lightning module declaration
+        # composer module declaration
         self.composer_module = self.configure_composer_module()
 
         # logger and experiment declaration
-        # update self.wandb_kwargs
         wandb_args = dict(
             project=self.wandb_project_name,
             group=self.wandb_group,
@@ -277,11 +275,6 @@ class Trainer(FromConfig):
             tags=self.wandb_tags,
             log_artifacts=self.wandb_log_artifacts,
             rank_zero_only=self.wandb_rank_zero_only,
-            # save_dir=self.wandb_save_dir,
-            # log_model=self.wandb_log_model,
-            # offline=not self.wandb_online_mode,
-            # watch=self.wandb_watch,
-            # lightning_module=self.composer_module,
         )
         wandb_init_kwargs = {
             "save_dir": self.wandb_save_dir,
@@ -308,24 +301,7 @@ class Trainer(FromConfig):
         self.metric_to_monitor = self.metric_to_monitor.format(top_k=self.target_top_k)
 
         # explicitly configure some callbacks that will be needed not only by the
-        # pl.Trainer but also in this class
-        # model checkpoint callback
-        # if self.save_last:
-        #     logger.warning(
-        #         "We will override the `save_last` of `ModelCheckpoint` to `False`. "
-        #         "Instead, we will use a separate `ModelCheckpoint` callback to save the last checkpoint"
-        #     )
-        # checkpoint_kwargs = dict(
-        #     monitor=self.metric_to_monitor,
-        #     mode=self.monitor_mode,
-        #     verbose=True,
-        #     save_top_k=self.save_top_k,
-        #     filename=self.checkpoint_filename,
-        #     dirpath=self.checkpoint_dir,
-        #     auto_insert_metric_name=False,
-        # )
-        # if self.checkpoint_kwargs is not None:
-        #     checkpoint_kwargs.update(self.checkpoint_kwargs)
+        # Composer Trainer but also in this class
         checkpoint_kwargs = dict(
             folder=self.checkpoint_dir,
             filename=self.checkpoint_filename,
@@ -350,9 +326,6 @@ class Trainer(FromConfig):
 
         # early stopping callback
         early_stopping_kwargs = dict(
-            # monitor=self.metric_to_monitor,
-            # mode=self.monitor_mode,
-            # patience=self.early_stopping_patience,
             monitor=self.metric_to_monitor,
             dataloader_label="validate",
             patience=self.early_stopping_patience,
@@ -373,27 +346,6 @@ class Trainer(FromConfig):
 
         # lazy trainer declaration
         self.trainer: ComposerTrainer | None = None
-
-    # def configure_lightning_datamodule(self, *args, **kwargs):
-    #     # lightning data module declaration
-    #     if self.val_dataset is not None and isinstance(
-    #         self.val_dataset, GoldenRetrieverDataset
-    #     ):
-    #         self.val_dataset = [self.val_dataset]
-    #     if self.test_dataset is not None and isinstance(
-    #         self.test_dataset, GoldenRetrieverDataset
-    #     ):
-    #         self.test_dataset = [self.test_dataset]
-
-    #     self.lightning_datamodule = GoldenRetrieverPLDataModule(
-    #         train_dataset=self.train_dataset,
-    #         val_datasets=self.val_dataset,
-    #         test_datasets=self.test_dataset,
-    #         num_workers=self.num_workers,
-    #         *args,
-    #         **kwargs,
-    #     )
-    #     return self.lightning_datamodule
 
     def configure_dataloader(self, *args, **kwargs):
 
