@@ -14,7 +14,7 @@ from goldenretriever.callbacks.base import PredictionCallback, NLPTemplateCallba
 from goldenretriever.common.log import get_logger
 from goldenretriever.common.model_inputs import ModelInputs
 from goldenretriever.data.base.datasets import BaseDataset
-from goldenretriever.data.datasets import GoldenRetrieverDataset
+from goldenretriever.data.old_datasets import GoldenRetrieverDataset
 from goldenretriever.indexers.base import BaseDocumentIndex
 from goldenretriever.pytorch_modules.model import GoldenRetriever
 

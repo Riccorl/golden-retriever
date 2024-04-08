@@ -21,6 +21,11 @@ PRECISION_MAP = {
     "fp32": torch.float32,
     "fp16": torch.float16,
     "bf16": torch.bfloat16,
+    "amp_fp16": torch.float16,
+    "amp_bf16": torch.bfloat16,
+    "mixed": torch.float16,
+    "true": torch.float32,
+    "mixed-precision": torch.float16,
 }
 
 

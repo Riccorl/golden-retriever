@@ -1,32 +1,28 @@
 import copy
-from functools import partial
 import itertools
 import logging
 import os
-from pathlib import Path
 import random
 import time
+from functools import partial
+from pathlib import Path
 from typing import Dict, List, Optional, Set
-from composer import Callback, ComposerModel, DataSpec, Event, State, Logger, Time
-from composer.utils import create_interval_scheduler
+
 import hydra
-from omegaconf import DictConfig
 import torch
+from composer import Callback, ComposerModel, DataSpec, Event, Logger, State, Time
+from composer.utils import create_interval_scheduler, dist, reproducibility
+from omegaconf import DictConfig
+from torch.utils.data import DataLoader, Dataset, DistributedSampler, IterableDataset
 from tqdm import tqdm
 
-from torch.utils.data import DataLoader, DistributedSampler
-
 from goldenretriever.callbacks.base import NLPTemplateCallback
-
-from composer.utils import reproducibility, dist
-
 from goldenretriever.common.log import get_logger
 from goldenretriever.common.model_inputs import ModelInputs
 from goldenretriever.composer_modules.mosaic_module import GoldenRetrieverComposerModule
-from goldenretriever.data.mosaic_datasets import (
+from goldenretriever.data.datasets import (
     GoldenRetrieverCollator,
-    GoldenStreamingDataLoader,
-    StreamingGoldenRetrieverDataset,
+    GoldenRetrieverStreamingDataset,
 )
 from goldenretriever.data.utils import HardNegativesManager
 from goldenretriever.indexers.base import BaseDocumentIndex
@@ -46,14 +42,13 @@ class PredictionCallback(Callback):
         num_workers: int = 8,
         document_index: BaseDocumentIndex | None = None,
         precision: str | int = 32,
+        compute_on_cpu: bool = False,
         force_reindex: bool = True,
         retriever_dir: Path | None = None,
         events: Set[Event] | None = None,
-        # stages: Set[str | RunningStage] | None = None,
-        other_callbacks: List[DictConfig] | List["NLPTemplateCallback"] | None = None,
+        metric_callbacks: List[DictConfig] | List["NLPTemplateCallback"] | None = None,
         interval: str | int | Time = None,
-        # dataset: DictConfig | BaseDataset | None = None,
-        # dataloader: DataLoader | None = None,
+        dataloader: DataLoader | None = None,
         *args,
         **kwargs,
     ):
@@ -63,19 +58,21 @@ class PredictionCallback(Callback):
         self.num_workers = num_workers
         self.document_index = document_index
         self.precision = precision
+        self.compute_on_cpu = compute_on_cpu
         self.force_reindex = force_reindex
         self.retriever_dir = retriever_dir
         self.events = events or {Event.EVAL_END}
+        self.dataloader = dataloader
 
         self.check_interval = create_interval_scheduler(
             interval, include_end_of_training=True
         )
         self.last_generate_batch: Optional[Time] = None
 
-        self.other_callbacks = other_callbacks or []
-        for i, callback in enumerate(self.other_callbacks):
+        self.metric_callbacks = metric_callbacks or []
+        for i, callback in enumerate(self.metric_callbacks):
             if isinstance(callback, DictConfig):
-                self.other_callbacks[i] = hydra.utils.instantiate(
+                self.metric_callbacks[i] = hydra.utils.instantiate(
                     callback, _recursive_=False
                 )
 
@@ -87,7 +84,7 @@ class PredictionCallback(Callback):
             predictions = self(event, state, logger)
             # run the inner callbacks
             # TODO: check if we need rank 0 only
-            for callback in self.other_callbacks:
+            for callback in self.metric_callbacks:
                 callback(
                     state=state,
                     logger=logger,
@@ -95,7 +92,7 @@ class PredictionCallback(Callback):
                     callback=self,
                 )
             diff = time.time() - start
-            program_logger.info(f"Prediction callback ran in {diff} seconds.")
+            program_logger.info(f"{self.__class__.__name__} ran in {diff} seconds.")
 
     @torch.no_grad()
     def __call__(
@@ -133,7 +130,7 @@ class PredictionCallback(Callback):
         # get the retriever
         retriever: GoldenRetriever = composer_model.model
         # get the current eval dataloader
-        dataloader = state.dataloader
+        dataloader = self.dataloader or state.dataloader
         # get the current eval dataset
         dataset = dataloader.dataset
         # get the tokenizer
@@ -146,7 +143,6 @@ class PredictionCallback(Callback):
                     x,
                     truncation=True,
                     padding=True,
-                    # max_length=40,  # dataset.max_passage_length,
                     max_length=dataset.max_passage_length,
                     return_tensors="pt",
                 )
@@ -176,11 +172,10 @@ class PredictionCallback(Callback):
         retriever.index(
             batch_size=self.batch_size,
             num_workers=self.num_workers,
-            # max_length=40,  # dataset.max_passage_length,
             max_length=dataset.max_passage_length,
             collate_fn=collate_fn,
             precision=self.precision,
-            compute_on_cpu=False,
+            compute_on_cpu=self.compute_on_cpu,
             force_reindex=force_reindex,
         )
         predictions = []
@@ -243,21 +238,11 @@ class PredictionCallback(Callback):
                     )
                     predictions.append(prediction_output)
 
-        # for callback in self.other_callbacks:
-        #     callback(
-        #         state=state,
-        #         logger=logger,
-        #         predictions=predictions,
-        #         callback=self,
-        #     )
-
         composer_model.train(mode=original_mode)
         return predictions
 
-    # def eval_end(self, state: State, logger: Logger):
 
-
-class HardNegativeMiningCallback(Callback):
+class HardNegativeMiningCallback(PredictionCallback):
 
     def __init__(
         self,
@@ -266,49 +251,44 @@ class HardNegativeMiningCallback(Callback):
         num_workers: int = 8,
         document_index: BaseDocumentIndex | None = None,
         precision: str | int = 32,
+        compute_on_cpu: bool = False,
         force_reindex: bool = True,
         retriever_dir: Path | None = None,
         events: Set[Event] | None = None,
-        # stages: Set[str | RunningStage] | None = None,
-        other_callbacks: List[DictConfig] | List["NLPTemplateCallback"] | None = None,
-        # dataset: DictConfig | BaseDataset | None = None,
-        # dataloader: DataLoader | None = None,
-        max_negatives: int = 5,
+        metric_callbacks: List[DictConfig] | List["NLPTemplateCallback"] | None = None,
         interval: str | int | Time = None,
+        dataloader: DataLoader | None = None,
+        metrics_to_monitor: str = None,
+        threshold: float = 0.8,
+        max_negatives: int = 5,
+        add_with_probability: float = 1.0,
         *args,
         **kwargs,
     ):
-        super().__init__()
-        self.k = k
-        self.batch_size = batch_size
-        self.num_workers = num_workers
-        self.document_index = document_index
-        self.precision = precision
-        self.force_reindex = force_reindex
-        self.retriever_dir = retriever_dir
-        self.events = events or {Event.EVAL_AFTER_ALL}
-        self.max_negatives = max_negatives
-        self.check_interval = create_interval_scheduler(
-            interval, include_end_of_training=True
+        if dataloader is None:
+            raise ValueError("For hard negative mining, a dataloader must be provided.")
+        # overwrite the events if not provided
+        events = events or {Event.EVAL_AFTER_ALL}
+        super().__init__(
+            k=k,
+            batch_size=batch_size,
+            num_workers=num_workers,
+            document_index=document_index,
+            precision=precision,
+            compute_on_cpu=compute_on_cpu,
+            force_reindex=force_reindex,
+            retriever_dir=retriever_dir,
+            events=events,
+            metric_callbacks=metric_callbacks,
+            interval=interval,
+            dataloader=dataloader,
+            *args,
+            **kwargs,
         )
-        self.last_generate_batch: Optional[Time] = None
-        self.interval = interval.value if isinstance(interval, Time) else interval
-
-        self.other_callbacks = other_callbacks or []
-        for i, callback in enumerate(self.other_callbacks):
-            if isinstance(callback, DictConfig):
-                self.other_callbacks[i] = hydra.utils.instantiate(
-                    callback, _recursive_=False
-                )
-
-    def run_event(self, event: Event, state: State, logger: Logger):
-        if event in self.events:
-            # if state.get_elapsed_duration(
-            # ) is not None and self.check_interval(state, event) and self.last_generate_batch != state.timestamp.batch:
-            start = time.time()
-            self(event, state, logger)
-            diff = time.time() - start
-            program_logger.info(f"Hard Negative callback ran in {diff} seconds.")
+        self.metrics_to_monitor = f"metrics/{metrics_to_monitor}"
+        self.threshold = threshold
+        self.max_negatives = max_negatives
+        self.add_with_probability = add_with_probability
 
     @torch.no_grad()
     def __call__(
@@ -322,6 +302,16 @@ class HardNegativeMiningCallback(Callback):
         if event not in self.events:
             return
 
+        if self.metrics_to_monitor not in state.eval_metrics:
+            logger.warning(
+                f"Metric `{self.metrics_to_monitor}` not found in trainer.logged_metrics. "
+                f"Available metrics: {state.eval_metrics.keys()}"
+            )
+            return {}
+
+        if state.eval_metrics[self.metrics_to_monitor] < self.threshold:
+            return {}
+    
         program_logger.info(f"Computing hard negatives predictions for event `{event}`")
         # get model from state
         composer_model: GoldenRetrieverComposerModule = (
@@ -335,62 +325,30 @@ class HardNegativeMiningCallback(Callback):
         composer_model.dummy_forward_called = False
         # get the retriever
         retriever = composer_model.model
-        # get the current train dataloader
-        # dataloader = state.train_dataloader
         # get the current train dataset
-        # dataset = copy.deepcopy(state.train_dataloader.dataset)
-        dataset = StreamingGoldenRetrieverDataset(
-            name="aida_train",
-            tokenizer=retriever.question_tokenizer,
-            local="/home/ric/Projects/golden-retriever/data/dpr-like/el/mosaic/train",
-            split="train",
-            batch_size=32,
-            shuffle=True,
-            shuffle_seed=42,
-            # passage_batch_size=400,
-        )
+        dataset = self.dataloader.dataset
         # save the current epoch of the training
         current_train_epoch = state.timestamp.epoch
         # get the tokenizer
         # tokenizer = retriever.question_tokenizer  # dataset.tokenizer
         tokenizer = dataset.tokenizer
-        # get the steps before the next evaluation
-        # this information is stored in the evaluators
-        # get the maximum interval step from the evaluators
-        # n_samples_to_augment = [
-        #     evaluator.actual_eval_interval for evaluator in state.evaluators
-        # ]
-        # # cast to int and get the maximum value
-        # n_samples_to_augment = max(
-        #     [int(n.value) for n in n_samples_to_augment if n is not None]
-        # )
-
-        # ds = copy.deepcopy(dataset)
-        # dl = GoldenStreamingDataLoader(
-        dl = DataLoader(
-            dataset,
-            collate_fn=GoldenRetrieverCollator(tokenizer=dataset.tokenizer),
-            batch_size=32,
-            drop_last=False,
-            num_workers=8,  # self.num_workers,
-            # pin_memory=True,
-            # prefetch_factor=2,
-            # persistent_workers=True,
-            # timeout=0,
-            # sampler=dist.get_sampler(
-            #     self.train_dataset, drop_last=False, shuffle=False
-            # ),
-        )
-        dl.dataset.load_state_dict(
+        # restore the state of the dataset
+        self.dataloader.dataset.load_state_dict(
             state.train_dataloader.dataset.state_dict(
                 int(state.timestamp.sample_in_epoch.value), True
             )
         )
-        # dl.load_state_dict(
-        #     state.train_dataloader.state_dict(
-        #         # int(state.timestamp.sample_in_epoch.value), True
-        #     )
-        # )
+
+        # get the steps before the next evaluation
+        # this information is stored in the evaluators
+        # get the maximum interval step from the evaluators
+        n_samples_to_augment = [
+            evaluator.actual_eval_interval for evaluator in state.evaluators
+        ]
+        # cast to int and get the maximum value
+        n_samples_to_augment = max(
+            [int(n.value) for n in n_samples_to_augment if n is not None]
+        )
 
         def collate_fn(x):
             return ModelInputs(
@@ -399,7 +357,6 @@ class HardNegativeMiningCallback(Callback):
                     truncation=True,
                     padding=True,
                     max_length=dataset.max_passage_length,
-                    # max_length=40,  # dataset.max_passage_length,
                     return_tensors="pt",
                 )
             )
@@ -440,9 +397,9 @@ class HardNegativeMiningCallback(Callback):
 
         # start = time.time()
         progress_bar = tqdm(
-            dl,
+            self.dataloader,
             initial=0,
-            total=self.interval,
+            total=n_samples_to_augment,
             desc=f"Computing predictions for dataset {state.dataloader_label}",
         )
         batch_augmented = 0
@@ -493,7 +450,7 @@ class HardNegativeMiningCallback(Callback):
                 predictions.append(prediction_output)
             progress_bar.update(batch.questions["input_ids"].size(0))
             batch_augmented += 1
-            if batch_augmented >= self.interval:
+            if batch_augmented >= n_samples_to_augment:
                 program_logger.info(
                     f"Augmented next iteration batches ({batch_augmented}). "
                     "Stopping the hard negative mining."
@@ -508,8 +465,8 @@ class HardNegativeMiningCallback(Callback):
         # store the predictions in a dictionary for faster access based on the sample index
         hard_negatives_list = {}
         for prediction in tqdm(predictions, desc="Collecting hard negatives"):
-            # if random.random() < 1 - self.add_with_probability:
-            #     continue
+            if random.random() < 1 - self.add_with_probability:
+                continue
             top_k_passages = prediction["predictions"]
             gold_passages = prediction["gold"]
             # get the ids of the max_negatives wrong passages with the highest similarity
@@ -520,12 +477,12 @@ class HardNegativeMiningCallback(Callback):
             ][: self.max_negatives]
             hard_negatives_list[prediction["sample_idx"]] = wrong_passages
 
+        # HardNegativesManager is a singleton, so we need
+        # to reset it before adding new hard negatives
         hn_manager = HardNegativesManager(
             tokenizer=tokenizer,
             max_length=dataset.max_passage_length,
-            # data=hard_negatives_list,
         )
-        # # dataset.hn_manager = hn_manager
         hn_manager.reset()
         hn_manager.add(hard_negatives_list.keys(), hard_negatives_list.values())
         hn_manager.tokenize()
@@ -569,8 +526,6 @@ class RecallAtKEvaluationCallback(NLPTemplateCallback):
     @torch.no_grad()
     def __call__(
         self,
-        # trainer: pl.Trainer,
-        # pl_module: pl.LightningModule,
         state: State,
         logger: Logger,
         predictions: Dict,

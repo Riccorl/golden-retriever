@@ -4,7 +4,7 @@ from goldenretriever.indexers.document import DocumentStore
 from goldenretriever.trainer import Trainer
 from goldenretriever import GoldenRetriever
 from goldenretriever.indexers.inmemory import InMemoryDocumentIndex
-from goldenretriever.data.datasets import AidaInBatchNegativesDataset
+from goldenretriever.data.old_datasets import AidaInBatchNegativesDataset
 
 logger = get_logger(__name__)
 

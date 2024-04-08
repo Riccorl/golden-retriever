@@ -1,27 +1,17 @@
-# Copyright 2022 MosaicML Composer authors
-# SPDX-License-Identifier: Apache-2.0
-
-"""Core MixUp classes and functions."""
-
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, Optional, Tuple, Union
 
-import numpy as np
 import torch
-
 from composer.core import Algorithm, Event, State
 from composer.loggers import Logger
-from composer.loss.utils import ensure_targets_one_hot
 
-from goldenretriever.common.model_inputs import ModelInputs
 from goldenretriever.data.utils import HardNegativesManager
 
 log = logging.getLogger(__name__)
 
 
-class HardNegativeAlgo(Algorithm):
+class HardNegativeAlgorithm(Algorithm):
 
     def __init__(
         self,
@@ -53,7 +43,6 @@ class HardNegativeAlgo(Algorithm):
                     {
                         tuple(passage["input_ids"]): passage
                         for passage in self.hn_manager.get(sample)
-                        # if tuple(passage["input_ids"]) not in already_in_batch
                     }
                 )
 
@@ -115,15 +104,25 @@ class HardNegativeAlgo(Algorithm):
         state.batch_set_item("labels", labels)
 
     @staticmethod
-    def duplicate(a, b):
-        # dimensions
-        shape1 = a.shape[0]
-        shape2 = b.shape[0]
-        c = a.shape[1]
-        assert c == b.shape[1], "Tensors must have same number of columns"
+    def duplicate(tensor_one: torch.Tenser, tensor_two: torch.Tenser) -> torch.Tensor:
+        """
+        Check if two tensors have the same elements.
 
-        a_expand = a.unsqueeze(1).expand(-1, shape2, c)
-        b_expand = b.unsqueeze(0).expand(shape1, -1, c)
+        Args:
+            tensor_one (`torch.Tensor`): The first tensor.
+            tensor_two (`torch.Tensor`): The second tensor.
+
+        Returns:
+            `torch.Tensor`: A boolean tensor with the same shape as the input tensors.
+        """
+        # dimensions
+        shape1 = tensor_one.shape[0]
+        shape2 = tensor_two.shape[0]
+        c = tensor_one.shape[1]
+        assert c == tensor_two.shape[1], "Tensors must have same number of columns"
+
+        a_expand = tensor_one.unsqueeze(1).expand(-1, shape2, c)
+        b_expand = tensor_two.unsqueeze(0).expand(shape1, -1, c)
         # element-wise equality
         mask = (a_expand == b_expand).all(-1).any(-1)
         return mask

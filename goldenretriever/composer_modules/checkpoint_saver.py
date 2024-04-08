@@ -207,7 +207,7 @@ class MetricCheckpointSaver(CheckpointSaver):  # noqa: D101
                 self._save_checkpoint(
                     state,
                     logger,
-            )
+                )
 
     def epoch_checkpoint(self, state: State, logger: Logger):
         assert callable(self.save_interval)
@@ -224,7 +224,7 @@ class MetricCheckpointSaver(CheckpointSaver):  # noqa: D101
                 self._save_checkpoint(
                     state,
                     logger,
-            )
+                )
 
     def iteration_checkpoint(self, state: State, logger: Logger):
         assert callable(self.save_interval)
@@ -241,7 +241,7 @@ class MetricCheckpointSaver(CheckpointSaver):  # noqa: D101
                 self._save_checkpoint(
                     state,
                     logger,
-            )
+                )
 
     def state_dict(self) -> Dict[str, Any]:
         state_dict = {}

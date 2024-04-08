@@ -9,7 +9,7 @@ from tqdm import tqdm
 
 from goldenretriever import GoldenRetriever
 from goldenretriever.common.utils import get_logger, get_callable_from_string
-from goldenretriever.data.datasets import InBatchNegativesDataset
+from goldenretriever.data.old_datasets import InBatchNegativesDataset
 from goldenretriever.indexers.document import DocumentStore
 
 logger = get_logger(__name__)

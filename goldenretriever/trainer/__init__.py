@@ -21,6 +21,5 @@ COMPOSER_PRECISION_INPUT_STR_ALIAS_CONVERSION = {
     "amp_fp16": Precision.AMP_FP16,
     "amp_bf16": Precision.AMP_BF16,
     "amp_fp8": Precision.AMP_FP8,
-    "amp": "amp",
     None: None,
 }

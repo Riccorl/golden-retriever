@@ -38,7 +38,7 @@ from goldenretriever.callbacks.utils_callbacks import (
 from goldenretriever.common.from_config import FromConfig
 from goldenretriever.common.log import get_logger
 from goldenretriever.common.utils import to_config
-from goldenretriever.data.datasets import GoldenRetrieverDataset
+from goldenretriever.data.old_datasets import GoldenRetrieverDataset
 from goldenretriever.indexers.base import BaseDocumentIndex
 from goldenretriever.lightning_modules.pl_data_modules import (
     GoldenRetrieverPLDataModule,

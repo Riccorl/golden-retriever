@@ -1,26 +1,28 @@
+import copy
 import os
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Literal, Optional, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Literal,
+    Optional,
+    Sequence,
+    Union,
+)
 
 import composer
 import composer.callbacks
+import composer.optim
 import hydra
 import lightning as pl
 import omegaconf
 import torch
-from composer import (
-    Algorithm,
-    DataSpec,
-    Evaluator,
-    Event,
-    State,
-    Time,
-    TimeUnit,
-)
-from composer import (
-    Trainer as ComposerTrainer,
-)
+from composer import Algorithm, DataSpec, Evaluator, Event, State, Time, TimeUnit
+from composer import Trainer as ComposerTrainer
 from composer.callbacks import (
     CheckpointSaver,
     EarlyStopper,
@@ -29,16 +31,16 @@ from composer.callbacks import (
     SpeedMonitor,
 )
 from composer.loggers import WandBLogger
+from composer.optim.scheduler import LinearScheduler
 from composer.utils import dist, reproducibility
 
 # from lightning import Trainer
-from lightning.pytorch.callbacks import (
-    EarlyStopping,
-    LearningRateMonitor,
-    ModelCheckpoint,
-    ModelSummary,
-)
-
+# from lightning.pytorch.callbacks import (
+#     EarlyStopping,
+#     LearningRateMonitor,
+#     ModelCheckpoint,
+#     ModelSummary,
+# )
 # from lightning.pytorch.loggers import WandbLogger
 from omegaconf import OmegaConf
 from pprintpp import pformat
@@ -63,7 +65,7 @@ from goldenretriever.common.from_config import FromConfig
 from goldenretriever.common.log import _golden_retriever_build_pbar, get_logger
 from goldenretriever.common.model_inputs import ModelInputs
 from goldenretriever.common.utils import to_config
-from goldenretriever.composer_modules.algo import HardNegativeAlgo
+from goldenretriever.composer_modules.algorithms import HardNegativeAlgorithm
 from goldenretriever.composer_modules.callbacks import (
     HardNegativeMiningCallback,
     PredictionCallback,
@@ -73,11 +75,10 @@ from goldenretriever.composer_modules.callbacks import (
 )
 from goldenretriever.composer_modules.checkpoint_saver import MetricCheckpointSaver
 from goldenretriever.composer_modules.mosaic_module import GoldenRetrieverComposerModule
-from goldenretriever.data.datasets import GoldenRetrieverDataset
-from goldenretriever.data.mosaic_datasets import (
+from goldenretriever.data.old_datasets import GoldenRetrieverDataset
+from goldenretriever.data.datasets import (
     GoldenRetrieverCollator,
-    GoldenStreamingDataLoader,
-    StreamingGoldenRetrieverDataset,
+    GoldenRetrieverStreamingDataset,
 )
 from goldenretriever.indexers.base import BaseDocumentIndex
 from goldenretriever.lightning_modules.pl_data_modules import (
@@ -87,13 +88,14 @@ from goldenretriever.lightning_modules.pl_modules import GoldenRetrieverPLModule
 from goldenretriever.pytorch_modules.loss import MultiLabelNCELoss
 from goldenretriever.pytorch_modules.model import GoldenRetriever
 from goldenretriever.pytorch_modules.optim import RAdamW
-from goldenretriever.pytorch_modules.scheduler import LinearScheduler
 from goldenretriever.trainer import (
     COMPOSER_PRECISION_INPUT_STR_ALIAS_CONVERSION,
     PRECISION_INPUT_STR_ALIAS_CONVERSION,
 )
-from goldenretriever.trainer.composer_trainer import GoldenComposerTrainer
 from goldenretriever.trainer.evaluator import GoldenRetrieverEvaluator
+from transformers import PreTrainedTokenizerBase
+
+from composer.utils import dist, get_device
 
 logger = get_logger()
 
@@ -102,32 +104,50 @@ class Trainer(FromConfig):
     def __init__(
         self,
         retriever: GoldenRetriever,
-        train_dataset: GoldenRetrieverDataset | None = None,
+        train_dataset: str | GoldenRetrieverStreamingDataset | None = None,
+        train_batch_size: int = 32,
+        train_dataset_kwargs: dict | None = None,
         val_dataset: (
-            GoldenRetrieverDataset | list[GoldenRetrieverDataset] | None
+            str
+            | GoldenRetrieverStreamingDataset
+            | list[str]
+            | list[GoldenRetrieverStreamingDataset]
+            | None
         ) = None,
+        val_batch_size: int = 32,
+        val_dataset_kwargs: dict | list[dict] | None = None,
         test_dataset: (
-            GoldenRetrieverDataset | list[GoldenRetrieverDataset] | None
+            str
+            | GoldenRetrieverStreamingDataset
+            | list[str]
+            | list[GoldenRetrieverStreamingDataset]
+            | None
         ) = None,
+        test_batch_size: int = 32,
+        test_dataset_kwargs: dict | list[dict] | None = None,
         num_workers: int = 4,
         optimizer: torch.optim.Optimizer = RAdamW,
         lr: float = 1e-5,
         weight_decay: float = 0.01,
-        lr_scheduler: torch.optim.lr_scheduler.LRScheduler = LinearScheduler,
-        num_warmup_steps: int = 0,
+        lr_scheduler: composer.optim.scheduler.ComposerScheduler = LinearScheduler,
+        lr_kwargs: dict | None = None,
         loss: torch.nn.Module = MultiLabelNCELoss,
         callbacks: list | None = None,
         device: str = "gpu",
-        precision: int | str = "amp",
+        precision: int | str = "amp_fp16",
         # accelerator: str = "auto",
         # devices: int = 1,
         # accumulate_grad_batches: int = 1,
         # gradient_clip_val: float = 1.0,
         # val_check_interval: float = 1.0,
         # check_val_every_n_epoch: int = 1,
-        max_steps: int | None = None,
-        max_epochs: int | None = None,
+        # max_steps: int | None = None,
+        # max_epochs: int | None = None,
+        max_duration: str | Time | TimeUnit = "1ba",
         eval_interval: int | str | Time | Callable[[State, Event], bool] = "1ba",
+        device_train_microbatch_size: int | str | None = None,
+        device_eval_microbatch_size: int | str | None = None,
+        step_schedulers_every_batch: bool = True,
         deterministic: bool = True,
         fast_dev_run: bool = False,
         resume_from_checkpoint_path: str | os.PathLike | None = None,
@@ -136,7 +156,7 @@ class Trainer(FromConfig):
         dist_timeout: int = 300,
         composer_trainer_kwargs: dict | None = None,
         # eval parameters
-        metric_to_monitor: str = "validate_recall@{top_k}",
+        metric_to_monitor: str = "recall@{top_k}",
         monitor_mode: str = "max",
         top_k: int | List[int] = 100,
         # early stopping parameters
@@ -149,9 +169,10 @@ class Trainer(FromConfig):
         wandb_experiment_name: str | None = None,
         wandb_project_name: str = "golden-retriever",
         wandb_save_dir: str | os.PathLike = "./",  # TODO: i don't like this default
-        wandb_log_model: bool = True,
+        wandb_log_artifacts: bool = False,
         wandb_online_mode: bool = False,
-        wandb_watch: str = "all",
+        # wandb_watch: str = "all",
+        wandb_rank_zero_only: bool = True,
         wandb_kwargs: dict | None = None,
         # checkpoint parameters
         model_checkpointing: bool = True,
@@ -168,30 +189,45 @@ class Trainer(FromConfig):
         metrics_to_monitor_for_hard_negatives: str | None = None,
         mine_hard_negatives_with_probability: float = 1.0,
         # other parameters
+        progress_bar: bool = True,
+        log_to_console: bool = False,
         seed: int = 42,
         float32_matmul_precision: str = "medium",
         **kwargs,
     ):
+        dist.initialize_dist(get_device(None), timeout=dist_timeout)
+
         # put all the parameters in the class
         self.retriever = retriever
         # datasets
         self.train_dataset = train_dataset
+        self.train_batch_size = train_batch_size
+        self.train_dataset_kwargs = train_dataset_kwargs or {}
         self.val_dataset = val_dataset
+        self.val_batch_size = val_batch_size
+        self.val_dataset_kwargs = val_dataset_kwargs or {}
         self.test_dataset = test_dataset
+        self.test_batch_size = test_batch_size
+        self.test_dataset_kwargs = test_dataset_kwargs or {}
         self.num_workers = num_workers
         # trainer parameters
         self.optimizer = optimizer
         self.lr = lr
         self.weight_decay = weight_decay
         self.lr_scheduler = lr_scheduler
-        self.num_warmup_steps = num_warmup_steps
+        self.lr_kwargs = lr_kwargs or {}
+        # self.num_warmup_steps = num_warmup_steps
         self.loss = loss
         self.callbacks = callbacks
         self.device = device
         self.precision = precision
-        self.max_steps = max_steps
-        self.max_epochs = max_epochs
+        self.max_duration = max_duration
+        # self.max_steps = max_steps
+        # self.max_epochs = max_epochs
         self.eval_interval = eval_interval
+        self.device_train_microbatch_size = device_train_microbatch_size or train_batch_size
+        self.device_eval_microbatch_size = device_eval_microbatch_size or val_batch_size
+        self.step_schedulers_every_batch = step_schedulers_every_batch
         self.deterministic = deterministic
         self.fast_dev_run = fast_dev_run
         self.resume_from_checkpoint_path = resume_from_checkpoint_path
@@ -213,9 +249,10 @@ class Trainer(FromConfig):
         self.wandb_experiment_name = wandb_experiment_name
         self.wandb_project_name = wandb_project_name
         self.wandb_save_dir = wandb_save_dir
-        self.wandb_log_model = wandb_log_model
+        self.wandb_log_artifacts = wandb_log_artifacts
         self.wandb_online_mode = wandb_online_mode
-        self.wandb_watch = wandb_watch
+        self.wandb_rank_zero_only = wandb_rank_zero_only
+        # self.wandb_watch = wandb_watch
         self.wandb_kwargs = wandb_kwargs
         # checkpoint parameters
         self.model_checkpointing = model_checkpointing
@@ -234,20 +271,10 @@ class Trainer(FromConfig):
         )
         self.mine_hard_negatives_with_probability = mine_hard_negatives_with_probability
         # other parameters
+        self.progress_bar = progress_bar
+        self.log_to_console = log_to_console
         self.seed = seed
         self.float32_matmul_precision = float32_matmul_precision
-
-        if self.max_epochs is None and self.max_steps is None:
-            raise ValueError(
-                "Either `max_epochs` or `max_steps` should be specified in the trainer configuration"
-            )
-
-        if self.max_epochs is not None and self.max_steps is not None:
-            logger.info(
-                "Both `max_epochs` and `max_steps` are specified in the trainer configuration. "
-                "Will use `max_epochs` for the number of training steps"
-            )
-            self.max_steps = None
 
         # reproducibility
         if self.deterministic:
@@ -256,12 +283,16 @@ class Trainer(FromConfig):
         # set the precision of matmul operations
         torch.set_float32_matmul_precision(self.float32_matmul_precision)
 
-        # dataloader declaration
-        self.train_dataloader, self.val_dataloader = self.configure_dataloader()
+        # dataset and dataloader declaration
+        (
+            self.train_dataset,
+            self.val_dataset,
+            self.train_dataloader,
+            self.val_dataloader,
+        ) = self.configure_dataset_and_dataloader()
 
-        if self.max_epochs is not None:
-            logger.info(f"Number of training epochs: {self.max_epochs}")
-            self.max_steps = len(self.train_dataloader) * self.max_epochs
+        # evaluator declaration
+        self.evaluators = self.configure_evaluators()
 
         # optimizer declaration
         self.optimizer, self.lr_scheduler = self.configure_optimizers()
@@ -272,10 +303,8 @@ class Trainer(FromConfig):
         # logger and experiment declaration
         wandb_args = dict(
             project=self.wandb_project_name,
-            group=self.wandb_group,
             name=self.wandb_experiment_name,
             entity=self.wandb_entity,
-            tags=self.wandb_tags,
             log_artifacts=self.wandb_log_artifacts,
             rank_zero_only=self.wandb_rank_zero_only,
         )
@@ -308,7 +337,7 @@ class Trainer(FromConfig):
         checkpoint_kwargs = dict(
             folder=self.checkpoint_dir,
             filename=self.checkpoint_filename,
-            save_interval=self.save_interval,
+            save_interval=self.eval_interval,
             num_checkpoints_to_keep=self.save_top_k,
             monitor=self.metric_to_monitor,
             mode=self.monitor_mode,
@@ -348,20 +377,74 @@ class Trainer(FromConfig):
         ]
 
         # algorithms declaration
-        self.agorithms: List[Algorithm] = []
+        self.algorithms: List[Algorithm] = []
 
         # lazy trainer declaration
         self.trainer: ComposerTrainer | None = None
 
-    def configure_dataloader(self, *args, **kwargs):
+    @staticmethod
+    def dataset_builder(
+        dataset: str | GoldenRetrieverStreamingDataset = None,
+        name: str = None,
+        batch_size: int = None,
+        tokenizer: PreTrainedTokenizerBase = None,
+        shuffle: bool = None,
+        shuffle_seed: int = None,
+        dataset_kwargs: dict = None,
+    ):
+        dataset = dataset or dataset_kwargs.get("local", None)
+        if dataset is None:
+            raise ValueError("The dataset is required.")
+        if isinstance(dataset, str):
+            # check if all the necessary parameters are provided
+            if name is None and "name" not in dataset_kwargs:
+                raise ValueError("The dataset name is required.")
+            if batch_size is None and "batch_size" not in dataset_kwargs:
+                raise ValueError("The batch size is required.")
+            if tokenizer is None and "tokenizer" not in dataset_kwargs:
+                raise ValueError("The tokenizer is required.")
+            if shuffle is None and "shuffle" not in dataset_kwargs:
+                raise ValueError("The shuffle parameter is required.")
+            if shuffle_seed is None and "shuffle_seed" not in dataset_kwargs:
+                raise ValueError("The shuffle_seed parameter is required.")
 
-        train_collator = GoldenRetrieverCollator(
-            tokenizer=self.retriever.question_tokenizer
+            if "name" not in dataset_kwargs:
+                dataset_kwargs["name"] = name
+            if "local" not in dataset_kwargs:
+                dataset_kwargs["local"] = dataset
+            if "split" not in dataset_kwargs:
+                # TODO:
+                dataset_kwargs["split"] = "train"
+            if "tokenizer" not in dataset_kwargs:
+                dataset_kwargs["tokenizer"] = tokenizer
+            if "batch_size" not in dataset_kwargs:
+                dataset_kwargs["batch_size"] = batch_size
+            if "shuffle" not in dataset_kwargs:
+                dataset_kwargs["shuffle"] = shuffle
+            if "shuffle_seed" not in dataset_kwargs:
+                dataset_kwargs["shuffle_seed"] = shuffle_seed
+            dataset = GoldenRetrieverStreamingDataset(**dataset_kwargs)
+
+        return dataset, dataset_kwargs
+
+    def configure_dataset_and_dataloader(self, *args, **kwargs):
+
+        # dataset declaration
+        self.train_dataset, self.train_dataset_kwargs = self.dataset_builder(
+            dataset=self.train_dataset,
+            name="train_dataset",
+            batch_size=self.train_batch_size,
+            tokenizer=self.retriever.question_tokenizer,
+            shuffle=True,
+            shuffle_seed=self.seed,
+            dataset_kwargs=self.train_dataset_kwargs,
         )
+        # dataloader declaration
+        train_collator = GoldenRetrieverCollator(tokenizer=self.train_dataset.tokenizer)
         self.train_dataloader = DataLoader(
             self.train_dataset,
             collate_fn=train_collator,
-            batch_size=32,
+            batch_size=self.train_dataset.batch_size,
             drop_last=False,
             num_workers=self.num_workers,
             # pin_memory=True,
@@ -371,33 +454,105 @@ class Trainer(FromConfig):
         )
         self.train_dataloader = DataSpec(
             self.train_dataloader,
-            split_batch=StreamingGoldenRetrieverDataset.split_batch,
-            get_num_samples_in_batch=StreamingGoldenRetrieverDataset.get_num_samples_in_batch,
-            get_num_tokens_in_batch=StreamingGoldenRetrieverDataset.get_num_tokens_in_batch,
+            split_batch=train_collator.split_batch,
+            get_num_samples_in_batch=train_collator.get_num_samples_in_batch,
+            get_num_tokens_in_batch=train_collator.get_num_tokens_in_batch,
         )
 
-        # self.val_dataloader = GoldenStreamingDataLoader(
-        val_collator = GoldenRetrieverCollator(
-            tokenizer=self.retriever.question_tokenizer
-        )
-        self.val_dataloader = DataLoader(
+        # val dataset declaration
+        if self.val_dataset is not None and isinstance(
+            self.val_dataset, (GoldenRetrieverStreamingDataset, str)
+        ):
+            self.val_dataset = [self.val_dataset]
+        if isinstance(self.val_batch_size, int):
+            self.val_batch_size = [self.val_batch_size] * len(self.val_dataset)
+        if isinstance(self.val_dataset_kwargs, dict):
+            self.val_dataset_kwargs = [self.val_dataset_kwargs] * len(self.val_dataset)
+
+        self.val_dataloader = []
+        # keep track also of the kwargs
+        _val_dataset_kwargs = []
+        for i, ds in enumerate(self.val_dataset):
+            ds, ds_kwargs = self.dataset_builder(
+                dataset=ds,
+                name=f"val_dataset_{i}",
+                batch_size=self.val_batch_size[i],
+                tokenizer=self.retriever.question_tokenizer,
+                shuffle=False,
+                shuffle_seed=self.seed,
+                dataset_kwargs=self.val_dataset_kwargs[i],
+            )
+            val_collator = GoldenRetrieverCollator(tokenizer=ds.tokenizer)
+            val_dataloader = DataLoader(
+                ds,
+                collate_fn=val_collator,
+                batch_size=ds.batch_size,
+                drop_last=False,
+                num_workers=self.num_workers,
+                pin_memory=True,
+                prefetch_factor=2,
+                persistent_workers=True,
+                timeout=0,
+            )
+            val_dataloader = DataSpec(
+                val_dataloader,
+                split_batch=val_collator.split_batch,
+                get_num_samples_in_batch=val_collator.get_num_samples_in_batch,
+                get_num_tokens_in_batch=val_collator.get_num_tokens_in_batch,
+            )
+            self.val_dataloader.append(val_dataloader)
+            # keep track of the kwargs
+            _val_dataset_kwargs.append(ds_kwargs)
+
+        # update val_dataset with the new datasets
+        self.val_dataset = [
+            dataspec.dataloader.dataset for dataspec in self.val_dataloader
+        ]
+        # update val_dataset_kwargs with the new kwargs
+        self.val_dataset_kwargs = _val_dataset_kwargs
+
+        if self.test_dataset is not None and isinstance(
+            self.test_dataset, GoldenRetrieverStreamingDataset
+        ):
+            self.test_dataset = [self.test_dataset]
+
+        return (
+            self.train_dataset,
             self.val_dataset,
-            collate_fn=val_collator,
-            batch_size=32,
-            drop_last=False,
-            num_workers=self.num_workers,
-            pin_memory=True,
-            prefetch_factor=2,
-            persistent_workers=True,
-            timeout=0,
-        )
-        self.val_dataloader = DataSpec(
+            self.train_dataloader,
             self.val_dataloader,
-            split_batch=StreamingGoldenRetrieverDataset.split_batch,
-            get_num_samples_in_batch=StreamingGoldenRetrieverDataset.get_num_samples_in_batch,
-            get_num_tokens_in_batch=StreamingGoldenRetrieverDataset.get_num_tokens_in_batch,
         )
-        return self.train_dataloader, self.val_dataloader
+
+    def configure_evaluators(self):
+
+        self.evaluators = []
+
+        for i, val_dataloader in enumerate(self.val_dataloader):
+            # try to get the label name from the dataset if has a name attribute
+            if hasattr(self.val_dataset[i], "name"):
+                label = self.val_dataset[i].name
+            else:
+                label = f"val_dataset_{i}"
+            # try to get the batch size from the dataset if has a batch_size attribute
+            batch_size = None
+            if hasattr(self.val_dataset[i], "batch_size"):
+                batch_size = self.val_dataset[i].batch_size
+            evaluator = GoldenRetrieverEvaluator(
+                label=label,
+                dataloader=val_dataloader,
+                device_eval_microbatch_size=self.device_eval_microbatch_size
+                or batch_size,
+            )
+            self.evaluators.append(evaluator)
+
+        # self.evaluators = [
+        #     GoldenRetrieverEvaluator(
+        #         label="val_dataset",
+        #         dataloader=self.val_dataloader,
+        #         device_eval_microbatch_size=self.device_eval_microbatch_size,
+        #     )
+        # ]
+        return self.evaluators
 
     def configure_composer_module(self, *args, **kwargs):
         # # check if Index is empty
@@ -486,10 +641,12 @@ class Trainer(FromConfig):
         # check if it is the class, the instance or a function
         if self.lr_scheduler is not None:
             if isinstance(self.lr_scheduler, type):
-                self.lr_scheduler = self.lr_scheduler(
-                    optimizer=self.optimizer,
-                    num_warmup_steps=self.num_warmup_steps,
-                    num_training_steps=self.max_steps,
+                self.lr_scheduler = self.lr_scheduler(**self.lr_kwargs)
+            if not isinstance(
+                self.lr_scheduler, composer.optim.scheduler.ComposerScheduler
+            ):
+                raise ValueError(
+                    "The LR Scheduler should be an instance of `ComposerScheduler`"
                 )
 
         return self.optimizer, self.lr_scheduler
@@ -537,7 +694,7 @@ class Trainer(FromConfig):
         patience: int = 3,
         *args,
         **kwargs,
-    ) -> EarlyStopping:
+    ) -> EarlyStopper:
         logger.info(f"Enabling EarlyStopping callback with patience: {patience}")
         early_stopping_callback = EarlyStopper(
             monitor=monitor,
@@ -594,81 +751,8 @@ class Trainer(FromConfig):
         #     filename=self.checkpoint_filename,
         # )
         # modelcheckpoint_kwargs.update(kwargs)
-        self.model_checkpoint_callback = CheckpointSaver(**kwargs)
+        self.model_checkpoint_callback = MetricCheckpointSaver(**kwargs)
         return self.model_checkpoint_callback
-
-    def configure_hard_negatives_callback(self):
-        # TODO: use new callback and algorithm for composer
-        metrics_to_monitor = (
-            self.metrics_to_monitor_for_hard_negatives or self.metric_to_monitor
-        )
-        # hard_negatives_callback = NegativeAugmentationCallback(
-        #     k=self.target_top_k,
-        #     batch_size=self.prediction_batch_size,
-        #     precision=self.precision,
-        #     stages=["validate"],
-        #     metrics_to_monitor=metrics_to_monitor,
-        #     threshold=self.hard_negatives_threshold,
-        #     max_negatives=self.max_hard_negatives_to_mine,
-        #     add_with_probability=self.mine_hard_negatives_with_probability,
-        #     refresh_every_n_epochs=1,
-        # )
-        hard_negatives_callback = HardNegativeMiningCallback(
-            k=self.target_top_k, interval=self.eval_interval
-        )
-        hard_negative_algo = HardNegativeAlgo(
-            self.train_dataset.tokenizer,
-            max_length=self.train_dataset.max_passage_length,
-        )
-        self.algorithms.append(hard_negative_algo)
-
-        return hard_negatives_callback
-
-    def training_callbacks(self):
-        if self.model_checkpointing:
-            self.model_checkpoint_callback = self.configure_model_checkpoint(
-                **self.checkpoint_kwargs
-            )
-            self.callbacks_store.append(self.model_checkpoint_callback)
-            if self.save_last:
-                self.latest_model_checkpoint_callback = self.configure_model_checkpoint(
-                    **self.last_checkpoint_kwargs
-                )
-                self.callbacks_store.append(self.latest_model_checkpoint_callback)
-
-            self.callbacks_store.append(SaveRetrieverCallback())
-        if self.early_stopping:
-            self.early_stopping_callback = self.configure_early_stopping(
-                **self.early_stopping_kwargs
-            )
-        return self.callbacks_store
-
-    def configure_metrics_callbacks(
-        self, save_predictions: bool = False
-    ) -> List[NLPTemplateCallback]:
-        """
-        Configure the metrics callbacks for the trainer. This method is called
-        by the `eval_callbacks` method, and it is used to configure the callbacks
-        that will be used to evaluate the model during training.
-
-        Args:
-            save_predictions (`bool`, optional, defaults to `False`):
-                Whether to save the predictions to disk or not
-
-        Returns:
-            `List[NLPTemplateCallback]`:
-                The list of callbacks to use for evaluation
-        """
-        # prediction callback
-        metrics_callbacks: List[NLPTemplateCallback] = [
-            RecallAtKEvaluationCallback(k, verbose=True) for k in self.top_k
-        ]
-        metrics_callbacks += [
-            AvgRankingEvaluationCallback(k, verbose=True) for k in self.top_k
-        ]
-        if save_predictions:
-            metrics_callbacks.append(SavePredictionsCallback())
-        return metrics_callbacks
 
     def configure_prediction_callbacks(
         self,
@@ -689,27 +773,107 @@ class Trainer(FromConfig):
             # TODO: convert the metrics_callbacks to the new callbacks
             metrics_callbacks = self.configure_metrics_callbacks()
 
-        # prediction_callback = GoldenRetrieverPredictionCallback(
-        #     batch_size=batch_size,
-        #     precision=precision,
-        #     k=k,
-        #     force_reindex=force_reindex,
-        #     other_callbacks=metrics_callbacks,
-        #     *args,
-        #     **kwargs,
-        # )
-
         prediction_callback = PredictionCallback(
             k=k,
             batch_size=batch_size,
             precision=precision,
             force_reindex=force_reindex,
-            other_callbacks=metrics_callbacks,
-            # other_callbacks=[ComposerRecallAtKEvaluationCallback()],
+            metric_callbacks=metrics_callbacks,
             interval=interval,
         )
 
         return prediction_callback
+
+    def configure_metrics_callbacks(
+        self, save_predictions: bool = False
+    ) -> List[NLPTemplateCallback]:
+        """
+        Configure the metrics callbacks for the trainer. This method is called
+        by the `eval_callbacks` method, and it is used to configure the callbacks
+        that will be used to evaluate the model during training.
+
+        Args:
+            save_predictions (`bool`, optional, defaults to `False`):
+                Whether to save the predictions to disk or not
+
+        Returns:
+            `List[NLPTemplateCallback]`:
+                The list of callbacks to use for evaluation
+        """
+        # prediction callback
+        # metrics_callbacks: List[NLPTemplateCallback] = [
+        #     RecallAtKEvaluationCallback(k, verbose=True) for k in self.top_k
+        # ]
+        # metrics_callbacks += [
+        #     AvgRankingEvaluationCallback(k, verbose=True) for k in self.top_k
+        # ]
+        # if save_predictions:
+        #     metrics_callbacks.append(SavePredictionsCallback())
+        metrics_callbacks: List[NLPTemplateCallback] = [
+            ComposerRecallAtKEvaluationCallback(k, verbose=True) for k in self.top_k
+        ]
+        return metrics_callbacks
+
+    def configure_hard_negatives_callback(self):
+        metrics_to_monitor = (
+            self.metrics_to_monitor_for_hard_negatives or self.metric_to_monitor
+        )
+        hn_dataset, _ = self.dataset_builder(dataset_kwargs=self.train_dataset_kwargs)
+        dataloader = DataLoader(
+            # GoldenRetrieverStreamingDataset(
+            #     name="aida_train_hn",
+            #     tokenizer=self.train_dataset.tokenizer,
+            #     local="/home/ric/Projects/golden-retriever/data/dpr-like/el/mosaic/train",
+            #     split="train",
+            #     batch_size=32,
+            #     shuffle=True,
+            #     shuffle_seed=42,
+            # ),
+            hn_dataset,
+            collate_fn=GoldenRetrieverCollator(tokenizer=hn_dataset.tokenizer),
+            batch_size=hn_dataset.batch_size,
+            num_workers=self.num_workers,
+            drop_last=False,
+            # pin_memory=True,
+            # prefetch_factor=2,
+        )
+        hard_negatives_callback = HardNegativeMiningCallback(
+            k=self.target_top_k,
+            batch_size=self.prediction_batch_size,
+            precision=self.precision,
+            interval=self.eval_interval,
+            dataloader=dataloader,
+            metrics_to_monitor=metrics_to_monitor,
+            threshold=self.hard_negatives_threshold,
+            max_negatives=self.max_hard_negatives_to_mine,
+            add_with_probability=self.mine_hard_negatives_with_probability,
+        )
+        hard_negative_algo = HardNegativeAlgorithm(
+            self.train_dataset.tokenizer,
+            max_length=self.train_dataset.max_passage_length,
+        )
+        self.algorithms.append(hard_negative_algo)
+
+        return hard_negatives_callback
+
+    def training_callbacks(self):
+        if self.model_checkpointing:
+            self.model_checkpoint_callback = self.configure_model_checkpoint(
+                **self.checkpoint_kwargs
+            )
+            self.callbacks_store.append(self.model_checkpoint_callback)
+            if self.save_last:
+                self.latest_model_checkpoint_callback = self.configure_model_checkpoint(
+                    **self.last_checkpoint_kwargs
+                )
+                self.callbacks_store.append(self.latest_model_checkpoint_callback)
+
+            # self.callbacks_store.append(SaveRetrieverCallback())
+        if self.early_stopping:
+            self.early_stopping_callback = self.configure_early_stopping(
+                **self.early_stopping_kwargs
+            )
+        return self.callbacks_store
 
     def train(self, *args, **kwargs):
         """
@@ -743,25 +907,19 @@ class Trainer(FromConfig):
             self.callbacks_store.append(self.configure_hard_negatives_callback())
 
         # set-up training specific callbacks
-        self.callbacks_store = self.training_callbacks()
+        # self.callbacks_store = self.training_callbacks()
 
         # self.callbacks_store.append(FreeUpIndexerVRAMCallback())
 
-        self.configure_dataloader()
-        evaluators = [
-            GoldenRetrieverEvaluator(
-                label="val_dataset",
-                dataloader=self.val_dataloader,
-            )
-        ]
         if self.trainer is None:
             logger.info("Instantiating the Trainer")
             self.trainer = ComposerTrainer(
                 model=self.composer_module,
                 train_dataloader=self.train_dataloader,
-                eval_dataloader=evaluators,
-                device_train_microbatch_size=self.device_train_microbatch_size,
-                algorithms=self.agorithms,
+                eval_dataloader=self.evaluators,
+                device_train_microbatch_size=self.device_train_microbatch_size
+                or self.train_dataset.batch_size,
+                algorithms=self.algorithms,
                 progress_bar=self.progress_bar,
                 log_to_console=self.log_to_console,
                 device=self.device,
@@ -771,7 +929,7 @@ class Trainer(FromConfig):
                 optimizers=self.optimizer,
                 schedulers=self.lr_scheduler,
                 step_schedulers_every_batch=self.step_schedulers_every_batch,  # interval should be step
-                max_duration="230ba",
+                max_duration=self.max_duration,
                 eval_interval=self.eval_interval,
                 dist_timeout=self.dist_timeout,
                 load_path=self.resume_from_checkpoint_path,
@@ -789,6 +947,7 @@ class Trainer(FromConfig):
                 #         # "offload_optimizer": {"device": "cpu", "pin_memory": True},
                 #     },
                 # },
+                **self.composer_trainer_kwargs,
             )
 
             # self.trainer = pl.Trainer(

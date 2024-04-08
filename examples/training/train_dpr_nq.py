@@ -1,6 +1,6 @@
 from goldenretriever import GoldenRetriever, Trainer
 from goldenretriever.common.log import get_logger
-from goldenretriever.data.datasets import InBatchNegativesDataset
+from goldenretriever.data.old_datasets import InBatchNegativesDataset
 
 logger = get_logger(__name__)
 

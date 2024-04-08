@@ -8,7 +8,7 @@ from omegaconf import DictConfig
 from torch.utils.data import DataLoader
 
 from goldenretriever.common.log import get_logger
-from goldenretriever.data.datasets import GoldenRetrieverDataset
+from goldenretriever.data.old_datasets import GoldenRetrieverDataset
 
 logger = get_logger()
 
