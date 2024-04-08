@@ -1,9 +1,9 @@
 import csv
 import json
-from pathlib import Path
 import pickle
 import sys
-from typing import Any, Dict, List, Union
+from pathlib import Path
+from typing import Dict, List, Union
 
 from goldenretriever.common.log import get_logger
 

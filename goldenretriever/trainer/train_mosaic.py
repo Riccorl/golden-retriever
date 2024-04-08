@@ -1,4 +1,3 @@
-import copy
 import os
 from copy import deepcopy
 from pathlib import Path
@@ -6,11 +5,8 @@ from typing import (
     Any,
     Callable,
     Dict,
-    Iterable,
     List,
-    Literal,
     Optional,
-    Sequence,
     Union,
 )
 
@@ -21,7 +17,7 @@ import hydra
 import lightning as pl
 import omegaconf
 import torch
-from composer import Algorithm, DataSpec, Evaluator, Event, State, Time, TimeUnit
+from composer import Algorithm, DataSpec, Event, State, Time, TimeUnit
 from composer import Trainer as ComposerTrainer
 from composer.callbacks import (
     CheckpointSaver,
@@ -32,7 +28,8 @@ from composer.callbacks import (
 )
 from composer.loggers import WandBLogger
 from composer.optim.scheduler import LinearScheduler
-from composer.utils import dist, reproducibility
+from composer.utils import dist, get_device
+from composer.utils import reproducibility
 
 # from lightning import Trainer
 # from lightning.pytorch.callbacks import (
@@ -43,27 +40,12 @@ from composer.utils import dist, reproducibility
 # )
 # from lightning.pytorch.loggers import WandbLogger
 from omegaconf import OmegaConf
-from pprintpp import pformat
 from torch.utils.data import DataLoader
-from tqdm import tqdm
+from transformers import PreTrainedTokenizerBase
 
 from goldenretriever.callbacks.base import NLPTemplateCallback
-from goldenretriever.callbacks.evaluation_callbacks import (
-    AvgRankingEvaluationCallback,
-    RecallAtKEvaluationCallback,
-)
-from goldenretriever.callbacks.prediction_callbacks import (
-    GoldenRetrieverPredictionCallback,
-)
-from goldenretriever.callbacks.training_callbacks import NegativeAugmentationCallback
-from goldenretriever.callbacks.utils_callbacks import (
-    FreeUpIndexerVRAMCallback,
-    SavePredictionsCallback,
-    SaveRetrieverCallback,
-)
 from goldenretriever.common.from_config import FromConfig
-from goldenretriever.common.log import _golden_retriever_build_pbar, get_logger
-from goldenretriever.common.model_inputs import ModelInputs
+from goldenretriever.common.log import get_logger
 from goldenretriever.common.utils import to_config
 from goldenretriever.composer_modules.algorithms import HardNegativeAlgorithm
 from goldenretriever.composer_modules.callbacks import (
@@ -75,12 +57,10 @@ from goldenretriever.composer_modules.callbacks import (
 )
 from goldenretriever.composer_modules.checkpoint_saver import MetricCheckpointSaver
 from goldenretriever.composer_modules.mosaic_module import GoldenRetrieverComposerModule
-from goldenretriever.data.old_datasets import GoldenRetrieverDataset
 from goldenretriever.data.datasets import (
     GoldenRetrieverCollator,
     GoldenRetrieverStreamingDataset,
 )
-from goldenretriever.indexers.base import BaseDocumentIndex
 from goldenretriever.lightning_modules.pl_data_modules import (
     GoldenRetrieverPLDataModule,
 )
@@ -90,12 +70,8 @@ from goldenretriever.pytorch_modules.model import GoldenRetriever
 from goldenretriever.pytorch_modules.optim import RAdamW
 from goldenretriever.trainer import (
     COMPOSER_PRECISION_INPUT_STR_ALIAS_CONVERSION,
-    PRECISION_INPUT_STR_ALIAS_CONVERSION,
 )
 from goldenretriever.trainer.evaluator import GoldenRetrieverEvaluator
-from transformers import PreTrainedTokenizerBase
-
-from composer.utils import dist, get_device
 
 logger = get_logger()
 
@@ -225,7 +201,9 @@ class Trainer(FromConfig):
         # self.max_steps = max_steps
         # self.max_epochs = max_epochs
         self.eval_interval = eval_interval
-        self.device_train_microbatch_size = device_train_microbatch_size or train_batch_size
+        self.device_train_microbatch_size = (
+            device_train_microbatch_size or train_batch_size
+        )
         self.device_eval_microbatch_size = device_eval_microbatch_size or val_batch_size
         self.step_schedulers_every_batch = step_schedulers_every_batch
         self.deterministic = deterministic

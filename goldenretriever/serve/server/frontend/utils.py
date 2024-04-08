@@ -1,6 +1,6 @@
 import base64
 import random
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Union
 
 import spacy
 import streamlit as st

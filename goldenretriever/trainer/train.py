@@ -2,7 +2,6 @@ import os
 from copy import deepcopy
 from pathlib import Path
 from typing import List, Literal
-from goldenretriever.trainer import PRECISION_INPUT_STR_ALIAS_CONVERSION
 
 import hydra
 import lightning as pl
@@ -48,6 +47,7 @@ from goldenretriever.pytorch_modules.loss import MultiLabelNCELoss
 from goldenretriever.pytorch_modules.model import GoldenRetriever
 from goldenretriever.pytorch_modules.optim import RAdamW
 from goldenretriever.pytorch_modules.scheduler import LinearScheduler
+from goldenretriever.trainer import PRECISION_INPUT_STR_ALIAS_CONVERSION
 
 logger = get_logger()
 

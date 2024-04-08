@@ -16,10 +16,9 @@ from goldenretriever.common.utils import (
     from_cache,
     is_str_a_path,
     relative_to_absolute_path,
-    to_config,
 )
-from goldenretriever.indexers.document import Document, DocumentStore
 from goldenretriever.indexers.document import Document
+from goldenretriever.indexers.document import DocumentStore
 
 logger = get_logger(__name__)
 

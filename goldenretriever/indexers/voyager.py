@@ -6,7 +6,6 @@ from typing import Callable, List, Optional, Union
 import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from voyager import Index, Space
 
 from goldenretriever.common.log import get_logger
 from goldenretriever.common.model_inputs import ModelInputs
@@ -14,6 +13,7 @@ from goldenretriever.data.base.datasets import BaseDataset
 from goldenretriever.data.labels import Labels
 from goldenretriever.indexers.base import BaseDocumentIndex
 from goldenretriever.pytorch_modules import PRECISION_MAP, RetrievedSample
+from voyager import Index, Space
 
 logger = get_logger(__name__, level=logging.INFO)
 

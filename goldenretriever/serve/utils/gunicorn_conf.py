@@ -1,5 +1,4 @@
 import json
-import multiprocessing
 import os
 
 max_cores_str = os.getenv("MAX_CORES", "1")

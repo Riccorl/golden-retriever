@@ -1,33 +1,26 @@
 import logging
-import os
-import sys
 import threading
 from logging.config import dictConfig
-from typing import Any, Dict, Optional
 
-from art import text2art, tprint
+from art import tprint
 from colorama import Fore, Style, init
 from rich import get_console
 
 
 import os
 import sys
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, TextIO, Union
+from typing import Any, Dict, Optional
 
-import tqdm.auto
 import yaml
 from composer.core.time import TimeUnit
-from composer.loggers.logger import Logger, format_log_data_value
-from composer.loggers.logger_destination import LoggerDestination
 from composer.loggers.progress_bar_logger import (
-    ProgressBarLogger,
     _ProgressBar,
     _IS_TRAIN_TO_KEYS_TO_LOG,
 )
-from composer.utils import dist, is_notebook
+from composer.utils import is_notebook
 
 # if TYPE_CHECKING:
-from composer.core import State, Timestamp
+from composer.core import State
 
 _lock = threading.Lock()
 _default_handler: Optional[logging.Handler] = None

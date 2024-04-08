@@ -1,12 +1,12 @@
-from typing import Any, Iterable, List, Optional, Union
+from typing import Any, Iterable, List, Union
 
 import spacy
+from goldenretriever.serve.tokenizers.spacy_tokenizer import load_spacy
 
 from goldenretriever.serve.data.objects import Word
 from goldenretriever.serve.data.splitters.base_sentence_splitter import (
     BaseSentenceSplitter,
 )
-from goldenretriever.serve.tokenizers.spacy_tokenizer import load_spacy
 
 SPACY_LANGUAGE_MAPPER = {
     "cs": "xx_sent_ud_sm",

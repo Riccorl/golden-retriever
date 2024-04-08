@@ -10,15 +10,14 @@ import os
 import pathlib
 import shutil
 import tempfile
-import textwrap
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Union
 
-from composer.core import Callback, Event, State, Time, Timestamp
+import torch
+from composer.callbacks.checkpoint_saver import CheckpointSaver
+from composer.core import Event, State, Time, Timestamp
 from composer.loggers import Logger, MLFlowLogger
 from composer.utils import (
-    FORMAT_NAME_WITH_DIST_AND_TIME_TABLE,
-    FORMAT_NAME_WITH_DIST_TABLE,
     PartialFilePath,
     checkpoint,
     create_interval_scheduler,
@@ -35,9 +34,6 @@ from composer.utils.object_store.mlflow_object_store import (
     MLFLOW_EXPERIMENT_ID_FORMAT_KEY,
     MLFLOW_RUN_ID_FORMAT_KEY,
 )
-
-from composer.callbacks.checkpoint_saver import CheckpointSaver
-import torch
 
 log = logging.getLogger(__name__)
 

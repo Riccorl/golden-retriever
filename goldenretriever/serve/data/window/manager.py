@@ -1,6 +1,4 @@
-import collections
-import itertools
-from typing import Dict, List, Optional, Set, Tuple
+from typing import List
 
 from goldenretriever.serve.data.objects import Window
 from goldenretriever.serve.data.splitters.base_sentence_splitter import (

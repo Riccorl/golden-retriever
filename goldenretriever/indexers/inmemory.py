@@ -1,7 +1,7 @@
 import contextlib
 import logging
 import os
-from typing import Callable, List, Optional, Tuple, Union
+from typing import Callable, List, Optional, Union
 
 import torch
 from torch.utils.data import DataLoader
@@ -14,7 +14,6 @@ from goldenretriever.data.base.datasets import BaseDataset
 from goldenretriever.indexers.base import BaseDocumentIndex
 from goldenretriever.indexers.document import Document, DocumentStore
 from goldenretriever.pytorch_modules import PRECISION_MAP, RetrievedSample
-from goldenretriever.pytorch_modules.modules import MatrixMultiplicationModule
 
 logger = get_logger(__name__, level=logging.INFO)
 

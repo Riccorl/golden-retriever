@@ -5,6 +5,7 @@ from typing import Union, Type, TypeVar, Dict, Any
 
 import hydra
 from omegaconf import OmegaConf
+
 from goldenretriever.common.log import get_logger
 
 logger = get_logger(__name__)

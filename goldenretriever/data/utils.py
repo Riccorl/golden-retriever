@@ -1,14 +1,12 @@
 import json
-from multiprocessing import synchronize
 import os
+import threading
 from collections import defaultdict
 from typing import Any, Dict, Iterable, List, Optional, Union
 
 import numpy as np
 import transformers as tr
 from tqdm import tqdm
-
-import threading
 
 lock = threading.Lock()
 

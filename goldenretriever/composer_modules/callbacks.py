@@ -1,29 +1,23 @@
-import copy
-import itertools
+import logging
 import logging
 import os
 import random
 import time
-from functools import partial
 from pathlib import Path
 from typing import Dict, List, Optional, Set
 
 import hydra
 import torch
-from composer import Callback, ComposerModel, DataSpec, Event, Logger, State, Time
+from composer import Callback, Event, Logger, State, Time
 from composer.utils import create_interval_scheduler, dist, reproducibility
 from omegaconf import DictConfig
-from torch.utils.data import DataLoader, Dataset, DistributedSampler, IterableDataset
+from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from goldenretriever.callbacks.base import NLPTemplateCallback
 from goldenretriever.common.log import get_logger
 from goldenretriever.common.model_inputs import ModelInputs
 from goldenretriever.composer_modules.mosaic_module import GoldenRetrieverComposerModule
-from goldenretriever.data.datasets import (
-    GoldenRetrieverCollator,
-    GoldenRetrieverStreamingDataset,
-)
 from goldenretriever.data.utils import HardNegativesManager
 from goldenretriever.indexers.base import BaseDocumentIndex
 from goldenretriever.pytorch_modules.model import GoldenRetriever
@@ -311,7 +305,7 @@ class HardNegativeMiningCallback(PredictionCallback):
 
         if state.eval_metrics[self.metrics_to_monitor] < self.threshold:
             return {}
-    
+
         program_logger.info(f"Computing hard negatives predictions for event `{event}`")
         # get model from state
         composer_model: GoldenRetrieverComposerModule = (

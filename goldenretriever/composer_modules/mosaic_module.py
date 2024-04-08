@@ -1,12 +1,9 @@
-from composer.models.base import ComposerModel
-
-from typing import Any, Union
+from typing import Union
 
 import hydra
 import torch
+from composer.models.base import ComposerModel
 from omegaconf import DictConfig
-
-from goldenretriever.common.model_inputs import ModelInputs
 
 
 class GoldenRetrieverComposerModule(ComposerModel):

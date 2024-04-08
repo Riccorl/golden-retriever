@@ -4,44 +4,29 @@
 """Build a StreamingTextDataset dataset and dataloader for training."""
 
 import os
-from concurrent.futures import ThreadPoolExecutor, wait
 from functools import partial
-from glob import glob
-from itertools import islice
-from pathlib import Path
-from threading import Event, Lock
 from typing import (
     Any,
-    Callable,
     Dict,
-    Iterator,
     List,
     Mapping,
     Optional,
     Sequence,
     Union,
-    cast,
 )
 
-import datasets as hf_datasets
 import numpy as np
 import torch
-import transformers
 
 # from composer.core.data_spec import DataSpec
 # from composer.core.types import Batch
 # from composer.utils import dist, get_file, parse_uri
 # from omegaconf import DictConfig
-from omegaconf import OmegaConf as om
-from streaming import Stream, StreamingDataLoader, StreamingDataset
-from streaming.base.dataset import _Iterator
-from streaming.base.world import World
-from torch.utils.data import DataLoader
+from streaming import Stream, StreamingDataset
 from transformers import PreTrainedTokenizerBase
 
 from goldenretriever.common.log import get_logger
 from goldenretriever.common.model_inputs import ModelInputs
-from goldenretriever.data.utils import HardNegativesManager
 
 logger = get_logger(__name__)
 

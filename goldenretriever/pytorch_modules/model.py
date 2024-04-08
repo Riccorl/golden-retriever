@@ -1,4 +1,4 @@
-import contextlib
+import logging
 import logging
 import os
 import platform
@@ -22,7 +22,7 @@ from goldenretriever.data.labels import Labels
 from goldenretriever.indexers.base import BaseDocumentIndex
 from goldenretriever.indexers.document import Document
 from goldenretriever.indexers.inmemory import InMemoryDocumentIndex
-from goldenretriever.pytorch_modules import PRECISION_MAP, RetrievedSample
+from goldenretriever.pytorch_modules import RetrievedSample
 from goldenretriever.pytorch_modules.hf import GoldenRetrieverModel
 
 logger = get_logger(__name__, level=logging.INFO)
