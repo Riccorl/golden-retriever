@@ -1,1 +1,1 @@
-
+from goldenretriever.pytorch_modules.model import GoldenRetriever

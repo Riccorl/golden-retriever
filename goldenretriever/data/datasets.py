@@ -447,7 +447,6 @@ class GoldenRetrieverCollator:
         # split the positives
         positives = split_fn(batch["positives"])
         positives_pssgs = split_fn(batch["positives_pssgs"])
-        # passages_ids = split_fn(batch["passages_ids"])
 
         # collect the new batches
         batches = []

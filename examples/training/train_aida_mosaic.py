@@ -91,7 +91,7 @@ if __name__ == "__main__":
         num_workers=4,
         max_duration="100ba",
         eval_interval="10ba",
-        log_to_wandb=False,
+        log_to_wandb=True,
         wandb_online_mode=False,
         wandb_project_name="golden-retriever-aida",
         wandb_experiment_name="aida-e5-base-topics-from-blink",

@@ -152,7 +152,7 @@ class Trainer(FromConfig):
         wandb_kwargs: dict | None = None,
         # checkpoint parameters
         model_checkpointing: bool = True,
-        checkpoint_dir: str | os.PathLike | None = None,
+        checkpoint_dir: str | os.PathLike = "checkpoints",
         checkpoint_filename: str | os.PathLike | None = None,
         save_top_k: int = 1,
         save_last: bool = False,
@@ -234,7 +234,10 @@ class Trainer(FromConfig):
         self.wandb_kwargs = wandb_kwargs
         # checkpoint parameters
         self.model_checkpointing = model_checkpointing
-        self.checkpoint_dir = checkpoint_dir
+        self.checkpoint_dir = Path(checkpoint_dir)
+        # if the dir is relative, make it absolute to the current working directory
+        if not self.checkpoint_dir.is_absolute():
+            self.checkpoint_dir = Path.cwd() / self.checkpoint_dir
         self.checkpoint_filename = checkpoint_filename
         self.save_top_k = save_top_k
         self.save_last = save_last
@@ -289,7 +292,7 @@ class Trainer(FromConfig):
         wandb_init_kwargs = {
             "save_dir": self.wandb_save_dir,
             # TODO: maybe env variables with "dryrun" and "online" would be better
-            "mode": "online" if self.wandb_online_mode else "offline",
+            "mode": "online" if self.wandb_online_mode else "dryrun",
             "dir": self.wandb_save_dir,
         }
         if self.wandb_kwargs is not None:
@@ -297,7 +300,6 @@ class Trainer(FromConfig):
             wandb_args.update({"init_kwargs": wandb_init_kwargs})
         self.wandb_kwargs = wandb_args
         self.wandb_logger: WandBLogger | None = None
-        self.experiment_path: Path | None = None
 
         # setup metrics to monitor for a bunch of callbacks
         if isinstance(self.top_k, int):
@@ -331,7 +333,9 @@ class Trainer(FromConfig):
         if self.save_last:
             last_checkpoint_kwargs = deepcopy(self.checkpoint_kwargs)
             last_checkpoint_kwargs["num_checkpoints_to_keep"] = 1
-            last_checkpoint_kwargs["filename"] = "last-{epoch}-{step}"
+            last_checkpoint_kwargs["filename"] = (
+                "last-ep{epoch}-ba{batch}-rank{rank}.pt"
+            )
             self.last_checkpoint_kwargs = last_checkpoint_kwargs
 
         # early stopping callback
@@ -648,6 +652,7 @@ class Trainer(FromConfig):
 
         Returns:
         """
+        # os.environ["WANDB_MODE"] = "dryrun"
         wandb_logger = WandBLogger(
             project=project,
             group=group,
@@ -697,13 +702,21 @@ class Trainer(FromConfig):
         logger.info("Enabling Model Checkpointing")
         if folder is None:
             folder = (
-                self.experiment_path / "checkpoints" if self.experiment_path else None
+                self.checkpoint_dir / "checkpoints" if self.checkpoint_dir else None
             )
         if filename is None:
+            # filename = (
+            #     "checkpoint-" + monitor + "_{" + monitor + ":.4f}-epoch_{epoch:02d}"
+            # )
             filename = (
-                "checkpoint-" + monitor + "_{" + monitor + ":.4f}-epoch_{epoch:02d}"
+                "ep{epoch}-ba{batch}-rank{rank}"
+                + monitor
+                + "_{"
+                + monitor
+                + ":.4f}"
+                + ".pt"
             )
-        self.checkpoint_path = folder / filename if folder is not None else None
+        self.checkpoint_dir = folder / filename if folder is not None else None
         logger.info(f"Checkpoint directory: {folder}")
         logger.info(f"Checkpoint filename: {filename}")
 
@@ -871,7 +884,7 @@ class Trainer(FromConfig):
             # log the args to wandb
             # logger.info(pformat(self.wandb_kwargs))
             self.wandb_logger = self.configure_logger(**self.wandb_kwargs)
-            self.experiment_path = Path(self.wandb_logger.experiment.dir)
+            # self.checkpoint_path = Path(self.wandb_logger.experiment.dir)
 
         # add the evaluation callbacks
         self.callbacks_store.append(
@@ -885,7 +898,7 @@ class Trainer(FromConfig):
             self.callbacks_store.append(self.configure_hard_negatives_callback())
 
         # set-up training specific callbacks
-        # self.callbacks_store = self.training_callbacks()
+        self.callbacks_store = self.training_callbacks()
 
         # self.callbacks_store.append(FreeUpIndexerVRAMCallback())
 
