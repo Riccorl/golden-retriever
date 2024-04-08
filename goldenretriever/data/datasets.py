@@ -1,8 +1,3 @@
-# Copyright 2022 MosaicML LLM Foundry authors
-# SPDX-License-Identifier: Apache-2.0
-
-"""Build a StreamingTextDataset dataset and dataloader for training."""
-
 import os
 from functools import partial
 from typing import (
@@ -18,10 +13,6 @@ from typing import (
 import numpy as np
 import torch
 
-# from composer.core.data_spec import DataSpec
-# from composer.core.types import Batch
-# from composer.utils import dist, get_file, parse_uri
-# from omegaconf import DictConfig
 from streaming import Stream, StreamingDataset
 from transformers import PreTrainedTokenizerBase
 
