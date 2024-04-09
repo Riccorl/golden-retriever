@@ -27,9 +27,9 @@ class HardNegativeAlgorithm(Algorithm):
 
     def apply(self, event: Event, state: State, logger: Logger) -> None:
         # update hn_manager
-        self.hn_manager = HardNegativesManager(
-            self.tokenizer, max_length=self.max_length
-        )
+        # self.hn_manager = HardNegativesManager(
+        #     self.tokenizer, max_length=self.max_length
+        # )
 
         # get the hard negatives
         batch = state.batch

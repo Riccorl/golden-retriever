@@ -7,7 +7,7 @@ from typing import Dict, List, Optional, Set
 
 import hydra
 import torch
-from composer import Callback, Event, Logger, State, Time
+from composer import Callback, Event, Logger, State, Time, TimeUnit
 from composer.utils import create_interval_scheduler, dist, reproducibility
 from omegaconf import DictConfig
 from torch.utils.data import DataLoader
@@ -338,10 +338,14 @@ class HardNegativeMiningCallback(PredictionCallback):
         n_samples_to_augment = [
             evaluator.actual_eval_interval for evaluator in state.evaluators
         ]
-        # cast to int and get the maximum value
-        n_samples_to_augment = max(
-            [int(n.value) for n in n_samples_to_augment if n is not None]
-        )
+        # get the unit of the interval: if any has "ep" we annotate all the dataset
+        if any(n.unit == TimeUnit.EPOCH for n in n_samples_to_augment):
+            n_samples_to_augment = None
+        else:
+            # cast to int and get the maximum value
+            n_samples_to_augment = max(
+                [int(n.value) for n in n_samples_to_augment if n is not None]
+            )
 
         def collate_fn(x):
             return ModelInputs(
@@ -392,7 +396,7 @@ class HardNegativeMiningCallback(PredictionCallback):
         progress_bar = tqdm(
             self.dataloader,
             initial=0,
-            total=n_samples_to_augment,
+            total=n_samples_to_augment or len(self.dataloader),
             desc=f"Computing predictions for dataset {state.dataloader_label}",
         )
         batch_augmented = 0
@@ -443,7 +447,10 @@ class HardNegativeMiningCallback(PredictionCallback):
                 predictions.append(prediction_output)
             progress_bar.update(batch.questions["input_ids"].size(0))
             batch_augmented += 1
-            if batch_augmented >= n_samples_to_augment:
+            if (
+                n_samples_to_augment is not None
+                and batch_augmented >= n_samples_to_augment
+            ):
                 program_logger.info(
                     f"Augmented next iteration batches ({batch_augmented}). "
                     "Stopping the hard negative mining."

@@ -5,7 +5,7 @@ from goldenretriever.indexers.document import DocumentStore
 from goldenretriever.trainer import Trainer
 from goldenretriever import GoldenRetriever
 from goldenretriever.indexers.inmemory import InMemoryDocumentIndex
-from goldenretriever.indexers.faiss import FaissDocumentIndex
+from goldenretriever.indexers.faiss_index import FaissDocumentIndex
 from goldenretriever.data.old_datasets import InBatchNegativesDataset
 
 logger = get_logger(__name__)

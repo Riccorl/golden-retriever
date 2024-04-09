@@ -10,7 +10,7 @@ def get_autocast_context(
     # we need to convert the model device to that
     device_type_for_autocast = str(device).split(":")[0]
 
-    from goldenretriever.pytorch_modules import PRECISION_MAP
+    from goldenretriever.trainer import PRECISION_MAP
 
     # autocast doesn't work with CPU and stuff different from bfloat16
     autocast_manager = (

@@ -1,14 +1,7 @@
 import os
 from copy import deepcopy
 from pathlib import Path
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    Optional,
-    Union,
-)
+from typing import Any, Callable, Dict, List, Optional, Union
 
 import composer
 import composer.callbacks
@@ -19,6 +12,7 @@ import omegaconf
 import torch
 from composer import Algorithm, DataSpec, Event, State, Time, TimeUnit
 from composer import Trainer as ComposerTrainer
+from composer.algorithms import GradientClipping
 from composer.callbacks import (
     CheckpointSaver,
     EarlyStopper,
@@ -28,17 +22,8 @@ from composer.callbacks import (
 )
 from composer.loggers import WandBLogger
 from composer.optim.scheduler import LinearScheduler
-from composer.utils import dist, get_device
-from composer.utils import reproducibility
+from composer.utils import dist, get_device, reproducibility
 
-# from lightning import Trainer
-# from lightning.pytorch.callbacks import (
-#     EarlyStopping,
-#     LearningRateMonitor,
-#     ModelCheckpoint,
-#     ModelSummary,
-# )
-# from lightning.pytorch.loggers import WandbLogger
 from omegaconf import OmegaConf
 from torch.utils.data import DataLoader
 from transformers import PreTrainedTokenizerBase
@@ -68,9 +53,7 @@ from goldenretriever.lightning_modules.pl_modules import GoldenRetrieverPLModule
 from goldenretriever.pytorch_modules.loss import MultiLabelNCELoss
 from goldenretriever.pytorch_modules.model import GoldenRetriever
 from goldenretriever.pytorch_modules.optim import RAdamW
-from goldenretriever.trainer import (
-    COMPOSER_PRECISION_INPUT_STR_ALIAS_CONVERSION,
-)
+from goldenretriever.trainer import COMPOSER_PRECISION_INPUT_STR_ALIAS_CONVERSION
 from goldenretriever.trainer.evaluator import GoldenRetrieverEvaluator
 
 logger = get_logger()
@@ -111,14 +94,7 @@ class Trainer(FromConfig):
         callbacks: list | None = None,
         device: str = "gpu",
         precision: int | str = "amp_fp16",
-        # accelerator: str = "auto",
-        # devices: int = 1,
-        # accumulate_grad_batches: int = 1,
-        # gradient_clip_val: float = 1.0,
-        # val_check_interval: float = 1.0,
-        # check_val_every_n_epoch: int = 1,
-        # max_steps: int | None = None,
-        # max_epochs: int | None = None,
+        gradient_clip_norm: float = 0.1,
         max_duration: str | Time | TimeUnit = "1ba",
         eval_interval: int | str | Time | Callable[[State, Event], bool] = "1ba",
         device_train_microbatch_size: int | str | None = None,
@@ -129,7 +105,7 @@ class Trainer(FromConfig):
         resume_from_checkpoint_path: str | os.PathLike | None = None,
         deepspeed_config: dict | None = None,
         fsdp_config: dict | None = None,
-        dist_timeout: int = 300,
+        dist_timeout: float = 300.0,
         composer_trainer_kwargs: dict | None = None,
         # eval parameters
         metric_to_monitor: str = "recall@{top_k}",
@@ -197,6 +173,7 @@ class Trainer(FromConfig):
         self.callbacks = callbacks
         self.device = device
         self.precision = precision
+        self.gradient_clip_norm = gradient_clip_norm
         self.max_duration = max_duration
         # self.max_steps = max_steps
         # self.max_epochs = max_epochs
@@ -234,7 +211,15 @@ class Trainer(FromConfig):
         self.wandb_kwargs = wandb_kwargs
         # checkpoint parameters
         self.model_checkpointing = model_checkpointing
-        self.checkpoint_dir = Path(checkpoint_dir)
+        # merge checkpoint dir with wandb project name and experiment name if they are provided
+        if self.wandb_project_name is not None and self.wandb_experiment_name is not None:
+            self.checkpoint_dir = (
+                Path(checkpoint_dir)
+                / self.wandb_project_name
+                / self.wandb_experiment_name
+            )
+        else:
+            self.checkpoint_dir = Path(checkpoint_dir)
         # if the dir is relative, make it absolute to the current working directory
         if not self.checkpoint_dir.is_absolute():
             self.checkpoint_dir = Path.cwd() / self.checkpoint_dir
@@ -288,11 +273,10 @@ class Trainer(FromConfig):
             entity=self.wandb_entity,
             log_artifacts=self.wandb_log_artifacts,
             rank_zero_only=self.wandb_rank_zero_only,
+            online=self.wandb_online_mode,
         )
         wandb_init_kwargs = {
             "save_dir": self.wandb_save_dir,
-            # TODO: maybe env variables with "dryrun" and "online" would be better
-            "mode": "online" if self.wandb_online_mode else "dryrun",
             "dir": self.wandb_save_dir,
         }
         if self.wandb_kwargs is not None:
@@ -307,7 +291,7 @@ class Trainer(FromConfig):
         # save the target top_k
         self.target_top_k = self.top_k[0]
         logger.info(
-            f"Monitor top-k value is recall@{self.target_top_k}. \n"
+            f"Monitor top-k value is recall@{self.target_top_k}. "
             "If you provided a list of top-k values, the first one will be used."
         )
         self.metric_to_monitor = self.metric_to_monitor.format(top_k=self.target_top_k)
@@ -360,6 +344,12 @@ class Trainer(FromConfig):
 
         # algorithms declaration
         self.algorithms: List[Algorithm] = []
+        if self.gradient_clip_norm > 0:
+            self.algorithms.append(
+                GradientClipping(
+                    clipping_type="norm", clipping_threshold=self.gradient_clip_norm
+                )
+            )
 
         # lazy trainer declaration
         self.trainer: ComposerTrainer | None = None
@@ -429,10 +419,10 @@ class Trainer(FromConfig):
             batch_size=self.train_dataset.batch_size,
             drop_last=False,
             num_workers=self.num_workers,
-            # pin_memory=True,
-            # prefetch_factor=2,
-            # persistent_workers=True,
-            # timeout=0,
+            pin_memory=True,
+            prefetch_factor=2,
+            persistent_workers=True,
+            timeout=0,
         )
         self.train_dataloader = DataSpec(
             self.train_dataloader,
@@ -527,13 +517,6 @@ class Trainer(FromConfig):
             )
             self.evaluators.append(evaluator)
 
-        # self.evaluators = [
-        #     GoldenRetrieverEvaluator(
-        #         label="val_dataset",
-        #         dataloader=self.val_dataloader,
-        #         device_eval_microbatch_size=self.device_eval_microbatch_size,
-        #     )
-        # ]
         return self.evaluators
 
     def configure_composer_module(self, *args, **kwargs):
@@ -643,6 +626,7 @@ class Trainer(FromConfig):
         log_artifacts: bool = False,
         rank_zero_only: bool = True,
         init_kwargs: Optional[Dict[str, Any]] = None,
+        online: bool = False,
     ) -> WandBLogger:
         """
         Configure the wandb logger
@@ -652,7 +636,8 @@ class Trainer(FromConfig):
 
         Returns:
         """
-        # os.environ["WANDB_MODE"] = "dryrun"
+        if not online:
+            os.environ["WANDB_MODE"] = "dryrun"
         wandb_logger = WandBLogger(
             project=project,
             group=group,
@@ -710,10 +695,10 @@ class Trainer(FromConfig):
             # )
             filename = (
                 "ep{epoch}-ba{batch}-rank{rank}"
-                + monitor
-                + "_{"
-                + monitor
-                + ":.4f}"
+                # + monitor
+                # + "_{"
+                # + monitor
+                # + ":.4f}"
                 + ".pt"
             )
         self.checkpoint_dir = folder / filename if folder is not None else None
@@ -725,8 +710,8 @@ class Trainer(FromConfig):
             filename=filename,
             save_interval=save_interval,
             num_checkpoints_to_keep=num_checkpoints_to_keep,
-            monitor=monitor,
-            mode=mode,
+            # monitor=monitor,
+            # mode=mode,
             *args,
             **kwargs,
         )
@@ -742,7 +727,7 @@ class Trainer(FromConfig):
         #     filename=self.checkpoint_filename,
         # )
         # modelcheckpoint_kwargs.update(kwargs)
-        self.model_checkpoint_callback = MetricCheckpointSaver(**kwargs)
+        self.model_checkpoint_callback = CheckpointSaver(**kwargs)
         return self.model_checkpoint_callback
 
     def configure_prediction_callbacks(
@@ -884,7 +869,6 @@ class Trainer(FromConfig):
             # log the args to wandb
             # logger.info(pformat(self.wandb_kwargs))
             self.wandb_logger = self.configure_logger(**self.wandb_kwargs)
-            # self.checkpoint_path = Path(self.wandb_logger.experiment.dir)
 
         # add the evaluation callbacks
         self.callbacks_store.append(
@@ -926,6 +910,7 @@ class Trainer(FromConfig):
                 load_path=self.resume_from_checkpoint_path,
                 seed=self.seed,
                 callbacks=self.callbacks_store,
+                loggers=self.wandb_logger,
                 deepspeed_config=self.deepspeed_config,
                 fsdp_config=self.fsdp_config,
                 # deepspeed_config={
@@ -940,28 +925,6 @@ class Trainer(FromConfig):
                 # },
                 **self.composer_trainer_kwargs,
             )
-
-            # self.trainer = pl.Trainer(
-            #     accelerator=self.accelerator,
-            #     devices=self.devices,
-            #     num_nodes=self.num_nodes,
-            #     strategy=self.strategy,
-            #     accumulate_grad_batches=self.accumulate_grad_batches,
-            #     max_epochs=self.max_epochs,
-            #     max_steps=self.max_steps,
-            #     gradient_clip_val=self.gradient_clip_val,
-            #     val_check_interval=self.val_check_interval,
-            #     check_val_every_n_epoch=self.check_val_every_n_epoch,
-            #     deterministic=self.deterministic,
-            #     fast_dev_run=self.fast_dev_run,
-            #     precision=PRECISION_INPUT_STR_ALIAS_CONVERSION.get(
-            #         self.precision, self.precision
-            #     ),
-            #     reload_dataloaders_every_n_epochs=self.reload_dataloaders_every_n_epochs,
-            #     callbacks=self.callbacks_store,
-            #     logger=self.wandb_logger,
-            #     **self.trainer_kwargs,
-            # )
 
         self.trainer.fit()
 

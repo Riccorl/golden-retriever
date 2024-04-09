@@ -207,7 +207,7 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
 
         if len(kwargs) > 0:
             raise ValueError(
-                f"StreamingTextDataset() got an unexpected keyword argument: {kwargs}"
+                f"GoldenRetrieverStreamingDataset() got an unexpected keyword argument: {kwargs}"
             )
 
         if local is not None and (remote is None or (local == remote)):
@@ -272,8 +272,12 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
         if self.max_hard_negatives != -1:
             hard_negatives = hard_negatives[: self.max_hard_negatives]
 
+        text_pair = sample.get("doc_topic", None)
         question = self.tokenizer(
-            sample["question"], max_length=self.max_question_length, truncation=True
+            sample["question"],
+            text_pair=text_pair,
+            max_length=self.max_question_length,
+            truncation=True,
         )
 
         passage = positives + negatives + hard_negatives

@@ -12,12 +12,16 @@ from tqdm import tqdm
 
 from goldenretriever.common.log import get_logger
 from goldenretriever.common.model_inputs import ModelInputs
+from goldenretriever.common.torch_utils import get_autocast_context
 from goldenretriever.common.utils import is_package_available
 from goldenretriever.data.base.datasets import BaseDataset
 from goldenretriever.indexers.base import BaseDocumentIndex
 from goldenretriever.indexers.document import Document, DocumentStore
-from goldenretriever.pytorch_modules import PRECISION_MAP, RetrievedSample
+from goldenretriever.trainer import PRECISION_MAP
+from goldenretriever.pytorch_modules import RetrievedSample
 from goldenretriever.pytorch_modules.model import GoldenRetriever
+
+from composer.utils import dist
 
 if is_package_available("faiss"):
     import faiss
@@ -47,6 +51,7 @@ class FaissDocumentIndex(BaseDocumentIndex):
         separator: str | None = None,
         name_or_path: str | os.PathLike | None = None,
         device: str = "cpu",
+        distributed_index: bool = False,
         index=None,
         index_type: str = "Flat",
         nprobe: int = 1,
@@ -67,6 +72,14 @@ class FaissDocumentIndex(BaseDocumentIndex):
                     f"Got {len(documents)} documents and {embeddings.shape[0]} embeddings."
                 )
 
+        self.distributed_index = distributed_index
+
+        if self.distributed_index is False and dist.get_world_size() > 1:
+            logger.warning(
+                "The index is not distributed but the number of processes is greater than 1. "
+                "Consider setting `distributed_index` to `True`."
+            )
+
         faiss.omp_set_num_threads(psutil.cpu_count(logical=False))
 
         # params
@@ -78,9 +91,12 @@ class FaissDocumentIndex(BaseDocumentIndex):
             self.embeddings = index
             if self.device == "cuda":
                 # use a single GPU
-                faiss_resource = faiss.StandardGpuResources()
-                self.embeddings = faiss.index_cpu_to_gpu(
-                    faiss_resource, 0, self.embeddings
+                if distributed_index:
+                    self.embeddings = faiss.index_cpu_to_all_gpus(self.embeddings)
+                else:
+                    faiss_resource = faiss.StandardGpuResources()
+                    self.embeddings = faiss.index_cpu_to_gpu(
+                        faiss_resource, 0, self.embeddings
                 )
         else:
             if embeddings is not None:
@@ -113,8 +129,11 @@ class FaissDocumentIndex(BaseDocumentIndex):
             )
         if device_or_precision == "cuda" and self.device == "cpu":
             # use a single GPU
-            faiss_resource = faiss.StandardGpuResources()
-            self.embeddings = faiss.index_cpu_to_gpu(faiss_resource, 0, self.embeddings)
+            if self.distributed_index:
+                self.embeddings = faiss.index_cpu_to_all_gpus(self.embeddings)
+            else:
+                faiss_resource = faiss.StandardGpuResources()
+                self.embeddings = faiss.index_cpu_to_gpu(faiss_resource, 0, self.embeddings)
         elif device_or_precision == "cpu" and self.device == "cuda":
             # move faiss index to CPU
             self.embeddings = faiss.index_gpu_to_cpu(self.embeddings)
@@ -133,60 +152,66 @@ class FaissDocumentIndex(BaseDocumentIndex):
 
     def _build_faiss_index(
         self,
-        embeddings: Optional[Union[torch.Tensor, numpy.ndarray]],
+        embeddings: torch.Tensor | numpy.ndarray,
         index_type: str,
-        nprobe: int,
+        # nprobe: int,
         normalize: bool,
         metric: int,
+        distributed_index: bool = False,
     ):
-        # build the faiss index
-        self.normalize = (
-            normalize
-            and metric == faiss.METRIC_INNER_PRODUCT
-            and not isinstance(embeddings, torch.Tensor)
-        )
-        if self.normalize:
-            index_type = f"L2norm,{index_type}"
-        faiss_vector_size = embeddings.shape[1]
-        # if self.device == "cpu":
-        #     index_type = index_type.replace("x,", "x_HNSW32,")
-        # nlist = math.ceil(math.sqrt(faiss_vector_size)) * 4
-        # # nlist = 8
-        # index_type = index_type.replace(
-        #     "x", str(nlist)
-        # )
-        # print("Current nlist:", nlist)
-        self.embeddings = faiss.index_factory(faiss_vector_size, index_type, metric)
-
-        # convert to GPU
-        if self.device == "cuda":
-            # use a single GPU
-            faiss_resource = faiss.StandardGpuResources()
-            self.embeddings = faiss.index_cpu_to_gpu(faiss_resource, 0, self.embeddings)
-        else:
-            # move to CPU if embeddings is a torch.Tensor
-            embeddings = (
-                embeddings.cpu() if isinstance(embeddings, torch.Tensor) else embeddings
+        if self.embeddings is None or not isinstance(self.embeddings, faiss.Index):
+            # build the faiss index
+            self.normalize = (
+                normalize
+                and metric == faiss.METRIC_INNER_PRODUCT
+                and not isinstance(embeddings, torch.Tensor)
             )
+            if self.normalize:
+                index_type = f"L2norm,{index_type}"
+            faiss_vector_size = embeddings.shape[1]
+            # if self.device == "cpu":
+            #     index_type = index_type.replace("x,", "x_HNSW32,")
+            # nlist = math.ceil(math.sqrt(faiss_vector_size)) * 4
+            # # nlist = 8
+            # index_type = index_type.replace(
+            #     "x", str(nlist)
+            # )
+            # print("Current nlist:", nlist)
+            self.embeddings = faiss.index_factory(faiss_vector_size, index_type, metric)
 
-        # convert to float32 if embeddings is a torch.Tensor and is float16
-        if isinstance(embeddings, torch.Tensor) and embeddings.dtype == torch.float16:
-            embeddings = embeddings.float()
+            # convert to GPU
+            if self.device == "cuda":
+                # use a single GPU
+                if distributed_index:
+                    # faiss_resource = faiss.StandardGpuResources()
+                    self.embeddings = faiss.index_cpu_to_all_gpus(self.embeddings)
+                else:
+                    faiss_resource = faiss.StandardGpuResources()
+                    self.embeddings = faiss.index_cpu_to_gpu(faiss_resource, 0, self.embeddings)
+            else:
+                # move to CPU if embeddings is a torch.Tensor
+                embeddings = (
+                    embeddings.cpu() if isinstance(embeddings, torch.Tensor) else embeddings
+                )
 
-        logger.info("Training the index.")
-        self.embeddings.train(embeddings)
+            # convert to float32 if embeddings is a torch.Tensor and is float16
+            if isinstance(embeddings, torch.Tensor) and embeddings.dtype == torch.float16:
+                embeddings = embeddings.float()
 
-        logger.info("Adding the embeddings to the index.")
+        # logger.info("Training the index.")
+        # self.embeddings.train(embeddings)
+
+        # logger.info("Adding the embeddings to the index.")
         self.embeddings.add(embeddings)
 
-        self.embeddings.nprobe = nprobe
+        # self.embeddings.nprobe = nprobe
 
         # save parameters for saving/loading
         self.index_type = index_type
         self.metric = metric
 
         # clear the embeddings to free up memory
-        embeddings = None
+        del embeddings
 
         return self.embeddings
 
@@ -203,6 +228,7 @@ class FaissDocumentIndex(BaseDocumentIndex):
         encoder_precision: Optional[Union[str, int]] = None,
         compute_on_cpu: bool = False,
         force_reindex: bool = False,
+        distributed_index: bool | None = None,
         *args,
         **kwargs,
     ) -> "FaissDocumentIndex":
@@ -256,6 +282,7 @@ class FaissDocumentIndex(BaseDocumentIndex):
                 )
 
         if force_reindex:
+            self.embeddings = None
             if documents is not None:
                 self.documents.add_document(documents)
             data = [k for k in self.get_passages()]
@@ -286,43 +313,40 @@ class FaissDocumentIndex(BaseDocumentIndex):
         # we need to convert the model device to that
         device_type_for_autocast = str(encoder_device).split(":")[0]
         # autocast doesn't work with CPU and stuff different from bfloat16
-        autocast_pssg_mngr = (
-            contextlib.nullcontext()
-            if device_type_for_autocast == "cpu"
-            else (
-                torch.autocast(
-                    device_type=device_type_for_autocast,
-                    dtype=PRECISION_MAP[encoder_precision],
-                )
-            )
-        )
-        with autocast_pssg_mngr:
+        with get_autocast_context(device_type_for_autocast, encoder_precision):
             # Iterate through each batch in the dataloader
             for batch in tqdm(dataloader, desc="Indexing"):
                 # Move the batch to the device
                 batch: ModelInputs = batch.to(encoder_device)
                 # Compute the passage embeddings
-                passage_outs = encoder(**batch)
+                passage_outs = encoder(**batch).pooler_output
                 # Append the passage embeddings to the list
                 if self.device == "cpu":
-                    passage_embeddings.extend([c.detach().cpu() for c in passage_outs])
-                else:
-                    passage_embeddings.extend([c for c in passage_outs])
+                    passage_outs = torch.stack([c.detach().cpu() for c in passage_outs], dim=0)
+                
+                self.embeddings = self._build_faiss_index(
+                    embeddings=passage_outs,
+                    index_type=self.index_type,
+                    normalize=self.normalize,
+                    metric=self.metric,
+                    # distributed_index=dist.get_world_size() > 1,
+                    distributed_index=distributed_index or self.distributed_index,
+                )
 
         # move the passage embeddings to the CPU if not already done
-        passage_embeddings = [c.detach().cpu() for c in passage_embeddings]
-        # stack it
-        passage_embeddings: torch.Tensor = torch.stack(passage_embeddings, dim=0)
-        # convert to float32 for faiss
-        passage_embeddings.to(PRECISION_MAP["float32"])
+        # passage_embeddings = [c.detach().cpu() for c in passage_embeddings]
+        # # stack it
+        # passage_embeddings: torch.Tensor = torch.stack(passage_embeddings, dim=0)
+        # # convert to float32 for faiss
+        # passage_embeddings.to(PRECISION_MAP["float32"])
 
         # index the embeddings
-        self.embeddings = self._build_faiss_index(
-            embeddings=passage_embeddings,
-            index_type=self.index_type,
-            normalize=self.normalize,
-            metric=self.metric,
-        )
+        # self.embeddings = self._build_faiss_index(
+        #     embeddings=passage_embeddings,
+        #     index_type=self.index_type,
+        #     normalize=self.normalize,
+        #     metric=self.metric,
+        # )
         # free up memory from the unused variable
         del passage_embeddings
 

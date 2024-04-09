@@ -13,7 +13,8 @@ from goldenretriever.common.torch_utils import get_autocast_context
 from goldenretriever.data.base.datasets import BaseDataset
 from goldenretriever.indexers.base import BaseDocumentIndex
 from goldenretriever.indexers.document import Document, DocumentStore
-from goldenretriever.pytorch_modules import PRECISION_MAP, RetrievedSample
+from goldenretriever.trainer import PRECISION_MAP
+from goldenretriever.pytorch_modules import RetrievedSample
 
 logger = get_logger(__name__, level=logging.INFO)
 
@@ -118,6 +119,8 @@ class InMemoryDocumentIndex(BaseDocumentIndex):
         encoder_precision: Optional[Union[str, int]] = None,
         compute_on_cpu: bool = False,
         force_reindex: bool = False,
+        *args,
+        **kwargs,
     ) -> "InMemoryDocumentIndex":
         """
         Index the documents using the encoder.
@@ -201,19 +204,8 @@ class InMemoryDocumentIndex(BaseDocumentIndex):
 
         # fucking autocast only wants pure strings like 'cpu' or 'cuda'
         # we need to convert the model device to that
-        device_type_for_autocast = str(encoder_device).split(":")[0]
         # autocast doesn't work with CPU and stuff different from bfloat16
-        autocast_pssg_mngr = (
-            contextlib.nullcontext()
-            if device_type_for_autocast == "cpu"
-            else (
-                torch.autocast(
-                    device_type=device_type_for_autocast,
-                    dtype=PRECISION_MAP[encoder_precision],
-                )
-            )
-        )
-        with autocast_pssg_mngr:
+        with get_autocast_context(encoder_device, encoder_precision):
             # Iterate through each batch in the dataloader
             for batch in tqdm(dataloader, desc="Indexing"):
                 # Move the batch to the device
@@ -224,19 +216,26 @@ class InMemoryDocumentIndex(BaseDocumentIndex):
                 if self.device == "cpu":
                     passage_embeddings.extend([c.detach().cpu() for c in passage_outs])
                 else:
-                    passage_embeddings.extend([c for c in passage_outs])
+                    passage_embeddings.extend(
+                        [
+                            c.to(self.device) if self.device != encoder_device else c
+                            for c in passage_outs
+                        ]
+                    )
 
-        # move the passage embeddings to the CPU if not already done
-        # the move to cpu and then to gpu is needed to avoid OOM when using mixed precision
-        if not self.device == "cpu":  # this if is to avoid unnecessary moves
-            passage_embeddings = [c.detach().cpu() for c in passage_embeddings]
-        # stack it
-        passage_embeddings: torch.Tensor = torch.stack(passage_embeddings, dim=0)
-        # move the passage embeddings to the gpu if needed
-        if not self.device == "cpu":
-            passage_embeddings = passage_embeddings.to(PRECISION_MAP[self.precision])
-            passage_embeddings = passage_embeddings.to(self.device)
-        self.embeddings = passage_embeddings
+            # move the passage embeddings to the CPU if not already done
+            # the move to cpu and then to gpu is needed to avoid OOM when using mixed precision
+            if not self.device == "cpu":  # this if is to avoid unnecessary moves
+                passage_embeddings = [c.detach().cpu() for c in passage_embeddings]
+            # stack it
+            passage_embeddings: torch.Tensor = torch.stack(passage_embeddings, dim=0)
+            # move the passage embeddings to the gpu if needed
+            if not self.device == "cpu":
+                passage_embeddings = passage_embeddings.to(
+                    PRECISION_MAP[self.precision]
+                )
+                passage_embeddings = passage_embeddings.to(self.device)
+            self.embeddings = passage_embeddings
         # update the matrix multiplication module
         # self.mm = MatrixMultiplicationModule(embeddings=self.embeddings)
 
