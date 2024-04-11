@@ -387,9 +387,9 @@ class Trainer(FromConfig):
                 dataset_kwargs["name"] = name
             if "local" not in dataset_kwargs:
                 dataset_kwargs["local"] = dataset
-            if "split" not in dataset_kwargs:
+            # if "split" not in dataset_kwargs:
                 # TODO:
-                dataset_kwargs["split"] = "train"
+                # dataset_kwargs["split"] = "train"
             if "tokenizer" not in dataset_kwargs:
                 dataset_kwargs["tokenizer"] = tokenizer
             if "batch_size" not in dataset_kwargs:

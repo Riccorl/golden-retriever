@@ -4,9 +4,7 @@ from tqdm import tqdm
 from goldenretriever import GoldenRetriever
 from goldenretriever.common.log import get_logger
 from goldenretriever.data.old_datasets import AidaInBatchNegativesDataset
-from goldenretriever.data.datasets import (
-    GoldenRetrieverStreamingDataset,
-)
+from goldenretriever.data.datasets import GoldenRetrieverStreamingDataset
 from goldenretriever.indexers.document import DocumentStore
 from goldenretriever.indexers.faiss_index import FaissDocumentIndex
 from goldenretriever.indexers.inmemory import InMemoryDocumentIndex
@@ -90,11 +88,13 @@ if __name__ == "__main__":
 
     trainer = Trainer(
         retriever=retriever,
-        train_dataset="data/el/mosaic/train",
+        # train_dataset="data/el/mosaic/train",
+        train_dataset="/home/riccardo/golden-retriever/data/el/aida_32_tokens_topic/train.jsonl",
         train_dataset_kwargs={"predownload": 10_000},
         train_batch_size=128,
         device_train_microbatch_size=64,
-        val_dataset="data/el/mosaic/val",
+        # val_dataset="data/el/mosaic/val",
+        val_dataset="/home/riccardo/golden-retriever/data/el/aida_32_tokens_topic/val.jsonl",
         val_batch_size=128,
         test_dataset=None,
         num_workers=8,

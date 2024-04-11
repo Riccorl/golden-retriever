@@ -1,8 +1,10 @@
+from glob import glob
 import os
-from typing import Any, Dict
+from typing import Any, Dict, Iterable
 
 from composer.utils import dist
 from transformers import AutoTokenizer, PreTrainedTokenizerBase
+import datasets as hf_datasets
 
 
 def build_tokenizer(
@@ -41,3 +43,50 @@ def build_tokenizer(
             os.remove(signal_file_path)
 
     return tokenizer
+
+
+def build_hf_dataset(
+    dataset_name: str,
+    split: str,
+    data_subset: str | None = None,
+    streaming: bool = True,
+    shuffle: bool = False,
+    seed: int = 42,
+    is_local: bool = False,
+    num_workers: int | None = None,
+) -> Iterable:
+    """Build an IterableDataset over the HF C4 or pile source data.
+
+    Args:
+        dataset_name (str): Dataset name
+        split (str): Split name.
+        max_length (int): The length of concatenated tokens
+        tokenizer (PreTrainedTokenizerBase): if mode is CONCAT_TOKENS, the tokenizer to use
+        data_subset (str): Referred to as "name" in HuggingFace datasets.load_dataset.
+            Typically "all" (The Pile) or "en" (c4).
+
+    Returns:
+        An IterableDataset.
+    """
+    if is_local:
+        if os.path.isdir(dataset_name):
+            # only jsonl for now
+            data_files = glob(f"{dataset_name}/*")
+        else:
+            data_files = dataset_name
+        dataset = hf_datasets.load_dataset(
+            "json",
+            data_files=data_files,
+            split=split,
+            streaming=streaming,
+            num_proc=num_workers if not streaming else None,
+        )
+    else:
+        dataset = hf_datasets.load_dataset(
+            path=dataset_name, name=data_subset, split=split, streaming=streaming
+        )
+    if shuffle:
+        print("Shuffling dataset")
+        dataset = dataset.shuffle(seed=seed)
+    # dataset = IterableBaseDataset(name="hf_data", data=hf_dataset)
+    return dataset

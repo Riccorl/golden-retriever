@@ -34,7 +34,7 @@ SAPIENZANLP_HF_MODEL_REPO_ARCHIVE_URL = (
 )
 # path constants
 GOLDENRETRIEVER_CACHE_DIR = os.getenv(
-    "GOLDENRETRIEVER_CACHE_DIR", Path.home() / ".goldenretriever"
+    "GOLDENRETRIEVER_CACHE_DIR", Path.home() / ".cache" / "goldenretriever"
 )
 SAPIENZANLP_DATE_FORMAT = "%Y-%m-%d %H-%M-%S"
 

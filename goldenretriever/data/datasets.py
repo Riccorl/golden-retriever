@@ -1,25 +1,63 @@
+import base64
+import json
 import os
 from functools import partial
-from typing import (
-    Any,
-    Dict,
-    List,
-    Mapping,
-    Optional,
-    Sequence,
-    Union,
-)
+from pathlib import Path
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Union
 
 import numpy as np
 import torch
-
-from streaming import Stream, StreamingDataset
+from streaming import MDSWriter, Stream, StreamingDataset
+from streaming.base.format import get_index_basename
+from tqdm import tqdm
 from transformers import PreTrainedTokenizerBase
 
+from goldenretriever.common.hf_utils import build_hf_dataset
 from goldenretriever.common.log import get_logger
 from goldenretriever.common.model_inputs import ModelInputs
+from goldenretriever.common.torch_utils import build_dataloader
+from goldenretriever.common.utils import (
+    GOLDENRETRIEVER_CACHE_DIR,
+    file_exists,
+    url_to_filename,
+)
 
 logger = get_logger(__name__)
+
+import numpy as np
+from typing import Any
+
+from streaming.base.format.mds.encodings import Encoding, _encodings
+
+
+class ListStr(Encoding):
+    def encode(self, obj: Any) -> bytes:
+        # encode a list of strings to bytes
+        # since numpy doesn't support strings, we can't use numpy
+        return base64.b64encode(json.dumps(obj).encode()).decode()
+
+    def decode(self, data: bytes) -> Any:
+        # decode a bytes to a list of strings
+        return json.loads(base64.b64decode(data.encode()).decode())
+
+
+class ListInt(Encoding):
+    def encode(self, obj: Any) -> bytes:
+        return np.array(obj, np.int64).tobytes()
+
+    def decode(self, data: bytes) -> Any:
+        return np.frombuffer(data, np.int64).tolist()
+
+# class BatchEncoding(Encoding):
+#     def encode(self, obj: Any) -> bytes:
+#         return base64.b64encode(json.dumps(obj).encode()).decode()
+
+#     def decode(self, data: bytes) -> Any:
+#         return json.loads(base64.b64decode(data.encode()).decode())
+
+
+_encodings["lststr"] = ListStr
+_encodings["lstint"] = ListInt
 
 
 class GoldenRetrieverStreamingDataset(StreamingDataset):
@@ -193,7 +231,7 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
         shuffle_seed: int = 9176,
         shuffle_block_size: Optional[int] = None,
         batching_method: str = "random",
-        allow_unsafe_types: bool = False,
+        allow_unsafe_types: bool = True,
         replication: Optional[int] = None,
         # golden retriever specific
         max_positives: int = -1,
@@ -222,6 +260,21 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
         if isinstance(shuffle_block_size, float):
             shuffle_block_size = int(shuffle_block_size)
 
+        # we initialize subclass specific attributes first
+        # because we need to use them in case of preprocessing
+        self.name = name
+        self.tokenizer = tokenizer
+        self.max_positives = max_positives
+        self.max_negatives = max_negatives
+        self.max_hard_negatives = max_hard_negatives
+        self.max_passages = max_passages
+        self.max_question_length = max_question_length
+        self.max_passage_length = max_passage_length
+
+        local = self._preprocess_to_md(
+            local, self._tokenize
+        )  # , tokenizer=tokenizer, preprocess=True)
+
         # Build Dataset
         super().__init__(
             streams=streams,
@@ -248,14 +301,30 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
             allow_unsafe_types=allow_unsafe_types,
             replication=replication,
         )
-        self.name = name
-        self.tokenizer = tokenizer
-        self.max_positives = max_positives
-        self.max_negatives = max_negatives
-        self.max_hard_negatives = max_hard_negatives
-        self.max_passages = max_passages
-        self.max_question_length = max_question_length
-        self.max_passage_length = max_passage_length
+
+    def __getitem__(self, idx: int) -> Union[Dict[str, List[int]], torch.Tensor]:
+        sample = super().__getitem__(idx)
+
+        # check if the sample has been tokenized already
+        if isinstance(sample["question"], str):
+            return self._tokenize(sample)
+        else:
+            # TODO: check how to handle this
+            return sample
+
+    def _read_binary_tokenized_sample(self, sample: Dict[str, Any]) -> torch.Tensor:
+        return {
+            k: (
+                torch.from_numpy(np.frombuffer(v, dtype=np.int64))
+                if isinstance(v, np.ndarray)
+                else v
+            )
+            for k, v in sample.items()
+        }
+
+        # torch.from_numpy(
+        #     np.frombuffer(sample["tokens"], dtype=np.int64)[: self.max_seq_len].copy()
+        # )
 
     # How to tokenize a text sample to a token sample
     def _tokenize(self, sample: Mapping) -> Dict[str, List[int]]:
@@ -302,23 +371,96 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
         )
         return output
 
-    def _read_binary_tokenized_sample(self, sample: Dict[str, Any]) -> torch.Tensor:
-        return torch.from_numpy(
-            np.frombuffer(sample["tokens"], dtype=np.int64)[: self.max_seq_len].copy()
+    @staticmethod
+    def _preprocess_to_md(
+        source: str | os.PathLike,
+        # preprocess: bool = False,
+        tokenizer_fn: callable = None,
+        cache_dir: str | os.PathLike | None = None,
+    ) -> str | os.PathLike:
+        """Preprocess the dataset to a markdown file.
+
+        Args:
+            source (str | os.PathLike): The source file or directory to preprocess.
+        """
+        source = Path(source)
+
+        if source.is_dir():
+            basename = get_index_basename()
+            # filename = os.path.join(self.local, self.split, basename)  # pyright: ignore
+            hashed_filename = source / basename
+            if hashed_filename.exists():
+                logger.info(f"Found existing index file {hashed_filename}")
+                return source
+
+        # No index.json file found, so we need to create it
+        if cache_dir is None:
+            cache_dir = GOLDENRETRIEVER_CACHE_DIR
+        # check if cache dir exists
+        Path(cache_dir).mkdir(parents=True, exist_ok=True)
+        # get filename from the url
+        hashed_filename = url_to_filename(str(source), None)
+        # get cache path to put the file
+        cache_path = cache_dir / hashed_filename
+
+        # cache_path = str(cache_path)
+
+        # the file is already here, return it
+        if file_exists(cache_path):  # and not force_download:
+            logger.info(
+                f"{source} found in cache"  # , set `force_download=True` to force the download"
+            )
+            return str(cache_path)
+
+        dataset = build_hf_dataset(
+            dataset_name=str(source),
+            data_subset=None,
+            split="train",
+            shuffle=False,
+            is_local=True,
+            # num_workers=args.num_workers,
+        )
+        dataloader = build_dataloader(
+            dataset=dataset, batch_size=None, num_workers=None
         )
 
-    # How to process a sample
-    def __getitem__(self, idx: int) -> Union[Dict[str, List[int]], torch.Tensor]:
-        sample = super().__getitem__(idx)
-        # if "text" in sample:
-        token_sample = self._tokenize(sample)
-        # elif "tokens" in sample:
-        #     token_sample = self._read_binary_tokenized_sample(sample)
-        # else:
-        #     raise RuntimeError(
-        #         "StreamingTextDataset needs samples to have a `text` or `tokens` column"
-        #     )
-        return token_sample
+        def generate_samples(loader, tokenizer_fn=None):
+            for batch in loader:
+                if tokenizer_fn is not None:
+                    batch = tokenizer_fn(batch)
+                yield batch
+                # batch has key: list of values, we want to yield a list of dicts
+                # keys = list(batch.keys())
+                # current_bs = len(batch[keys[0]])
+                # for idx in range(current_bs):
+                #     yield {k: v[idx] if isinstance(v, list) else v for k, v in batch.items()}
+
+        if tokenizer_fn is None:
+            columns = {
+                "id": "str",
+                "question": "str",
+                "positive_ctxs": "json",
+                "negative_ctxs": "json",
+                "hard_negative_ctxs": "json",
+            }
+        else:
+            columns = {
+                "id": "str",
+                "question": "pkl",
+                "passage": "pkl",
+                "positive_pssgs": "pkl",
+                "positives": "pkl",
+                "negatives": "pkl",
+                "hard_negatives": "pkl",
+            }
+        with MDSWriter(columns=columns, out=str(cache_path)) as out:
+            for sample in tqdm(
+                generate_samples(dataloader, tokenizer_fn=tokenizer_fn),
+                desc=f"Converting {source} to MDS",
+            ):
+                out.write(sample)
+
+        return str(cache_path)
 
 
 class GoldenRetrieverCollator:
