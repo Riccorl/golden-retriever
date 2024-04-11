@@ -3,9 +3,11 @@ import json
 import os
 from functools import partial
 from pathlib import Path
+import platform
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Union
 
 import numpy as np
+import psutil
 import torch
 from streaming import MDSWriter, Stream, StreamingDataset
 from streaming.base.format import get_index_basename
@@ -23,41 +25,6 @@ from goldenretriever.common.utils import (
 )
 
 logger = get_logger(__name__)
-
-import numpy as np
-from typing import Any
-
-from streaming.base.format.mds.encodings import Encoding, _encodings
-
-
-class ListStr(Encoding):
-    def encode(self, obj: Any) -> bytes:
-        # encode a list of strings to bytes
-        # since numpy doesn't support strings, we can't use numpy
-        return base64.b64encode(json.dumps(obj).encode()).decode()
-
-    def decode(self, data: bytes) -> Any:
-        # decode a bytes to a list of strings
-        return json.loads(base64.b64decode(data.encode()).decode())
-
-
-class ListInt(Encoding):
-    def encode(self, obj: Any) -> bytes:
-        return np.array(obj, np.int64).tobytes()
-
-    def decode(self, data: bytes) -> Any:
-        return np.frombuffer(data, np.int64).tolist()
-
-# class BatchEncoding(Encoding):
-#     def encode(self, obj: Any) -> bytes:
-#         return base64.b64encode(json.dumps(obj).encode()).decode()
-
-#     def decode(self, data: bytes) -> Any:
-#         return json.loads(base64.b64decode(data.encode()).decode())
-
-
-_encodings["lststr"] = ListStr
-_encodings["lstint"] = ListInt
 
 
 class GoldenRetrieverStreamingDataset(StreamingDataset):
@@ -374,7 +341,6 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
     @staticmethod
     def _preprocess_to_md(
         source: str | os.PathLike,
-        # preprocess: bool = False,
         tokenizer_fn: callable = None,
         cache_dir: str | os.PathLike | None = None,
     ) -> str | os.PathLike:
@@ -420,15 +386,24 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
             is_local=True,
             # num_workers=args.num_workers,
         )
-        dataloader = build_dataloader(
-            dataset=dataset, batch_size=None, num_workers=None
-        )
+        num_workers = None
+        if tokenizer_fn is not None:
+            if num_workers is None:
+                # Multiple workers is only supported on linux machines
+                if "linux" or "macos" in platform.platform().lower():
+                    num_workers = max(1, psutil.cpu_count())
+                else:
+                    num_workers = 0
+            dataset = dataset.map(tokenizer_fn, desc="Tokenizing data")
+        # dataloader = build_dataloader(
+        #     dataset=dataset, batch_size=None, num_workers=None
+        # )
 
-        def generate_samples(loader, tokenizer_fn=None):
-            for batch in loader:
-                if tokenizer_fn is not None:
-                    batch = tokenizer_fn(batch)
-                yield batch
+        # def generate_samples(loader, tokenizer_fn=None):
+        #     for batch in loader:
+        #         if tokenizer_fn is not None:
+        #             batch = tokenizer_fn(batch)
+        #         yield batch
                 # batch has key: list of values, we want to yield a list of dicts
                 # keys = list(batch.keys())
                 # current_bs = len(batch[keys[0]])
@@ -455,7 +430,8 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
             }
         with MDSWriter(columns=columns, out=str(cache_path)) as out:
             for sample in tqdm(
-                generate_samples(dataloader, tokenizer_fn=tokenizer_fn),
+                # generate_samples(dataloader, tokenizer_fn=tokenizer_fn),
+                dataset,
                 desc=f"Converting {source} to MDS",
             ):
                 out.write(sample)

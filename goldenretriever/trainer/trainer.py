@@ -388,8 +388,8 @@ class Trainer(FromConfig):
             if "local" not in dataset_kwargs:
                 dataset_kwargs["local"] = dataset
             # if "split" not in dataset_kwargs:
-                # TODO:
-                # dataset_kwargs["split"] = "train"
+            # TODO:
+            # dataset_kwargs["split"] = "train"
             if "tokenizer" not in dataset_kwargs:
                 dataset_kwargs["tokenizer"] = tokenizer
             if "batch_size" not in dataset_kwargs:
@@ -423,7 +423,11 @@ class Trainer(FromConfig):
             drop_last=False,
             num_workers=self.num_workers,
             pin_memory=True,
-            prefetch_factor=2,
+            prefetch_factor=(
+                max(1, 8 * self.train_dataset.batch_size // self.num_workers)
+                if self.num_workers > 0
+                else 2
+            ),
             persistent_workers=True,
             timeout=0,
         )

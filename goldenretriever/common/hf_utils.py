@@ -49,7 +49,7 @@ def build_hf_dataset(
     dataset_name: str,
     split: str,
     data_subset: str | None = None,
-    streaming: bool = True,
+    streaming: bool = False,
     shuffle: bool = False,
     seed: int = 42,
     is_local: bool = False,
