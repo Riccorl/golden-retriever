@@ -963,27 +963,64 @@ class Trainer(FromConfig):
         Returns:
             `None`
         """
+        raise NotImplementedError("The `test` method is not implemented yet.")
         if self.test_dataset is None:
             logger.warning("No test dataset provided. Skipping testing.")
             return
 
         if self.trainer is None:
-            self.trainer = pl.Trainer(
-                accelerator=self.accelerator,
-                devices=self.devices,
-                num_nodes=self.num_nodes,
-                strategy=self.strategy,
-                deterministic=self.deterministic,
-                fast_dev_run=self.fast_dev_run,
-                precision=self.precision,
-                callbacks=[
-                    self.configure_prediction_callbacks(
-                        batch_size=self.prediction_batch_size,
-                        precision=self.precision,
-                        force_reindex=force_reindex,
-                    )
-                ],
+            self.trainer = ComposerTrainer(
+                model=self.composer_module,
+                train_dataloader=self.train_dataloader,
+                eval_dataloader=self.evaluators,
+                device_train_microbatch_size=self.device_train_microbatch_size
+                or self.train_dataset.batch_size,
+                algorithms=self.algorithms,
+                progress_bar=self.progress_bar,
+                log_to_console=self.log_to_console,
+                device=self.device,
+                precision=COMPOSER_PRECISION_INPUT_STR_ALIAS_CONVERSION.get(
+                    self.precision, self.precision
+                ),
+                optimizers=self.optimizer,
+                schedulers=self.lr_scheduler,
+                step_schedulers_every_batch=self.step_schedulers_every_batch,  # interval should be step
+                max_duration=self.max_duration,
+                eval_interval=self.eval_interval,
+                dist_timeout=self.dist_timeout,
+                load_path=self.resume_from_checkpoint_path,
+                seed=self.seed,
+                callbacks=self.callbacks_store,
+                loggers=self.wandb_logger,
+                deepspeed_config=self.deepspeed_config,
+                fsdp_config=self.fsdp_config,
+                # deepspeed_config={
+                #     "train_batch_size": 64,
+                #     "train_micro_batch_size_per_gpu": 32,
+                #     "gradient_accumulation_steps": 1,
+                #     "bf16": {"enabled": True},
+                #     "zero_optimization": {
+                #         "stage": 1,
+                #         # "offload_optimizer": {"device": "cpu", "pin_memory": True},
+                #     },
+                # },
                 **self.composer_trainer_kwargs,
+            # self.trainer = pl.Trainer(
+            #     accelerator=self.accelerator,
+            #     devices=self.devices,
+            #     num_nodes=self.num_nodes,
+            #     strategy=self.strategy,
+            #     deterministic=self.deterministic,
+            #     fast_dev_run=self.fast_dev_run,
+            #     precision=self.precision,
+            #     callbacks=[
+            #         self.configure_prediction_callbacks(
+            #             batch_size=self.prediction_batch_size,
+            #             precision=self.precision,
+            #             force_reindex=force_reindex,
+            #         )
+            #     ],
+            #     **self.composer_trainer_kwargs,
             )
         if lightning_module is not None:
             best_lightning_module = lightning_module
