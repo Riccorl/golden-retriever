@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 import os
 import pathlib
+import re
 import shutil
 import tempfile
 from pathlib import Path
@@ -23,7 +24,7 @@ from composer.utils import (
     create_interval_scheduler,
     create_symlink_file,
     dist,
-    ensure_folder_has_no_conflicting_files,
+    # ensure_folder_has_no_conflicting_files,
     format_name_with_dist,
     format_name_with_dist_and_time,
     is_model_deepspeed,
@@ -34,6 +35,7 @@ from composer.utils.object_store.mlflow_object_store import (
     MLFLOW_EXPERIMENT_ID_FORMAT_KEY,
     MLFLOW_RUN_ID_FORMAT_KEY,
 )
+from composer.utils.file_helpers import _get_dist_config
 
 log = logging.getLogger(__name__)
 
@@ -42,15 +44,120 @@ __all__ = ["CheckpointSaver"]
 _TORCH_DISTRIBUTED_CHECKPOINTS_METADATA_FILENAME = ".metadata"
 
 
+class SafeDict(dict):
+    def __missing__(self, key):
+        return "{" + key + "}"
+
+
+def ensure_folder_has_no_conflicting_files_save(
+    folder_name: Union[str, pathlib.Path],
+    filename: str,
+    timestamp: Timestamp,
+    additional_units: List[str] = None,
+):
+    """Ensure that the given folder does not have any files conflicting with the ``filename`` format string.
+
+    If any filename is formatted with a timestamp where the epoch, batch, sample, or token counts are after
+    ``timestamp``, a ``FileExistsError`` will be raised.
+    If ``filename`` and occurs later than ``timestamp``, raise a ``FileExistsError``.
+
+    Args:
+        folder_name (str | pathlib.Path): The folder to inspect.
+        filename (str): The pattern string for potential files.
+        timestamp (Timestamp): Ignore any files that occur before the provided timestamp.
+
+    Raises:
+        FileExistsError: If ``folder_name`` contains any files matching the ``filename`` template before ``timestamp``.
+    """
+
+    if len(os.listdir(folder_name)) > 0:
+        raise FileExistsError(
+            f"{folder_name} is not empty. Please delete that file, change to a new folder, or set overwrite=True."
+        )
+
+    # escape @ character in filename
+    # filename = filename.replace("@", r"\@")
+
+    # Prepare regex pattern by replacing f-string formatting with regex.
+    # pattern = f"^{filename}$"
+
+    # # Format time vars for regex match
+    # # units = [
+    # #     "epoch",
+    # #     "batch",
+    # #     "sample",
+    # #     "token",
+    # #     "batch_in_epoch",
+    # #     "sample_in_epoch",
+    # #     "token_in_epoch",
+    # # ]
+
+    # # extract other units from the filename
+    # units = re.findall(r"{(.*?)}", filename)
+    # # if additional_units is not None:
+    # #     units.extend(additional_units)
+    # for unit in units:
+    #     if unit in filename:
+    #         pattern = pattern.replace(f"{{{unit}}}", f"(?P<{unit}>\\d+)")
+
+    # # Format rank information
+    # pattern = pattern.format(**_get_dist_config(strict=False))
+    # # pattern = pattern.format_map(SafeDict(*_get_dist_config(strict=False)))
+    # # format_map((bond='bond'))
+
+    # template = re.compile(pattern)
+
+    # for file in os.listdir(folder_name):
+    #     if file == filename:
+    #         continue
+
+    #     file_parts = file.split("-")
+    #     if len(file_parts) != 3:
+    #         continue
+
+    #     file_epoch = int(file_parts[0][2:])
+    #     file_batch = int(file_parts[1][2:])
+    #     file_rank = int(file_parts[2][4:-3])
+
+    #     if file_epoch > timestamp.epoch:
+    #         raise FileExistsError(
+    #             f"{os.path.join(folder_name, file)} may conflict with a future checkpoint of the current run."
+    #             "Please delete that file, change to a new folder, or set overwrite=True.",
+    #         )
+    #     elif file_epoch == timestamp.epoch and file_batch > timestamp.batch:
+    #         raise FileExistsError(
+    #             f"{os.path.join(folder_name, file)} may conflict with a future checkpoint of the current run."
+    #             "Please delete that file, change to a new folder, or set overwrite=True.",
+    #         )
+
+    # for file in os.listdir(folder_name):
+    #     match = template.match(file)
+
+    #     if match is not None:
+    #         match = match.groupdict()
+    #         for unit, value in match.items():
+    #             if unit.endswith("_in_epoch"):
+    #                 if "epoch" not in match:
+    #                     raise ValueError(
+    #                         f"{filename} has {{unit}} but not {{epoch}}. Add {{epoch}} for uniqueness."
+    #                     )
+    #                 if int(match["epoch"]) != timestamp.epoch:
+    #                     continue  # only check _in_epoch if both files have same epoch count
+
+    #             if int(value) > int(getattr(timestamp, unit)):
+    #                 raise FileExistsError(
+    #                     f"{os.path.join(folder_name, file)} may conflict with a future checkpoint of the current run."
+    #                     "Please delete that file, change to a new folder, or set overwrite=True.",
+    #                 )
+
+
 class MetricCheckpointSaver(CheckpointSaver):  # noqa: D101
 
     def __init__(
         self,
         folder: Union[str, pathlib.Path] = "{run_name}/checkpoints",
         filename: Union[str, pathlib.Path] = "ep{epoch}-ba{batch}-rank{rank}.pt",
-        remote_file_name: Optional[Union[str, pathlib.Path]] = (
-            "{run_name}/checkpoints/" "ep{epoch}-ba{batch}-rank{rank}.pt"
-        ),
+        remote_file_name: Optional[Union[str, pathlib.Path]] = None,
         latest_filename: Optional[Union[str, pathlib.Path]] = "latest-rank{rank}.pt",
         latest_remote_file_name: Optional[
             Union[str, pathlib.Path]
@@ -175,8 +282,11 @@ class MetricCheckpointSaver(CheckpointSaver):  # noqa: D101
             # checks that save_folder contains no files with a timestamp after the current timestamp,
             # which has potential for future conflicts.
             folder = format_name_with_dist(self.folder, state.run_name)
-            ensure_folder_has_no_conflicting_files(
-                folder, self.filename.filename, state.timestamp
+            ensure_folder_has_no_conflicting_files_save(
+                folder,
+                self.filename.filename,
+                state.timestamp,
+                additional_units=[self.monitor],
             )
 
         dist.barrier()  # holds all ranks until folder check is done
@@ -285,7 +395,17 @@ class MetricCheckpointSaver(CheckpointSaver):  # noqa: D101
         current = None  # monitor_candidates.get(self.monitor)
 
         # get eval metric from state
-        eval_metric = state.eval_metrics[self.monitor]
+        try:
+            eval_metric = state.eval_metrics[self.monitor]
+        except KeyError:
+            # check if we add "metrics/" prefix to the monitor
+            if not self.monitor.startswith("metrics/"):
+                monitor = f"metrics/{self.monitor}"
+            if monitor not in state.eval_metrics:
+                raise ValueError(
+                    f"Monitor {self.monitor} not found in `state.eval_metrics`."
+                )
+            eval_metric = state.eval_metrics[monitor]
 
         k = (
             len(self.best_k_models) + 1
@@ -304,9 +424,9 @@ class MetricCheckpointSaver(CheckpointSaver):  # noqa: D101
                 float("inf" if self.mode == "min" else "-inf"), device=current.device
             )
 
-        _op = min if self.mode == "min" else max
-        self.best_model_path = _op(self.best_k_models, key=self.best_k_models.get)  # type: ignore[arg-type]
-        self.best_model_score = self.best_k_models[self.best_model_path]
+        # _op = min if self.mode == "min" else max
+        # self.best_model_path = _op(self.best_k_models, key=self.best_k_models.get)  # type: ignore[arg-type]
+        # self.best_model_score = self.best_k_models[self.best_model_path]
 
         is_deepspeed = is_model_deepspeed(state.model)
 
@@ -321,12 +441,13 @@ class MetricCheckpointSaver(CheckpointSaver):  # noqa: D101
         )
         # add metric to filename in place of the value of monitor
         filename_with_placeholders = filename_with_placeholders.replace(
-            f"{{{self.monitor}}}", str(eval_metric)
+            f"{{{self.monitor}}}", f"{eval_metric:.6f}"
         )
+        save_filename = checkpoint.get_save_filename(state, filename_with_placeholders)
 
         # save the current score
         self.current_score = current
-        self.best_k_models[filename_with_placeholders] = current
+        self.best_k_models[save_filename] = current
 
         if len(self.best_k_models) == k:
             # monitor dict has reached k elements
@@ -338,7 +459,6 @@ class MetricCheckpointSaver(CheckpointSaver):  # noqa: D101
         self.best_model_path = _op(self.best_k_models, key=self.best_k_models.get)  # type: ignore[arg-type]
         self.best_model_score = self.best_k_models[self.best_model_path]
 
-        save_filename = checkpoint.get_save_filename(state, filename_with_placeholders)
         # Store before saving so state_dict in checkpoint has reference to latest checkpoint (itself)
         self.all_saved_checkpoints_to_timestamp[save_filename] = state.timestamp
 

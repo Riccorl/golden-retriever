@@ -212,7 +212,10 @@ class Trainer(FromConfig):
         # checkpoint parameters
         self.model_checkpointing = model_checkpointing
         # merge checkpoint dir with wandb project name and experiment name if they are provided
-        if self.wandb_project_name is not None and self.wandb_experiment_name is not None:
+        if (
+            self.wandb_project_name is not None
+            and self.wandb_experiment_name is not None
+        ):
             self.checkpoint_dir = (
                 Path(checkpoint_dir)
                 / self.wandb_project_name
@@ -694,10 +697,11 @@ class Trainer(FromConfig):
             #     "checkpoint-" + monitor + "_{" + monitor + ":.4f}-epoch_{epoch:02d}"
             # )
             filename = (
-                "ep{epoch}-ba{batch}-rank{rank}"
-                # + monitor
-                # + "_{"
-                # + monitor
+                "ep{epoch}-ba{batch}-rank{rank}-"
+                + monitor
+                + "_{"
+                + monitor
+                + "}"
                 # + ":.4f}"
                 + ".pt"
             )
@@ -710,8 +714,8 @@ class Trainer(FromConfig):
             filename=filename,
             save_interval=save_interval,
             num_checkpoints_to_keep=num_checkpoints_to_keep,
-            # monitor=monitor,
-            # mode=mode,
+            monitor=monitor,
+            mode=mode,
             *args,
             **kwargs,
         )
@@ -727,7 +731,7 @@ class Trainer(FromConfig):
         #     filename=self.checkpoint_filename,
         # )
         # modelcheckpoint_kwargs.update(kwargs)
-        self.model_checkpoint_callback = CheckpointSaver(**kwargs)
+        self.model_checkpoint_callback = MetricCheckpointSaver(**kwargs)
         return self.model_checkpoint_callback
 
     def configure_prediction_callbacks(

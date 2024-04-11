@@ -10,7 +10,7 @@ from goldenretriever.data.datasets import (
 from goldenretriever.indexers.document import DocumentStore
 from goldenretriever.indexers.faiss_index import FaissDocumentIndex
 from goldenretriever.indexers.inmemory import InMemoryDocumentIndex
-from goldenretriever.trainer.train_mosaic import Trainer
+from goldenretriever.trainer.trainer import Trainer
 
 logger = get_logger(__name__)
 
@@ -20,7 +20,8 @@ if __name__ == "__main__":
     retriever = GoldenRetriever(
         question_encoder="intfloat/e5-small-v2",
         document_index=InMemoryDocumentIndex(
-            documents=DocumentStore.from_file("data/el/documents.jsonl"),
+            # documents=DocumentStore.from_file("data/el/documents.jsonl"),
+            documents=DocumentStore.from_file("data/el/documents_only_data.jsonl"),
             metadata_fields=["definition"],
             separator=" <def> ",
             device="cuda:1",
@@ -98,14 +99,14 @@ if __name__ == "__main__":
         test_dataset=None,
         num_workers=8,
         max_duration="25000ep",
-        eval_interval="1ep",
-        # eval_interval="10ba",
+        # eval_interval="1ep",
+        eval_interval="10ba",
         log_to_wandb=True,
         wandb_online_mode=False,
         wandb_project_name="golden-retriever-aida",
-        wandb_experiment_name="aida-e5-base-topics-from-blink",
+        wandb_experiment_name="aida-e5-base-topics-from-blink-debug",
         max_hard_negatives_to_mine=15,
-        save_top_k=-1,
+        save_top_k=1,
         # deepspeed_config={
         #     "train_batch_size": 64,
         #     "train_micro_batch_size_per_gpu": 32,
