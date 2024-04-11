@@ -33,14 +33,14 @@ from goldenretriever.common.from_config import FromConfig
 from goldenretriever.common.log import get_logger
 from goldenretriever.common.utils import to_config
 from goldenretriever.composer_modules.algorithms import HardNegativeAlgorithm
-from goldenretriever.composer_modules.callbacks import (
+from goldenretriever.callbacks.callbacks import (
     HardNegativeMiningCallback,
     PredictionCallback,
 )
-from goldenretriever.composer_modules.callbacks import (
+from goldenretriever.callbacks.callbacks import (
     RecallAtKEvaluationCallback as ComposerRecallAtKEvaluationCallback,
 )
-from goldenretriever.composer_modules.checkpoint_saver import MetricCheckpointSaver
+from goldenretriever.callbacks.checkpoint_saver import MetricCheckpointSaver
 from goldenretriever.composer_modules.mosaic_module import GoldenRetrieverComposerModule
 from goldenretriever.data.datasets import (
     GoldenRetrieverCollator,
@@ -960,96 +960,96 @@ class Trainer(FromConfig):
             `None`
         """
         raise NotImplementedError("The `test` method is not implemented yet.")
-        if self.test_dataset is None:
-            logger.warning("No test dataset provided. Skipping testing.")
-            return
+        # if self.test_dataset is None:
+        #     logger.warning("No test dataset provided. Skipping testing.")
+        #     return
 
-        if self.trainer is None:
-            self.trainer = ComposerTrainer(
-                model=self.composer_module,
-                train_dataloader=self.train_dataloader,
-                eval_dataloader=self.evaluators,
-                device_train_microbatch_size=self.device_train_microbatch_size
-                or self.train_dataset.batch_size,
-                algorithms=self.algorithms,
-                progress_bar=self.progress_bar,
-                log_to_console=self.log_to_console,
-                device=self.device,
-                precision=COMPOSER_PRECISION_INPUT_STR_ALIAS_CONVERSION.get(
-                    self.precision, self.precision
-                ),
-                optimizers=self.optimizer,
-                schedulers=self.lr_scheduler,
-                step_schedulers_every_batch=self.step_schedulers_every_batch,  # interval should be step
-                max_duration=self.max_duration,
-                eval_interval=self.eval_interval,
-                dist_timeout=self.dist_timeout,
-                load_path=self.resume_from_checkpoint_path,
-                seed=self.seed,
-                callbacks=self.callbacks_store,
-                loggers=self.wandb_logger,
-                deepspeed_config=self.deepspeed_config,
-                fsdp_config=self.fsdp_config,
-                # deepspeed_config={
-                #     "train_batch_size": 64,
-                #     "train_micro_batch_size_per_gpu": 32,
-                #     "gradient_accumulation_steps": 1,
-                #     "bf16": {"enabled": True},
-                #     "zero_optimization": {
-                #         "stage": 1,
-                #         # "offload_optimizer": {"device": "cpu", "pin_memory": True},
-                #     },
-                # },
-                **self.composer_trainer_kwargs,
-            # self.trainer = pl.Trainer(
-            #     accelerator=self.accelerator,
-            #     devices=self.devices,
-            #     num_nodes=self.num_nodes,
-            #     strategy=self.strategy,
-            #     deterministic=self.deterministic,
-            #     fast_dev_run=self.fast_dev_run,
-            #     precision=self.precision,
-            #     callbacks=[
-            #         self.configure_prediction_callbacks(
-            #             batch_size=self.prediction_batch_size,
-            #             precision=self.precision,
-            #             force_reindex=force_reindex,
-            #         )
-            #     ],
-            #     **self.composer_trainer_kwargs,
-            )
-        if lightning_module is not None:
-            best_lightning_module = lightning_module
-        else:
-            try:
-                if self.fast_dev_run:
-                    best_lightning_module = self.composer_module
-                else:
-                    # load best model for testing
-                    if checkpoint_path is not None:
-                        best_model_path = checkpoint_path
-                    elif self.checkpoint_path is not None:
-                        best_model_path = self.checkpoint_path
-                    elif self.model_checkpoint_callback:
-                        best_model_path = self.model_checkpoint_callback.best_model_path
-                    else:
-                        raise ValueError(
-                            "Either `checkpoint_path` or `model_checkpoint_callback` should "
-                            "be provided to the trainer"
-                        )
-                    logger.info(f"Loading best model from {best_model_path}")
+        # if self.trainer is None:
+        #     self.trainer = ComposerTrainer(
+        #         model=self.composer_module,
+        #         train_dataloader=self.train_dataloader,
+        #         eval_dataloader=self.evaluators,
+        #         device_train_microbatch_size=self.device_train_microbatch_size
+        #         or self.train_dataset.batch_size,
+        #         algorithms=self.algorithms,
+        #         progress_bar=self.progress_bar,
+        #         log_to_console=self.log_to_console,
+        #         device=self.device,
+        #         precision=COMPOSER_PRECISION_INPUT_STR_ALIAS_CONVERSION.get(
+        #             self.precision, self.precision
+        #         ),
+        #         optimizers=self.optimizer,
+        #         schedulers=self.lr_scheduler,
+        #         step_schedulers_every_batch=self.step_schedulers_every_batch,  # interval should be step
+        #         max_duration=self.max_duration,
+        #         eval_interval=self.eval_interval,
+        #         dist_timeout=self.dist_timeout,
+        #         load_path=self.resume_from_checkpoint_path,
+        #         seed=self.seed,
+        #         callbacks=self.callbacks_store,
+        #         loggers=self.wandb_logger,
+        #         deepspeed_config=self.deepspeed_config,
+        #         fsdp_config=self.fsdp_config,
+        #         # deepspeed_config={
+        #         #     "train_batch_size": 64,
+        #         #     "train_micro_batch_size_per_gpu": 32,
+        #         #     "gradient_accumulation_steps": 1,
+        #         #     "bf16": {"enabled": True},
+        #         #     "zero_optimization": {
+        #         #         "stage": 1,
+        #         #         # "offload_optimizer": {"device": "cpu", "pin_memory": True},
+        #         #     },
+        #         # },
+        #         **self.composer_trainer_kwargs,
+        #     # self.trainer = pl.Trainer(
+        #     #     accelerator=self.accelerator,
+        #     #     devices=self.devices,
+        #     #     num_nodes=self.num_nodes,
+        #     #     strategy=self.strategy,
+        #     #     deterministic=self.deterministic,
+        #     #     fast_dev_run=self.fast_dev_run,
+        #     #     precision=self.precision,
+        #     #     callbacks=[
+        #     #         self.configure_prediction_callbacks(
+        #     #             batch_size=self.prediction_batch_size,
+        #     #             precision=self.precision,
+        #     #             force_reindex=force_reindex,
+        #     #         )
+        #     #     ],
+        #     #     **self.composer_trainer_kwargs,
+        #     )
+        # if lightning_module is not None:
+        #     best_lightning_module = lightning_module
+        # else:
+        #     try:
+        #         if self.fast_dev_run:
+        #             best_lightning_module = self.composer_module
+        #         else:
+        #             # load best model for testing
+        #             if checkpoint_path is not None:
+        #                 best_model_path = checkpoint_path
+        #             elif self.checkpoint_path is not None:
+        #                 best_model_path = self.checkpoint_path
+        #             elif self.model_checkpoint_callback:
+        #                 best_model_path = self.model_checkpoint_callback.best_model_path
+        #             else:
+        #                 raise ValueError(
+        #                     "Either `checkpoint_path` or `model_checkpoint_callback` should "
+        #                     "be provided to the trainer"
+        #                 )
+        #             logger.info(f"Loading best model from {best_model_path}")
 
-                    best_lightning_module = (
-                        GoldenRetrieverPLModule.load_from_checkpoint(best_model_path)
-                    )
-            except Exception as e:
-                logger.info(f"Failed to load the model from checkpoint: {e}")
-                logger.info("Using last model instead")
-                best_lightning_module = self.composer_module
+        #             best_lightning_module = (
+        #                 GoldenRetrieverPLModule.load_from_checkpoint(best_model_path)
+        #             )
+        #     except Exception as e:
+        #         logger.info(f"Failed to load the model from checkpoint: {e}")
+        #         logger.info("Using last model instead")
+        #         best_lightning_module = self.composer_module
 
-        lightning_datamodule = lightning_datamodule or self.lightning_datamodule
-        # module test
-        self.trainer.test(best_lightning_module, datamodule=lightning_datamodule)
+        # lightning_datamodule = lightning_datamodule or self.lightning_datamodule
+        # # module test
+        # self.trainer.test(best_lightning_module, datamodule=lightning_datamodule)
 
     def convert_to_yaml(self):
         return OmegaConf.to_yaml(cfg=to_config(self))
