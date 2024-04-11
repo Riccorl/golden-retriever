@@ -10,7 +10,7 @@ import hydra
 import lightning as pl
 import omegaconf
 import torch
-from composer import Algorithm, DataSpec, Event, State, Time, TimeUnit
+from composer import Algorithm, ComposerModel, DataSpec, Evaluator, Event, State, Time, TimeUnit
 from composer import Trainer as ComposerTrainer
 from composer.algorithms import GradientClipping
 from composer.callbacks import (
@@ -46,10 +46,6 @@ from goldenretriever.data.datasets import (
     GoldenRetrieverCollator,
     GoldenRetrieverStreamingDataset,
 )
-from goldenretriever.lightning_modules.pl_data_modules import (
-    GoldenRetrieverPLDataModule,
-)
-from goldenretriever.lightning_modules.pl_modules import GoldenRetrieverPLModule
 from goldenretriever.pytorch_modules.loss import MultiLabelNCELoss
 from goldenretriever.pytorch_modules.model import GoldenRetriever
 from goldenretriever.pytorch_modules.optim import RAdamW
@@ -938,9 +934,9 @@ class Trainer(FromConfig):
 
     def test(
         self,
-        lightning_module: GoldenRetrieverPLModule | None = None,
+        composer_module: ComposerModel | None = None,
         checkpoint_path: str | os.PathLike | None = None,
-        lightning_datamodule: GoldenRetrieverPLDataModule | None = None,
+        test_dataloader: DataLoader | Evaluator | None = None,
         force_reindex: bool = False,
         *args,
         **kwargs,
