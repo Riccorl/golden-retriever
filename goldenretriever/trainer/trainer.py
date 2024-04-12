@@ -10,7 +10,16 @@ import hydra
 import lightning as pl
 import omegaconf
 import torch
-from composer import Algorithm, ComposerModel, DataSpec, Evaluator, Event, State, Time, TimeUnit
+from composer import (
+    Algorithm,
+    ComposerModel,
+    DataSpec,
+    Evaluator,
+    Event,
+    State,
+    Time,
+    TimeUnit,
+)
 from composer import Trainer as ComposerTrainer
 from composer.algorithms import GradientClipping
 from composer.callbacks import (
@@ -23,16 +32,11 @@ from composer.callbacks import (
 from composer.loggers import WandBLogger
 from composer.optim.scheduler import LinearScheduler
 from composer.utils import dist, get_device, reproducibility
-
 from omegaconf import OmegaConf
 from torch.utils.data import DataLoader
 from transformers import PreTrainedTokenizerBase
 
 from goldenretriever.callbacks.base import NLPTemplateCallback
-from goldenretriever.common.from_config import FromConfig
-from goldenretriever.common.log import get_logger
-from goldenretriever.common.utils import to_config
-from goldenretriever.composer_modules.algorithms import HardNegativeAlgorithm
 from goldenretriever.callbacks.callbacks import (
     HardNegativeMiningCallback,
     PredictionCallback,
@@ -41,14 +45,18 @@ from goldenretriever.callbacks.callbacks import (
     RecallAtKEvaluationCallback as ComposerRecallAtKEvaluationCallback,
 )
 from goldenretriever.callbacks.checkpoint_saver import MetricCheckpointSaver
-from goldenretriever.composer_modules.mosaic_module import GoldenRetrieverComposerModule
+from goldenretriever.common.from_config import FromConfig
+from goldenretriever.common.log import get_logger
+from goldenretriever.common.utils import to_config
+from goldenretriever.composer.algorithms import HardNegativeAlgorithm
+from goldenretriever.composer.model import GoldenRetrieverComposerModule
 from goldenretriever.data.datasets import (
     GoldenRetrieverCollator,
     GoldenRetrieverStreamingDataset,
 )
-from goldenretriever.pytorch_modules.loss import MultiLabelNCELoss
-from goldenretriever.pytorch_modules.model import GoldenRetriever
-from goldenretriever.pytorch_modules.optim import RAdamW
+from goldenretriever.pytorch.loss import MultiLabelNCELoss
+from goldenretriever.pytorch.model import GoldenRetriever
+from goldenretriever.pytorch.optim import RAdamW
 from goldenretriever.trainer import COMPOSER_PRECISION_INPUT_STR_ALIAS_CONVERSION
 from goldenretriever.trainer.evaluator import GoldenRetrieverEvaluator
 
@@ -333,13 +341,9 @@ class Trainer(FromConfig):
         self.early_stopping_callback: EarlyStopper | None = None
 
         # other callbacks declaration
-        self.callbacks_store: List[composer.Callback] = []  # self.configure_callbacks()
+        self.callbacks_store: List[composer.Callback] = []
         # add default callbacks
-        self.callbacks_store += [
-            SpeedMonitor(window_size=100),
-            LRMonitor(),
-            MemoryMonitor(),
-        ]
+        self.callbacks_store += [SpeedMonitor(), LRMonitor(), MemoryMonitor()]
 
         # algorithms declaration
         self.algorithms: List[Algorithm] = []
@@ -358,7 +362,8 @@ class Trainer(FromConfig):
         dataset: str | GoldenRetrieverStreamingDataset = None,
         name: str = None,
         batch_size: int = None,
-        tokenizer: PreTrainedTokenizerBase = None,
+        question_tokenizer: PreTrainedTokenizerBase = None,
+        passage_tokenizer: PreTrainedTokenizerBase = None,
         shuffle: bool = None,
         shuffle_seed: int = None,
         dataset_kwargs: dict = None,
@@ -372,8 +377,13 @@ class Trainer(FromConfig):
                 raise ValueError("The dataset name is required.")
             if batch_size is None and "batch_size" not in dataset_kwargs:
                 raise ValueError("The batch size is required.")
-            if tokenizer is None and "tokenizer" not in dataset_kwargs:
-                raise ValueError("The tokenizer is required.")
+            if (
+                question_tokenizer is None
+                and "question_tokenizer" not in dataset_kwargs
+            ):
+                raise ValueError("The question_tokenizer is required.")
+            if passage_tokenizer is None and "passage_tokenizer" not in dataset_kwargs:
+                raise ValueError("The passage_tokenizer is required.")
             if shuffle is None and "shuffle" not in dataset_kwargs:
                 raise ValueError("The shuffle parameter is required.")
             if shuffle_seed is None and "shuffle_seed" not in dataset_kwargs:
@@ -386,8 +396,10 @@ class Trainer(FromConfig):
             # if "split" not in dataset_kwargs:
             # TODO:
             # dataset_kwargs["split"] = "train"
-            if "tokenizer" not in dataset_kwargs:
-                dataset_kwargs["tokenizer"] = tokenizer
+            if "question_tokenizer" not in dataset_kwargs:
+                dataset_kwargs["question_tokenizer"] = question_tokenizer
+            if "passage_tokenizer" not in dataset_kwargs:
+                dataset_kwargs["passage_tokenizer"] = passage_tokenizer
             if "batch_size" not in dataset_kwargs:
                 dataset_kwargs["batch_size"] = batch_size
             if "shuffle" not in dataset_kwargs:
@@ -399,19 +411,21 @@ class Trainer(FromConfig):
         return dataset, dataset_kwargs
 
     def configure_dataset_and_dataloader(self, *args, **kwargs):
-
         # dataset declaration
         self.train_dataset, self.train_dataset_kwargs = self.dataset_builder(
             dataset=self.train_dataset,
             name="train_dataset",
             batch_size=self.train_batch_size,
-            tokenizer=self.retriever.question_tokenizer,
+            question_tokenizer=self.retriever.question_tokenizer,
+            passage_tokenizer=self.retriever.passage_tokenizer,
             shuffle=True,
             shuffle_seed=self.seed,
             dataset_kwargs=self.train_dataset_kwargs,
         )
         # dataloader declaration
-        train_collator = GoldenRetrieverCollator(tokenizer=self.train_dataset.tokenizer)
+        train_collator = GoldenRetrieverCollator(
+            tokenizer=self.train_dataset.question_tokenizer
+        )
         self.train_dataloader = DataLoader(
             self.train_dataset,
             collate_fn=train_collator,
@@ -422,9 +436,9 @@ class Trainer(FromConfig):
             prefetch_factor=(
                 max(1, 8 * self.train_dataset.batch_size // self.num_workers)
                 if self.num_workers > 0
-                else 2
+                else None
             ),
-            persistent_workers=True,
+            persistent_workers=True if self.num_workers > 0 else False,
             timeout=0,
         )
         self.train_dataloader = DataSpec(
@@ -452,12 +466,13 @@ class Trainer(FromConfig):
                 dataset=ds,
                 name=f"val_dataset_{i}",
                 batch_size=self.val_batch_size[i],
-                tokenizer=self.retriever.question_tokenizer,
+                question_tokenizer=self.retriever.question_tokenizer,
+                passage_tokenizer=self.retriever.passage_tokenizer,
                 shuffle=False,
                 shuffle_seed=self.seed,
                 dataset_kwargs=self.val_dataset_kwargs[i],
             )
-            val_collator = GoldenRetrieverCollator(tokenizer=ds.tokenizer)
+            val_collator = GoldenRetrieverCollator(tokenizer=ds.question_tokenizer)
             val_dataloader = DataLoader(
                 ds,
                 collate_fn=val_collator,
@@ -465,8 +480,12 @@ class Trainer(FromConfig):
                 drop_last=False,
                 num_workers=self.num_workers,
                 pin_memory=True,
-                prefetch_factor=2,
-                persistent_workers=True,
+                prefetch_factor=(
+                    max(1, 8 * self.train_dataset.batch_size // self.num_workers)
+                    if self.num_workers > 0
+                    else None
+                ),
+                persistent_workers=True if self.num_workers > 0 else False,
                 timeout=0,
             )
             val_dataloader = DataSpec(
@@ -651,11 +670,6 @@ class Trainer(FromConfig):
             rank_zero_only=rank_zero_only,
             init_kwargs=init_kwargs,
         )
-        # if watch is not None and lightning_module is not None:
-        #     watch_kwargs = dict(model=lightning_module)
-        #     if watch is not None:
-        #         watch_kwargs["log"] = watch
-        #     wandb_logger.watch(**watch_kwargs)
         return wandb_logger
 
     @staticmethod
@@ -693,17 +707,8 @@ class Trainer(FromConfig):
                 self.checkpoint_dir / "checkpoints" if self.checkpoint_dir else None
             )
         if filename is None:
-            # filename = (
-            #     "checkpoint-" + monitor + "_{" + monitor + ":.4f}-epoch_{epoch:02d}"
-            # )
             filename = (
-                "ep{epoch}-ba{batch}-rank{rank}-"
-                + monitor
-                + "_{"
-                + monitor
-                + "}"
-                # + ":.4f}"
-                + ".pt"
+                "ep{epoch}-ba{batch}-rank{rank}-" + monitor + "_{" + monitor + "}.pt"
             )
         self.checkpoint_dir = folder / filename if folder is not None else None
         logger.info(f"Checkpoint directory: {folder}")
@@ -719,18 +724,6 @@ class Trainer(FromConfig):
             *args,
             **kwargs,
         )
-
-        # update the kwargs
-        # TODO: this is bad
-        # kwargs.update(
-        #     dirpath=self.checkpoint_dir,
-        #     filename=self.checkpoint_filename,
-        # )
-        # modelcheckpoint_kwargs = dict(
-        #     dirpath=self.checkpoint_dir,
-        #     filename=self.checkpoint_filename,
-        # )
-        # modelcheckpoint_kwargs.update(kwargs)
         self.model_checkpoint_callback = MetricCheckpointSaver(**kwargs)
         return self.model_checkpoint_callback
 
@@ -800,17 +793,8 @@ class Trainer(FromConfig):
         )
         hn_dataset, _ = self.dataset_builder(dataset_kwargs=self.train_dataset_kwargs)
         dataloader = DataLoader(
-            # GoldenRetrieverStreamingDataset(
-            #     name="aida_train_hn",
-            #     tokenizer=self.train_dataset.tokenizer,
-            #     local="/home/ric/Projects/golden-retriever/data/dpr-like/el/mosaic/train",
-            #     split="train",
-            #     batch_size=32,
-            #     shuffle=True,
-            #     shuffle_seed=42,
-            # ),
             hn_dataset,
-            collate_fn=GoldenRetrieverCollator(tokenizer=hn_dataset.tokenizer),
+            collate_fn=GoldenRetrieverCollator(tokenizer=hn_dataset.question_tokenizer),
             batch_size=hn_dataset.batch_size,
             num_workers=self.num_workers,
             drop_last=False,
@@ -829,7 +813,7 @@ class Trainer(FromConfig):
             add_with_probability=self.mine_hard_negatives_with_probability,
         )
         hard_negative_algo = HardNegativeAlgorithm(
-            self.train_dataset.tokenizer,
+            self.train_dataset.passage_tokenizer,
             max_length=self.train_dataset.max_passage_length,
         )
         self.algorithms.append(hard_negative_algo)
@@ -871,14 +855,12 @@ class Trainer(FromConfig):
         if self.log_to_wandb:
             logger.info("Instantiating Wandb Logger")
             # log the args to wandb
-            # logger.info(pformat(self.wandb_kwargs))
             self.wandb_logger = self.configure_logger(**self.wandb_kwargs)
 
         # add the evaluation callbacks
         self.callbacks_store.append(
             self.configure_prediction_callbacks(
-                batch_size=self.prediction_batch_size,
-                precision=self.precision,
+                batch_size=self.prediction_batch_size, precision=self.precision
             )
         )
         # add the hard negatives callback after the evaluation callback

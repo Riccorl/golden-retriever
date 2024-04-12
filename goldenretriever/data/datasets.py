@@ -176,7 +176,8 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
         self,
         *,
         name: str,
-        tokenizer: PreTrainedTokenizerBase,
+        question_tokenizer: PreTrainedTokenizerBase,
+        passage_tokenizer: PreTrainedTokenizerBase | None = None,
         streams: Optional[Sequence[Stream]] = None,
         remote: Optional[str] = None,
         local: Optional[str] = None,
@@ -201,12 +202,15 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
         allow_unsafe_types: bool = True,
         replication: Optional[int] = None,
         # golden retriever specific
+        preprocess: bool = False,
         max_positives: int = -1,
         max_negatives: int = -1,
         max_hard_negatives: int = -1,
         max_passages: int = -1,
         max_question_length: int = 40,
         max_passage_length: int = 40,
+        metadata_fields: Optional[Sequence[str]] = None,
+        metadata_separator: str = "\t",
         **kwargs: Any,
     ):
 
@@ -230,17 +234,19 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
         # we initialize subclass specific attributes first
         # because we need to use them in case of preprocessing
         self.name = name
-        self.tokenizer = tokenizer
+        self.question_tokenizer = question_tokenizer
+        self.passage_tokenizer = passage_tokenizer or self.question_tokenizer
         self.max_positives = max_positives
         self.max_negatives = max_negatives
         self.max_hard_negatives = max_hard_negatives
         self.max_passages = max_passages
         self.max_question_length = max_question_length
         self.max_passage_length = max_passage_length
+        self.metadata_fields = metadata_fields
+        self.metadata_separator = metadata_separator
 
-        local = self._preprocess_to_md(
-            local, self._tokenize
-        )  # , tokenizer=tokenizer, preprocess=True)
+        # get data to MDS format
+        local = self._preprocess_to_mds(local, self._tokenize if preprocess else None)
 
         # Build Dataset
         super().__init__(
@@ -271,45 +277,49 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
 
     def __getitem__(self, idx: int) -> Union[Dict[str, List[int]], torch.Tensor]:
         sample = super().__getitem__(idx)
-
         # check if the sample has been tokenized already
         if isinstance(sample["question"], str):
             return self._tokenize(sample)
         else:
-            # TODO: check how to handle this
             return sample
 
-    def _read_binary_tokenized_sample(self, sample: Dict[str, Any]) -> torch.Tensor:
-        return {
-            k: (
-                torch.from_numpy(np.frombuffer(v, dtype=np.int64))
-                if isinstance(v, np.ndarray)
-                else v
-            )
-            for k, v in sample.items()
-        }
+    def _get_passages(self, passages: List[Dict[str, str]]) -> List[str]:
+        formatted_passages = []
+        for passage in passages:
+            formatted_passage = passage["text"]
+            if self.metadata_fields is not None:
+                metadata = self.metadata_separator.join(
+                    [passage.get(field, "") for field in self.metadata_fields]
+                )
+                formatted_passage = (
+                    f"{formatted_passage}{self.metadata_separator}{metadata}"
+                )
+            formatted_passages.append(formatted_passage)
 
-        # torch.from_numpy(
-        #     np.frombuffer(sample["tokens"], dtype=np.int64)[: self.max_seq_len].copy()
-        # )
+        # remove duplicates
+        formatted_passages = list(set(formatted_passages))
+        return formatted_passages
 
     # How to tokenize a text sample to a token sample
     def _tokenize(self, sample: Mapping) -> Dict[str, List[int]]:
         # remove duplicates and limit the number of passages
-        positives = list(set([p["text"] for p in sample["positive_ctxs"]]))
+        # positives = list(set([p["text"] for p in sample["positive_ctxs"]]))
+        positives = self._get_passages(sample["positive_ctxs"])
         if self.max_positives != -1:
             positives = positives[: self.max_positives]
 
-        negatives = list(set([n["text"] for n in sample["negative_ctxs"]]))
+        # negatives = list(set([n["text"] for n in sample["negative_ctxs"]]))
+        negatives = self._get_passages(sample["negative_ctxs"])
         if self.max_negatives != -1:
             negatives = negatives[: self.max_negatives]
 
-        hard_negatives = list(set([h["text"] for h in sample["hard_negative_ctxs"]]))
+        # hard_negatives = list(set([h["text"] for h in sample["hard_negative_ctxs"]]))
+        hard_negatives = self._get_passages(sample["hard_negative_ctxs"])
         if self.max_hard_negatives != -1:
             hard_negatives = hard_negatives[: self.max_hard_negatives]
 
         text_pair = sample.get("doc_topic", None)
-        question = self.tokenizer(
+        question = self.question_tokenizer(
             sample["question"],
             text_pair=text_pair,
             max_length=self.max_question_length,
@@ -320,7 +330,7 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
         if self.max_passages != -1:
             passage = passage[: self.max_passages]
 
-        passage = self.tokenizer(
+        passage = self.passage_tokenizer(
             passage, max_length=self.max_passage_length, truncation=True
         )
 
@@ -339,7 +349,7 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
         return output
 
     @staticmethod
-    def _preprocess_to_md(
+    def _preprocess_to_mds(
         source: str | os.PathLike,
         tokenizer_fn: callable = None,
         cache_dir: str | os.PathLike | None = None,
@@ -404,19 +414,19 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
         #         if tokenizer_fn is not None:
         #             batch = tokenizer_fn(batch)
         #         yield batch
-                # batch has key: list of values, we want to yield a list of dicts
-                # keys = list(batch.keys())
-                # current_bs = len(batch[keys[0]])
-                # for idx in range(current_bs):
-                #     yield {k: v[idx] if isinstance(v, list) else v for k, v in batch.items()}
+        # batch has key: list of values, we want to yield a list of dicts
+        # keys = list(batch.keys())
+        # current_bs = len(batch[keys[0]])
+        # for idx in range(current_bs):
+        #     yield {k: v[idx] if isinstance(v, list) else v for k, v in batch.items()}
 
         if tokenizer_fn is None:
             columns = {
                 "id": "str",
                 "question": "str",
-                "positive_ctxs": "json",
-                "negative_ctxs": "json",
-                "hard_negative_ctxs": "json",
+                "positive_ctxs": "pkl",
+                "negative_ctxs": "pkl",
+                "hard_negative_ctxs": "pkl",
             }
         else:
             columns = {
@@ -429,11 +439,7 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
                 "hard_negatives": "pkl",
             }
         with MDSWriter(columns=columns, out=str(cache_path)) as out:
-            for sample in tqdm(
-                # generate_samples(dataloader, tokenizer_fn=tokenizer_fn),
-                dataset,
-                desc=f"Converting {source} to MDS",
-            ):
+            for sample in tqdm(dataset, desc=f"Converting {source} to MDS"):
                 out.write(sample)
 
         return str(cache_path)

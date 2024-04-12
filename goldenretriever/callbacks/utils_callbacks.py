@@ -9,7 +9,7 @@ import torch
 
 from goldenretriever.callbacks.base import NLPTemplateCallback, PredictionCallback
 from goldenretriever.common.log import get_logger
-from goldenretriever.pytorch_modules.hf import GoldenRetrieverModel
+from goldenretriever.pytorch.hf import GoldenRetrieverModel
 
 logger = get_logger(__name__, level=logging.INFO)
 

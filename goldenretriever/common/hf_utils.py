@@ -8,8 +8,12 @@ import datasets as hf_datasets
 
 
 def build_tokenizer(
-    tokenizer_name: str, tokenizer_kwargs: Dict[str, Any]
+    tokenizer_name: str, tokenizer_kwargs: Dict[str, Any] | None = None
 ) -> PreTrainedTokenizerBase:
+
+    if tokenizer_kwargs is None:
+        tokenizer_kwargs = {}
+
     os.environ["TRANSFORMERS_NO_ADVISORY_WARNINGS"] = "1"
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
@@ -27,10 +31,7 @@ def build_tokenizer(
     # HuggingFace does not respect the model_max_length kwarg, and overrides it with
     # min(kwargs['model_max_length'], original_config['model_max_length']), so we
     # explicitly set it here
-    tokenizer.model_max_length = tokenizer_kwargs.get(
-        "model_max_length",
-        int(1e30),
-    )
+    tokenizer.model_max_length = tokenizer_kwargs.get("model_max_length", int(1e30))
 
     if dist.is_available() and dist.is_initialized() and dist.get_world_size() > 1:
         if dist.get_local_rank() == 0:

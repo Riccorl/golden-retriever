@@ -13,6 +13,7 @@ import transformers as tr
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+from goldenretriever.common.hf_utils import build_tokenizer
 from goldenretriever.common.log import get_logger
 from goldenretriever.common.model_inputs import ModelInputs
 from goldenretriever.common.torch_utils import get_autocast_context
@@ -22,8 +23,8 @@ from goldenretriever.data.labels import Labels
 from goldenretriever.indexers.base import BaseDocumentIndex
 from goldenretriever.indexers.document import Document
 from goldenretriever.indexers.inmemory import InMemoryDocumentIndex
-from goldenretriever.pytorch_modules import RetrievedSample
-from goldenretriever.pytorch_modules.hf import GoldenRetrieverModel
+from goldenretriever.pytorch import RetrievedSample
+from goldenretriever.pytorch.hf import GoldenRetrieverModel
 
 logger = get_logger(__name__, level=logging.INFO)
 
@@ -39,29 +40,57 @@ class GoldenRetrieverOutput(tr.file_utils.ModelOutput):
 
 
 class GoldenRetriever(torch.nn.Module):
+    """
+    The retriever model.
+
+    Args:
+        question_encoder (`str | tr.PreTrainedModel `):
+            The question encoder model.
+        loss_type (`torch.nn.Module | None`):
+            The loss function.
+        passage_encoder (`Optional[str | tr.PreTrainedModel `):
+            The passage encoder model.
+        document_index (`Optional[Union[str, BaseDocumentIndex]`):
+            The document index.
+        question_tokenizer (`Optional[Union[str, tr.PreTrainedTokenizer]`):
+            The question tokenizer.
+        passage_tokenizer (`Optional[Union[str, tr.PreTrainedTokenizer]`):
+            The passage tokenizer.
+        device (`Optional[Union[str, torch.device]`):
+            The device to use.
+        precision (`Optional[Union[str, int]`):
+            The precision to use.
+        index_precision (`Optional[Union[str, int]`):
+            The precision to use for the indexer.
+        index_device (`Optional[Union[str, torch.device]`):
+            The device to use for the indexer.
+        use_hf_model (`bool`):
+            Whether to use the HuggingFace model.
+    """
+
     def __init__(
         self,
-        question_encoder: Union[str, tr.PreTrainedModel],
-        loss_type: Optional[torch.nn.Module] = None,
-        passage_encoder: Optional[Union[str, tr.PreTrainedModel]] = None,
-        document_index: Optional[Union[str, BaseDocumentIndex]] = None,
-        question_tokenizer: Optional[Union[str, tr.PreTrainedTokenizer]] = None,
-        passage_tokenizer: Optional[Union[str, tr.PreTrainedTokenizer]] = None,
-        device: Optional[Union[str, torch.device]] = "cpu",
-        precision: Optional[Union[str, int]] = None,
-        index_precision: Optional[Union[str, int]] = None,
-        index_device: Optional[Union[str, torch.device]] = None,
+        question_encoder: str | tr.PreTrainedModel,
+        loss_type: torch.nn.Module | None = None,
+        passage_encoder: str | tr.PreTrainedModel | None = None,
+        document_index: str | BaseDocumentIndex | None = None,
+        question_tokenizer: str | tr.PreTrainedTokenizer | None = None,
+        passage_tokenizer: str | tr.PreTrainedTokenizer | None = None,
+        device: str | torch.device | None = "cpu",
+        precision: str | int | None = None,
+        index_precision: str | int | None = None,
+        index_device: str | torch.device | None = None,
+        use_hf_model: bool = False,
         *args,
         **kwargs,
     ):
         super().__init__()
 
+        model_class = GoldenRetrieverModel if not use_hf_model else tr.AutoModel
         self.passage_encoder_is_question_encoder = False
         # question encoder model
         if isinstance(question_encoder, str):
-            question_encoder = GoldenRetrieverModel.from_pretrained(
-                question_encoder, **kwargs
-            )
+            question_encoder = model_class.from_pretrained(question_encoder, **kwargs)
         self.question_encoder = question_encoder
         if passage_encoder is None:
             # if no passage encoder is provided,
@@ -70,9 +99,7 @@ class GoldenRetriever(torch.nn.Module):
             # keep track of the fact that the passage encoder is the same as the question encoder
             self.passage_encoder_is_question_encoder = True
         if isinstance(passage_encoder, str):
-            passage_encoder = GoldenRetrieverModel.from_pretrained(
-                passage_encoder, **kwargs
-            )
+            passage_encoder = model_class.from_pretrained(passage_encoder, **kwargs)
         # passage encoder model
         self.passage_encoder = passage_encoder
 
@@ -105,12 +132,12 @@ class GoldenRetriever(torch.nn.Module):
 
     def forward(
         self,
-        questions: Optional[Dict[str, torch.Tensor]] = None,
-        passages: Optional[Dict[str, torch.Tensor]] = None,
-        labels: Optional[torch.Tensor] = None,
-        question_encodings: Optional[torch.Tensor] = None,
-        passages_encodings: Optional[torch.Tensor] = None,
-        passages_per_question: Optional[List[int]] = None,
+        questions: Dict[str, torch.Tensor] | None = None,
+        passages: Dict[str, torch.Tensor] | None = None,
+        labels: torch.Tensor | None = None,
+        question_encodings: torch.Tensor | None = None,
+        passages_encodings: torch.Tensor | None = None,
+        passages_per_question: List[int] | None = None,
         return_loss: bool = False,
         return_encodings: bool = False,
         *args,
@@ -207,7 +234,7 @@ class GoldenRetriever(torch.nn.Module):
         collate_fn: Optional[Callable] = None,
         force_reindex: bool = False,
         compute_on_cpu: bool = False,
-        precision: Optional[Union[str, int]] = None,
+        precision: str | int | None = None,
         *args,
         **kwargs,
     ):
@@ -227,7 +254,7 @@ class GoldenRetriever(torch.nn.Module):
                 Whether to force reindexing even if the passages are already indexed.
             compute_on_cpu (`bool`):
                 Whether to move the index to the CPU after the indexing.
-            precision (`Optional[Union[str, int]]`):
+            precision (`str | int | None`):
                 The precision to use for the model.
         """
         if self.document_index is None:
@@ -255,12 +282,12 @@ class GoldenRetriever(torch.nn.Module):
         self,
         text: Optional[Union[str, List[str]]] = None,
         text_pair: Optional[Union[str, List[str]]] = None,
-        input_ids: Optional[torch.Tensor] = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        token_type_ids: Optional[torch.Tensor] = None,
+        input_ids: torch.Tensor | None = None,
+        attention_mask: torch.Tensor | None = None,
+        token_type_ids: torch.Tensor | None = None,
         k: int | None = None,
         max_length: int | None = None,
-        precision: Optional[Union[str, int]] = None,
+        precision: str | int | None = None,
         collate_fn: Optional[Callable] = None,
         batch_size: int | None = None,
         num_workers: int = 4,
@@ -285,7 +312,7 @@ class GoldenRetriever(torch.nn.Module):
                 The number of top passages to retrieve.
             max_length (`int | None`):
                 The maximum length of the questions.
-            precision (`Optional[Union[str, int]]`):
+            precision (`str | int | None`):
                 The precision to use for the model.
             collate_fn (`Callable`):
                 The collate function to use for the retrieval.
@@ -522,16 +549,23 @@ class GoldenRetriever(torch.nn.Module):
             == self.question_encoder.config.name_or_path
         ):
             if not self._question_tokenizer:
-                self._question_tokenizer = tr.AutoTokenizer.from_pretrained(
+                # self._question_tokenizer = tr.AutoTokenizer.from_pretrained(
+                #     self.question_encoder.config.name_or_path
+                # )
+                self._question_tokenizer = build_tokenizer(
                     self.question_encoder.config.name_or_path
                 )
             self._passage_tokenizer = self._question_tokenizer
             return self._question_tokenizer
 
         if not self._question_tokenizer:
-            self._question_tokenizer = tr.AutoTokenizer.from_pretrained(
+            # self._question_tokenizer = tr.AutoTokenizer.from_pretrained(
+            #     self.question_encoder.config.name_or_path
+            # )
+            self._question_tokenizer = build_tokenizer(
                 self.question_encoder.config.name_or_path
             )
+
         return self._question_tokenizer
 
     @property
@@ -547,15 +581,21 @@ class GoldenRetriever(torch.nn.Module):
             == self.passage_encoder.config.name_or_path
         ):
             if not self._question_tokenizer:
-                self._question_tokenizer = tr.AutoTokenizer.from_pretrained(
+                # self._question_tokenizer = tr.AutoTokenizer.from_pretrained(
+                #     self.question_encoder.config.name_or_path
+                # )
+                self._question_tokenizer = build_tokenizer(
                     self.question_encoder.config.name_or_path
                 )
             self._passage_tokenizer = self._question_tokenizer
             return self._passage_tokenizer
 
         if not self._passage_tokenizer:
-            self._passage_tokenizer = tr.AutoTokenizer.from_pretrained(
-                self.passage_encoder.config.name_or_path
+            # self._passage_tokenizer = tr.AutoTokenizer.from_pretrained(
+            #     self.passage_encoder.config.name_or_path
+            # )
+            self._passage_tokenizer = build_tokenizer(
+                self._passage_tokenizer.config.name_or_path
             )
         return self._passage_tokenizer
 

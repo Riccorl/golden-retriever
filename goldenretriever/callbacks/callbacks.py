@@ -16,10 +16,10 @@ from tqdm import tqdm
 from goldenretriever.callbacks.base import NLPTemplateCallback
 from goldenretriever.common.log import get_logger
 from goldenretriever.common.model_inputs import ModelInputs
-from goldenretriever.composer_modules.mosaic_module import GoldenRetrieverComposerModule
+from goldenretriever.composer.model import GoldenRetrieverComposerModule
 from goldenretriever.data.utils import HardNegativesManager
 from goldenretriever.indexers.base import BaseDocumentIndex
-from goldenretriever.pytorch_modules.model import GoldenRetriever
+from goldenretriever.pytorch.model import GoldenRetriever
 
 program_logger = get_logger(__name__, level=logging.INFO)
 
@@ -128,11 +128,11 @@ class PredictionCallback(Callback):
         dataset = dataloader.dataset
         # get the tokenizer
         # tokenizer = retriever.question_tokenizer
-        tokenizer = dataset.tokenizer
+        passage_tokenizer = dataset.passage_tokenizer
 
         def collate_fn(x):
             return ModelInputs(
-                tokenizer(
+                passage_tokenizer(
                     x,
                     truncation=True,
                     padding=True,
@@ -323,8 +323,7 @@ class HardNegativeMiningCallback(PredictionCallback):
         # save the current epoch of the training
         current_train_epoch = state.timestamp.epoch
         # get the tokenizer
-        # tokenizer = retriever.question_tokenizer  # dataset.tokenizer
-        tokenizer = dataset.tokenizer
+        passage_tokenizer = dataset.passage_tokenizer
         # restore the state of the dataset
         self.dataloader.dataset.load_state_dict(
             state.train_dataloader.dataset.state_dict(
@@ -349,7 +348,7 @@ class HardNegativeMiningCallback(PredictionCallback):
 
         def collate_fn(x):
             return ModelInputs(
-                tokenizer(
+                passage_tokenizer(
                     x,
                     truncation=True,
                     padding=True,
@@ -480,7 +479,7 @@ class HardNegativeMiningCallback(PredictionCallback):
         # HardNegativesManager is a singleton, so we need
         # to reset it before adding new hard negatives
         hn_manager = HardNegativesManager(
-            tokenizer=tokenizer,
+            tokenizer=passage_tokenizer,
             max_length=dataset.max_passage_length,
         )
         hn_manager.reset()

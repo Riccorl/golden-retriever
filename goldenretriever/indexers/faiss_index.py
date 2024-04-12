@@ -18,8 +18,8 @@ from goldenretriever.data.base.datasets import BaseDataset
 from goldenretriever.indexers.base import BaseDocumentIndex
 from goldenretriever.indexers.document import Document, DocumentStore
 from goldenretriever.trainer import PRECISION_MAP
-from goldenretriever.pytorch_modules import RetrievedSample
-from goldenretriever.pytorch_modules.model import GoldenRetriever
+from goldenretriever.pytorch import RetrievedSample
+from goldenretriever.pytorch.model import GoldenRetriever
 
 from composer.utils import dist
 

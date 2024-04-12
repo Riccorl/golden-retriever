@@ -13,11 +13,7 @@ log = logging.getLogger(__name__)
 
 class HardNegativeAlgorithm(Algorithm):
 
-    def __init__(
-        self,
-        tokenizer,
-        max_length: int,
-    ):
+    def __init__(self, tokenizer, max_length: int):
         self.tokenizer = tokenizer
         self.max_length = max_length
         self.hn_manager = HardNegativesManager(tokenizer, max_length=max_length)
@@ -26,11 +22,6 @@ class HardNegativeAlgorithm(Algorithm):
         return event in [Event.BEFORE_FORWARD]
 
     def apply(self, event: Event, state: State, logger: Logger) -> None:
-        # update hn_manager
-        # self.hn_manager = HardNegativesManager(
-        #     self.tokenizer, max_length=self.max_length
-        # )
-
         # get the hard negatives
         batch = state.batch
         sample_idxs = batch["sample_idx"]

@@ -13,7 +13,7 @@ from goldenretriever.data.base.datasets import BaseDataset
 from goldenretriever.data.labels import Labels
 from goldenretriever.indexers.base import BaseDocumentIndex
 from goldenretriever.trainer import PRECISION_MAP
-from goldenretriever.pytorch_modules import RetrievedSample
+from goldenretriever.pytorch import RetrievedSample
 from voyager import Index, Space
 
 logger = get_logger(__name__, level=logging.INFO)
