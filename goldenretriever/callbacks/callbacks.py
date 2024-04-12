@@ -21,7 +21,7 @@ from goldenretriever.data.utils import HardNegativesManager
 from goldenretriever.indexers.base import BaseDocumentIndex
 from goldenretriever.pytorch.model import GoldenRetriever
 
-program_logger = get_logger(__name__, level=logging.INFO)
+log = get_logger(__name__, level=logging.INFO)
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
@@ -70,22 +70,26 @@ class PredictionCallback(Callback):
                 )
 
     def run_event(self, event: Event, state: State, logger: Logger):
+        # if dist.get_global_rank() == 0:
         if event in self.events:
             # if state.get_elapsed_duration(
             # ) is not None and self.check_interval(state, event) and self.last_generate_batch != state.timestamp.batch:
             start = time.time()
             predictions = self(event, state, logger)
             # run the inner callbacks
-            # TODO: check if we need rank 0 only
-            for callback in self.metric_callbacks:
-                callback(
-                    state=state,
-                    logger=logger,
-                    predictions=predictions,
-                    callback=self,
-                )
+            with dist.run_local_rank_zero_first():
+                # if dist.get_global_rank() == 0:
+                for callback in self.metric_callbacks:
+                    callback(
+                        state=state,
+                        logger=logger,
+                        predictions=predictions,
+                        callback=self,
+                    )
+
             diff = time.time() - start
-            program_logger.info(f"{self.__class__.__name__} ran in {diff} seconds.")
+            log.info(f"{self.__class__.__name__} ran in {diff} seconds.")
+        # dist.barrier()
 
     @torch.no_grad()
     def __call__(
@@ -109,7 +113,7 @@ class PredictionCallback(Callback):
         """
         self.last_generate_batch = state.timestamp.batch
 
-        program_logger.info(f"Computing predictions for event `{event}`")
+        log.info(f"Computing predictions for event `{event}`")
         # get model from state
         composer_model: GoldenRetrieverComposerModule = (
             state.model.module if state.is_model_ddp else state.model
@@ -159,7 +163,7 @@ class PredictionCallback(Callback):
 
         # you never know :)
         retriever.eval()
-        program_logger.info(
+        log.info(
             f"Computing passage embeddings for dataset {state.dataloader_label}"
         )
         retriever.index(
@@ -294,9 +298,16 @@ class HardNegativeMiningCallback(PredictionCallback):
     ) -> None:
         if event not in self.events:
             return
+        
+        # syncronize the state to make sure all the processes are at the same point
+        # we need this to make sure that metrics are available for all the processes
+        # dist.barrier()
+        # dist.all_gather_object(state.eval_metrics)
+
+        # if dist.get_global_rank() != 0:
 
         if self.metrics_to_monitor not in state.eval_metrics:
-            logger.warning(
+            log.warning(
                 f"Metric `{self.metrics_to_monitor}` not found in trainer.logged_metrics. "
                 f"Available metrics: {state.eval_metrics.keys()}"
             )
@@ -305,7 +316,7 @@ class HardNegativeMiningCallback(PredictionCallback):
         if state.eval_metrics[self.metrics_to_monitor] < self.threshold:
             return {}
 
-        program_logger.info(f"Computing hard negatives predictions for event `{event}`")
+        log.info(f"Computing hard negatives predictions for event `{event}`")
         # get model from state
         composer_model: GoldenRetrieverComposerModule = (
             state.model.module if state.is_model_ddp else state.model
@@ -375,7 +386,7 @@ class HardNegativeMiningCallback(PredictionCallback):
         # you never know :)
         retriever.eval()
 
-        program_logger.info(
+        log.info(
             f"Computing passage embeddings for dataset {state.dataloader_label}"
         )
         # retriever.index(
@@ -450,14 +461,14 @@ class HardNegativeMiningCallback(PredictionCallback):
                 n_samples_to_augment is not None
                 and batch_augmented >= n_samples_to_augment
             ):
-                program_logger.info(
+                log.info(
                     f"Augmented next iteration batches ({batch_augmented}). "
                     "Stopping the hard negative mining."
                 )
                 break
 
         # dataset.hn_manager = None
-        program_logger.info(f"Computing hard negatives for epoch {current_train_epoch}")
+        log.info(f"Computing hard negatives for epoch {current_train_epoch}")
         # predictions is a dict with the dataloader index as key and the predictions as value
         # since we only have one dataloader, we can get the predictions directly
         # predictions = list(predictions.values())[0]
@@ -485,6 +496,9 @@ class HardNegativeMiningCallback(PredictionCallback):
         hn_manager.reset()
         hn_manager.add(hard_negatives_list.keys(), hard_negatives_list.values())
         hn_manager.tokenize()
+
+        # syncronize again to pass the hard negatives to all the processes
+        # dist.barrier()
 
         composer_model.train(mode=original_mode)
         return predictions

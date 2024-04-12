@@ -5,7 +5,7 @@ from composer import Logger, State
 import torch
 from sklearn.metrics import label_ranking_average_precision_score
 
-from goldenretriever.callbacks.base import DEFAULT_STAGES, NLPTemplateCallback
+from goldenretriever.callbacks.base import NLPTemplateCallback
 from goldenretriever.common.log import get_logger
 
 log = get_logger(__name__, level=logging.INFO)
@@ -161,11 +161,11 @@ class AvgRankingEvaluationCallback(NLPTemplateCallback):
             :obj:`Dict`: The computed metrics.
         """
         if not predictions:
-            logger.warning("No predictions to compute the AVG Ranking metrics.")
+            log.warning("No predictions to compute the AVG Ranking metrics.")
             return {}
 
         if self.verbose:
-            logger.info(f"Computing AVG Ranking@{self.k}")
+            log.info(f"Computing AVG Ranking@{self.k}")
 
         # metrics to return
         metrics = {}

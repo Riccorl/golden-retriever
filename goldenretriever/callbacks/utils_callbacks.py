@@ -8,8 +8,9 @@ from composer import Callback, Logger, State
 from composer.callbacks import CheckpointSaver
 import torch
 
-from goldenretriever.callbacks.base import NLPTemplateCallback, PredictionCallback
+from goldenretriever.callbacks.base import NLPTemplateCallback
 from goldenretriever.common.log import get_logger
+from goldenretriever.composer.model import GoldenRetrieverComposerModule
 from goldenretriever.pytorch.hf import GoldenRetrieverModel
 
 log = get_logger(__name__, level=logging.INFO)
@@ -21,7 +22,9 @@ class FreeUpIndexerVRAMCallback(Callback):
 
         # remove the index from the GPU memory
         # remove the embeddings from the GPU memory first
-        composer_model = state.model
+        composer_model: GoldenRetrieverComposerModule = (
+            state.model.module if state.is_model_ddp else state.model
+        )
         if composer_model.model.document_index is not None:
             if composer_model.model.document_index.embeddings is not None:
                 try:
@@ -38,7 +41,7 @@ class FreeUpIndexerVRAMCallback(Callback):
         gc.collect()
         torch.cuda.empty_cache()
 
-    def eval_end(self, state: State, logger: Logger, *args, **kwargs) -> None:
+    def eval_after_all(self, state: State, logger: Logger, *args, **kwargs) -> None:
         return self(state)
 
     def fit_end(self, state: State, logger: Logger, *args, **kwargs) -> None:

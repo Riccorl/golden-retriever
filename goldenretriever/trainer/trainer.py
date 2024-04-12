@@ -777,21 +777,14 @@ class Trainer(FromConfig):
             `List[NLPTemplateCallback]`:
                 The list of callbacks to use for evaluation
         """
-        # prediction callback
-        # metrics_callbacks: List[NLPTemplateCallback] = [
-        #     RecallAtKEvaluationCallback(k, verbose=True) for k in self.top_k
-        # ]
-        # metrics_callbacks += [
-        #     AvgRankingEvaluationCallback(k, verbose=True) for k in self.top_k
-        # ]
-        # if save_predictions:
-        #     metrics_callbacks.append(SavePredictionsCallback())
         metrics_callbacks: List[NLPTemplateCallback] = [
             RecallAtKEvaluationCallback(k, verbose=True) for k in self.top_k
         ]
         metrics_callbacks += [
             AvgRankingEvaluationCallback(k, verbose=True) for k in self.top_k
         ]
+        # if save_predictions:
+        #     metrics_callbacks.append(SavePredictionsCallback())
         return metrics_callbacks
 
     def configure_hard_negatives_callback(self):
@@ -877,7 +870,7 @@ class Trainer(FromConfig):
         # set-up training specific callbacks
         self.callbacks_store = self.training_callbacks()
 
-        self.callbacks_store.append(FreeUpIndexerVRAMCallback())
+        # self.callbacks_store.append(FreeUpIndexerVRAMCallback())
 
         if self.trainer is None:
             logger.info("Instantiating the Trainer")

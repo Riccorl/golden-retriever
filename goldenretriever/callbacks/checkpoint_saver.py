@@ -390,6 +390,9 @@ class MetricCheckpointSaver(CheckpointSaver):  # noqa: D101
         return should_update_best_and_save
 
     def _save_monitor_checkpoint(self, state: State, logger: Logger):
+        # syncronize distributed training to get eval metric
+        dist.barrier()
+
         self.last_checkpoint_batch = state.timestamp.batch
 
         current = None  # monitor_candidates.get(self.monitor)

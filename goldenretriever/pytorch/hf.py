@@ -28,6 +28,7 @@ class GoldenRetrieverConfig(PretrainedConfig):
         use_cache=True,
         classifier_dropout=None,
         projection_dim=None,
+        add_pooling_layer=False,
         **kwargs,
     ):
         super().__init__(pad_token_id=pad_token_id, **kwargs)
@@ -48,13 +49,14 @@ class GoldenRetrieverConfig(PretrainedConfig):
         self.use_cache = use_cache
         self.classifier_dropout = classifier_dropout
         self.projection_dim = projection_dim
+        self.add_pooling_layer = add_pooling_layer
 
 
 class GoldenRetrieverModel(BertModel):
     config_class = GoldenRetrieverConfig
 
     def __init__(self, config, *args, **kwargs):
-        super().__init__(config)
+        super().__init__(config, add_pooling_layer=False, *args, **kwargs)
         self.layer_norm_layer = torch.nn.LayerNorm(
             config.hidden_size, eps=config.layer_norm_eps
         )
@@ -71,6 +73,10 @@ class GoldenRetrieverModel(BertModel):
         attention_mask = kwargs.get("attention_mask", None)
         model_outputs = super().forward(**kwargs)
         if attention_mask is None:
+            if self.config.add_pooling_layer is False:
+                raise ValueError(
+                    "The `attention_mask` is required when `add_pooling_layer` is False"
+                )
             pooler_output = model_outputs.pooler_output
         else:
             token_embeddings = model_outputs.last_hidden_state
