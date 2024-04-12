@@ -7,7 +7,6 @@ import composer
 import composer.callbacks
 import composer.optim
 import hydra
-import lightning as pl
 import omegaconf
 import torch
 from composer import (
@@ -41,10 +40,15 @@ from goldenretriever.callbacks.callbacks import (
     HardNegativeMiningCallback,
     PredictionCallback,
 )
-from goldenretriever.callbacks.callbacks import (
-    RecallAtKEvaluationCallback as ComposerRecallAtKEvaluationCallback,
-)
 from goldenretriever.callbacks.checkpoint_saver import MetricCheckpointSaver
+from goldenretriever.callbacks.evaluation_callbacks import (
+    AvgRankingEvaluationCallback,
+    RecallAtKEvaluationCallback,
+)
+from goldenretriever.callbacks.utils_callbacks import (
+    FreeUpIndexerVRAMCallback,
+    SaveRetrieverCallback,
+)
 from goldenretriever.common.from_config import FromConfig
 from goldenretriever.common.log import get_logger
 from goldenretriever.common.utils import to_config
@@ -783,7 +787,10 @@ class Trainer(FromConfig):
         # if save_predictions:
         #     metrics_callbacks.append(SavePredictionsCallback())
         metrics_callbacks: List[NLPTemplateCallback] = [
-            ComposerRecallAtKEvaluationCallback(k, verbose=True) for k in self.top_k
+            RecallAtKEvaluationCallback(k, verbose=True) for k in self.top_k
+        ]
+        metrics_callbacks += [
+            AvgRankingEvaluationCallback(k, verbose=True) for k in self.top_k
         ]
         return metrics_callbacks
 
@@ -832,7 +839,7 @@ class Trainer(FromConfig):
                 )
                 self.callbacks_store.append(self.latest_model_checkpoint_callback)
 
-            # self.callbacks_store.append(SaveRetrieverCallback())
+            self.callbacks_store.append(SaveRetrieverCallback())
         if self.early_stopping:
             self.early_stopping_callback = self.configure_early_stopping(
                 **self.early_stopping_kwargs
@@ -870,7 +877,7 @@ class Trainer(FromConfig):
         # set-up training specific callbacks
         self.callbacks_store = self.training_callbacks()
 
-        # self.callbacks_store.append(FreeUpIndexerVRAMCallback())
+        self.callbacks_store.append(FreeUpIndexerVRAMCallback())
 
         if self.trainer is None:
             logger.info("Instantiating the Trainer")

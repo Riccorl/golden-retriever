@@ -4,14 +4,100 @@ import os
 from pathlib import Path
 from typing import Any, Dict
 
-from composer import Logger, State
+from composer import Callback, Logger, State
+from composer.callbacks import CheckpointSaver
 import torch
 
 from goldenretriever.callbacks.base import NLPTemplateCallback, PredictionCallback
 from goldenretriever.common.log import get_logger
 from goldenretriever.pytorch.hf import GoldenRetrieverModel
 
-logger = get_logger(__name__, level=logging.INFO)
+log = get_logger(__name__, level=logging.INFO)
+
+
+class FreeUpIndexerVRAMCallback(Callback):
+    def __call__(self, state: State, *args, **kwargs) -> Any:
+        log.info("Freeing up GPU memory")
+
+        # remove the index from the GPU memory
+        # remove the embeddings from the GPU memory first
+        composer_model = state.model
+        if composer_model.model.document_index is not None:
+            if composer_model.model.document_index.embeddings is not None:
+                try:
+                    composer_model.model.document_index.embeddings.cpu()
+                except Exception:
+                    log.warning(
+                        "Could not move embeddings to CPU. Skipping freeing up VRAM."
+                    )
+                    pass
+            composer_model.model.document_index.embeddings = None
+
+        import gc
+
+        gc.collect()
+        torch.cuda.empty_cache()
+
+    def eval_end(self, state: State, logger: Logger, *args, **kwargs) -> None:
+        return self(state)
+
+    def fit_end(self, state: State, logger: Logger, *args, **kwargs) -> None:
+        return self(state)
+
+
+class SaveRetrieverCallback(Callback):
+    def __init__(
+        self,
+        saving_dir: str | os.PathLike | None = None,
+        verbose: bool = True,
+        *args,
+        **kwargs,
+    ):
+        super().__init__()
+        self.saving_dir = saving_dir
+        self.verbose = verbose
+        self.free_up_indexer_callback = FreeUpIndexerVRAMCallback()
+
+    @torch.no_grad()
+    def __call__(
+        self,
+        state: State,
+        logger: Logger,
+        *args,
+        **kwargs,
+    ):
+        # find the checkpoint callback
+        checkpoint_callback: CheckpointSaver | None = None
+        for callback in state.callbacks:
+            if isinstance(callback, CheckpointSaver):
+                checkpoint_callback = callback
+                break
+
+        if self.saving_dir is None and checkpoint_callback is None:
+            log.error(
+                "You need to specify an output directory (`saving_dir`) or a `CheckpointSaver` "
+                "callback to save the retriever. Skipping saving retriever."
+            )
+            return
+        if self.saving_dir is not None:
+            retriever_folder = Path(self.saving_dir)
+        else:
+            try:
+                retriever_folder = Path(checkpoint_callback.folder) / "retriever"
+            except Exception:
+                log.error(
+                    "You need to specify an output directory (`saving_dir`) or a `CheckpointSaver` "
+                    "callback to save the retriever. Skipping saving retriever."
+                )
+                return
+        retriever_folder.mkdir(exist_ok=True, parents=True)
+        if self.verbose:
+            log.info(f"Saving retriever to {retriever_folder}")
+        state.model.model.save_pretrained(retriever_folder)
+
+    def on_save_checkpoint(self, state: State, logger: Logger):
+        self(state, logger)
+        # self.free_up_indexer_callback(pl_module)
 
 
 # class SavePredictionsCallback(NLPTemplateCallback):
@@ -37,8 +123,8 @@ logger = get_logger(__name__, level=logging.INFO)
 #         **kwargs,
 #     ) -> dict:
 #         # write the predictions to a file inside the experiment folder
-#         if self.saving_dir is None and trainer.logger is None:
-#             logger.info(
+#         if self.saving_dir is None and state.logger is None:
+#             log.info(
 #                 "You need to specify an output directory (`saving_dir`) or a logger to save the predictions.\n"
 #                 "Skipping saving predictions."
 #             )
@@ -54,7 +140,7 @@ logger = get_logger(__name__, level=logging.INFO)
 #                         Path(trainer.logger.experiment.dir) / "predictions"
 #                     )
 #                 except Exception:
-#                     logger.info(
+#                     log.info(
 #                         "You need to specify an output directory (`saving_dir`) or a logger to save the predictions.\n"
 #                         "Skipping saving predictions."
 #                     )
@@ -65,7 +151,7 @@ logger = get_logger(__name__, level=logging.INFO)
 #                 / f"{datasets[dataloader_idx].name}_{dataloader_idx}.json"
 #             )
 #             if self.verbose:
-#                 logger.info(f"Saving predictions to {predictions_path}")
+#                 log.info(f"Saving predictions to {predictions_path}")
 #             with open(predictions_path, "w") as f:
 #                 for prediction in dataloader_predictions:
 #                     for k, v in prediction.items():
@@ -252,40 +338,3 @@ logger = get_logger(__name__, level=logging.INFO)
 #     ):
 #         self(trainer, pl_module)
 #         # self.free_up_indexer_callback(pl_module)
-
-
-# class SampleNegativesDatasetCallback(pl.Callback):
-#     def __init__(self, seed: int = 42, verbose: bool = True) -> None:
-#         super().__init__()
-#         self.seed = seed
-#         self.verbose = verbose
-
-#     def on_validation_epoch_end(self, trainer: pl.Trainer, *args, **kwargs):
-#         if self.verbose:
-#             f"Sampling negatives for train dataset at epoch {trainer.current_epoch}"
-#         trainer.datamodule.train_dataset.sample_dataset_negatives(
-#             seed=self.seed + trainer.current_epoch
-#         )
-
-
-# class SubsampleDataCallback(pl.Callback):
-#     def __init__(self, seed: int = 42, verbose: bool = True) -> None:
-#         super().__init__()
-#         self.seed = seed
-#         self.verbose = verbose
-
-#     def on_validation_epoch_start(self, trainer: pl.Trainer, *args, **kwargs):
-#         if self.verbose:
-#             f"Subsampling data for train dataset at epoch {trainer.current_epoch}"
-#         if trainer.state.stage == RunningStage.SANITY_CHECKING:
-#             return
-#         trainer.datamodule.train_dataset.subsample_data(
-#             seed=self.seed + trainer.current_epoch
-#         )
-
-#     def on_fit_start(self, trainer: pl.Trainer, *args, **kwargs):
-#         if self.verbose:
-#             f"Subsampling data for train dataset at epoch {trainer.current_epoch}"
-#         trainer.datamodule.train_dataset.subsample_data(
-#             seed=self.seed + trainer.current_epoch
-#         )

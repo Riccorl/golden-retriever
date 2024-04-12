@@ -15,7 +15,9 @@ def build_tokenizer(
         tokenizer_kwargs = {}
 
     os.environ["TRANSFORMERS_NO_ADVISORY_WARNINGS"] = "1"
-    os.environ["TOKENIZERS_PARALLELISM"] = "false"
+    os.environ["TOKENIZERS_PARALLELISM"] = tokenizer_kwargs.pop(
+        "TOKENIZERS_PARALLELISM", "false"
+    )
 
     signal_file_path = (
         f".node_{dist.get_node_rank()}_local_rank0_completed_tokenizer_setup"
