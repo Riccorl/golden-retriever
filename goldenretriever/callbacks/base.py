@@ -10,6 +10,7 @@ from torch.utils.data import DataLoader, Dataset
 
 from goldenretriever.common.log import get_logger
 from goldenretriever.data.base.datasets import BaseDataset
+from lightning.pytorch.utilities import rank_zero_only
 
 logger = get_logger()
 
@@ -72,29 +73,31 @@ class PredictionCallback(pl.Callback):
         # it should return the predictions
         raise NotImplementedError
 
+    # @rank_zero_only
     def on_validation_epoch_end(
         self, trainer: pl.Trainer, pl_module: pl.LightningModule
     ):
-        if trainer.global_rank == 0:
-            predictions = self(trainer, pl_module)
-            for callback in self.other_callbacks:
-                callback(
-                    trainer=trainer,
-                    pl_module=pl_module,
-                    callback=self,
-                    predictions=predictions,
-                )
+        # if trainer.global_rank == 0:
+        predictions = self(trainer, pl_module)
+        for callback in self.other_callbacks:
+            callback(
+                trainer=trainer,
+                pl_module=pl_module,
+                callback=self,
+                predictions=predictions,
+            )
 
+    # @rank_zero_only
     def on_test_epoch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule):
-        if trainer.global_rank == 0:
-            predictions = self(trainer, pl_module)
-            for callback in self.other_callbacks:
-                callback(
-                    trainer=trainer,
-                    pl_module=pl_module,
-                    callback=self,
-                    predictions=predictions,
-                )
+        # if trainer.global_rank == 0:
+        predictions = self(trainer, pl_module)
+        for callback in self.other_callbacks:
+            callback(
+                trainer=trainer,
+                pl_module=pl_module,
+                callback=self,
+                predictions=predictions,
+            )
 
     @staticmethod
     def _get_datasets_and_dataloaders(

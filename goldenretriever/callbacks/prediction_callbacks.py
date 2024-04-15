@@ -131,32 +131,35 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
             # you never know :)
             retriever.eval()
 
-            retriever.index(
-                batch_size=self.batch_size,
-                num_workers=self.num_workers,
-                max_length=current_dataset.max_passage_length,
-                collate_fn=collate_fn,
-                precision=self.precision,
-                compute_on_cpu=False,
-                force_reindex=force_reindex,
-            )
-
-            # create new dataloader
-            eval_dataloader = DataLoader(
-                    GoldenRetrieverStreamingDataset(
-                    name="aida_val",
-                    question_tokenizer=tokenizer,
-                    local="/home/ric/Projects/golden-retriever/data/dpr-like/el/mosaic/val",
-                    batch_size=32,
-                    predownload=64*64,
-                    shuffle_seed=42,
-                ),
-                batch_size=32,
-                num_workers=self.num_workers,
-                collate_fn=GoldenRetrieverCollator(tokenizer=tokenizer),
-                pin_memory=False,
-                shuffle=False,
-            )
+            if trainer.global_rank == 0:
+                retriever.index(
+                    batch_size=self.batch_size,
+                    num_workers=self.num_workers,
+                    max_length=current_dataset.max_passage_length,
+                    collate_fn=collate_fn,
+                    precision=self.precision,
+                    compute_on_cpu=False,
+                    force_reindex=force_reindex,
+                )
+            
+            trainer.strategy.barrier()
+            
+            # # create new dataloader
+            # eval_dataloader = DataLoader(
+            #         GoldenRetrieverStreamingDataset(
+            #         name="aida_val",
+            #         question_tokenizer=tokenizer,
+            #         local="/home/ric/Projects/golden-retriever/data/dpr-like/el/mosaic/val",
+            #         batch_size=32,
+            #         predownload=64*64,
+            #         shuffle_seed=42,
+            #     ),
+            #     batch_size=32,
+            #     num_workers=self.num_workers,
+            #     collate_fn=GoldenRetrieverCollator(tokenizer=tokenizer),
+            #     pin_memory=False,
+            #     shuffle=False,
+            # )
 
             # now compute the question embeddings and compute the top-k accuracy
             predictions = []
@@ -164,14 +167,11 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
             if trainer.global_rank == 0:
                 logger.info("Computing predictions")
                 for batch in tqdm(
-                    eval_dataloader,
+                    dataloader,
                     desc=f"Computing predictions for dataset {current_dataset.name}",
                     disable=trainer.global_rank != 0,
                 ):
-                    # print(batch)
-                    logger.debug(f"Moving batch to device {pl_module.device}")
                     batch = batch.to(pl_module.device)
-                    logger.debug(f"Batch moved to device {pl_module.device}")
                     # get the top-k indices
                     retriever_output = retriever.retrieve(
                         **batch.questions, k=self.k, precision=self.precision
@@ -219,10 +219,10 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                         )
                         predictions.append(prediction_output)
                 end = time.time()
-                if trainer.global_rank == 0:
-                    logger.info(f"Time to retrieve: {str(end - start)}")
+            # if trainer.global_rank == 0:
+                logger.info(f"Time to retrieve: {str(end - start)}")
 
-                dataloader_predictions[dataloader_idx] = predictions
+            dataloader_predictions[dataloader_idx] = predictions
 
             # if pl_module_original_device != pl_module.device:
             #     pl_module.to(pl_module_original_device)
