@@ -17,7 +17,7 @@ from goldenretriever.callbacks.prediction_callbacks import (
 )
 from goldenretriever.common.log import get_logger
 from goldenretriever.data.base.datasets import BaseDataset
-from goldenretriever.data.streaming_dataset import GoldenRetrieverCollator
+# from goldenretriever.data.streaming_dataset import GoldenRetrieverCollator
 from goldenretriever.data.utils import HardNegativesManager
 
 logger = get_logger(__name__, level=logging.INFO)

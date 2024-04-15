@@ -1,13 +1,17 @@
 from tqdm import tqdm
 from goldenretriever.common.log import get_logger
-from goldenretriever.data.streaming_dataset import StreamingGoldenRetrieverDataset
+# from goldenretriever.data.streaming_dataset import StreamingGoldenRetrieverDataset
 from goldenretriever.indexers.document import DocumentStore
 from goldenretriever.trainer import Trainer
 from goldenretriever import GoldenRetriever
 from goldenretriever.indexers.inmemory import InMemoryDocumentIndex
 from goldenretriever.data.datasets import AidaInBatchNegativesDataset
+import os
 
 logger = get_logger(__name__)
+
+
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 if __name__ == "__main__":
     # instantiate retriever
@@ -23,6 +27,25 @@ if __name__ == "__main__":
             precision="16",
         ),
     )
+
+    trainer = Trainer(
+        retriever=retriever,
+        train_dataset=None,
+        val_dataset=None,
+        # test_dataset=test_dataset,
+        num_workers=0,
+        max_steps=25_000,
+        # log_to_wandb=False,
+        wandb_online_mode=False,
+        wandb_project_name="golden-retriever-aida",
+        wandb_experiment_name="aida-e5-base-topics-from-blink",
+        max_hard_negatives_to_mine=0,
+        # strategy="ddp_find_unused_parameters_true",
+        # devices=2,
+        # accelerator="cuda",
+    )
+
+    trainer.train()
 
     # train_dataset = AidaInBatchNegativesDataset(
     #     name="aida_train",
@@ -82,22 +105,5 @@ if __name__ == "__main__":
     #     passage_batch_size=400,
     # )
     
-    trainer = Trainer(
-        retriever=retriever,
-        train_dataset=None,
-        val_dataset=None,
-        # test_dataset=test_dataset,
-        num_workers=4,
-        max_steps=25_000,
-        # log_to_wandb=False,
-        wandb_online_mode=False,
-        wandb_project_name="golden-retriever-aida",
-        wandb_experiment_name="aida-e5-base-topics-from-blink",
-        max_hard_negatives_to_mine=15,
-        strategy="ddp_find_unused_parameters_true",
-        devices=2,
-        # accelerator="cuda",
-    )
-
-    trainer.train()
+    
     # trainer.test()

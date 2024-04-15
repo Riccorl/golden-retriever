@@ -2,7 +2,8 @@ import os
 from copy import deepcopy
 from pathlib import Path
 from typing import List, Literal
-from goldenretriever.data.streaming_dataset import StreamingGoldenRetrieverDataset
+# from goldenretriever.data.streaming_dataset import StreamingGoldenRetrieverDataset
+from goldenretriever.data.lit_dataset import GoldenStreamingDataset
 from goldenretriever.trainer.utils import PRECISION_INPUT_STR_ALIAS_CONVERSION
 
 import hydra
@@ -309,11 +310,11 @@ class Trainer(FromConfig):
     def configure_lightning_datamodule(self, *args, **kwargs):
         # lightning data module declaration
         if self.val_dataset is not None and isinstance(
-            self.val_dataset, (GoldenRetrieverDataset, StreamingGoldenRetrieverDataset)
+            self.val_dataset, (GoldenRetrieverDataset, GoldenStreamingDataset)
         ):
             self.val_dataset = [self.val_dataset]
         if self.test_dataset is not None and isinstance(
-            self.test_dataset, (GoldenRetrieverDataset, StreamingGoldenRetrieverDataset)
+            self.test_dataset, (GoldenRetrieverDataset, GoldenStreamingDataset)
         ):
             self.test_dataset = [self.test_dataset]
 
@@ -705,7 +706,7 @@ class Trainer(FromConfig):
                 precision=PRECISION_INPUT_STR_ALIAS_CONVERSION.get(
                     self.precision, self.precision
                 ),
-                reload_dataloaders_every_n_epochs=self.reload_dataloaders_every_n_epochs,
+                # reload_dataloaders_every_n_epochs=self.reload_dataloaders_every_n_epochs,
                 callbacks=self.callbacks_store,
                 logger=self.wandb_logger,
                 # use_distributed_sampler=False,

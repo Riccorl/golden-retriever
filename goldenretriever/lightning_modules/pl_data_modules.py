@@ -2,6 +2,7 @@ from typing import Any, List, Optional, Sequence, Union
 
 import hydra
 import lightning as pl
+from litdata import StreamingDataLoader
 import torch
 from lightning.pytorch.utilities.types import EVAL_DATALOADERS
 from omegaconf import DictConfig
@@ -9,7 +10,10 @@ from torch.utils.data import DataLoader
 
 from goldenretriever.common.log import get_logger
 from goldenretriever.data.datasets import GoldenRetrieverDataset
-from goldenretriever.data.streaming_dataset import GoldenRetrieverCollator, StreamingGoldenRetrieverDataset
+
+# from goldenretriever.data.streaming_dataset import GoldenRetrieverCollator, StreamingGoldenRetrieverDataset
+from goldenretriever.data.lit_dataset import GoldenStreamingDataset
+from goldenretriever.data.streaming_dataset import GoldenRetrieverCollator, GoldenRetrieverStreamingDataset
 from goldenretriever.data.utils import GoldenDistributedSampler
 
 logger = get_logger()
@@ -60,24 +64,32 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
             #         hydra.utils.instantiate(dataset_cfg)
             #         for dataset_cfg in self.datasets.val
             #     ]
-            self.train_dataset = StreamingGoldenRetrieverDataset(
+            self.train_dataset = GoldenRetrieverStreamingDataset(
                 name="aida_train",
-                tokenizer=self.tokenizer,
-                local="data/dpr-like/el/mosaic/train",
-                split="train",
-                question_batch_size=32,
-                passage_batch_size=80,
+                question_tokenizer=self.tokenizer,
+                local="/home/ric/Projects/golden-retriever/data/dpr-like/el/mosaic/train",
+                batch_size=32,
                 predownload=64*64,
+                shuffle_seed=42,
             )
-            self.val_dataset = StreamingGoldenRetrieverDataset(
+            # self.train_dataset = GoldenStreamingDataset(
+            #     name="streaming_train",
+            #     question_tokenizer=self.tokenizer,
+            #     input_dir="/home/ric/Projects/golden-retriever/data/dpr-like/el/litdata/train",
+            # )
+            self.val_dataset = GoldenRetrieverStreamingDataset(
                 name="aida_val",
-                tokenizer=self.tokenizer,
-                local="data/dpr-like/el/mosaic/val",
-                split="train",
-                question_batch_size=32,
-                passage_batch_size=80,
+                question_tokenizer=self.tokenizer,
+                local="/home/ric/Projects/golden-retriever/data/dpr-like/el/mosaic/val",
+                batch_size=32,
                 predownload=64*64,
+                shuffle_seed=42,
             )
+            # self.val_dataset = GoldenStreamingDataset(
+            #     name="streaming_val",
+            #     question_tokenizer=self.tokenizer,
+            #     input_dir="/home/ric/Projects/golden-retriever/data/dpr-like/el/litdata/val",
+            # )
             self.val_datasets = [self.val_dataset]
         if stage == "test":
             if self.test_datasets is None:
@@ -93,13 +105,13 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
             # torch_dataset,
             self.train_dataset,
             shuffle=False,
-            batch_size=64,
+            batch_size=32,
             num_workers=self.num_workers.train,
             pin_memory=False,
-            prefetch_factor=2,
+            # prefetch_factor=2,
             # persistent_workers=True,
             # collate_fn=lambda x: x,
-            collate_fn=GoldenRetrieverCollator(tokenizer=self.train_dataset.tokenizer),
+            collate_fn=GoldenRetrieverCollator(tokenizer=self.train_dataset.question_tokenizer),
             # user a custom distributed sampler
             # sampler=GoldenDistributedSampler
         )
@@ -113,13 +125,13 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
                     # torch_dataset,
                     dataset,
                     shuffle=False,
-                    batch_size=64,
+                    batch_size=32,
                     num_workers=self.num_workers.val,
                     pin_memory=False,
-                    prefetch_factor=2,
+                    # prefetch_factor=2,
                     # persistent_workers=True,
                     # collate_fn=lambda x: x,
-                    collate_fn=GoldenRetrieverCollator(tokenizer=dataset.tokenizer),
+                    collate_fn=GoldenRetrieverCollator(tokenizer=dataset.question_tokenizer),
                     # sampler=GoldenDistributedSampler
                 )
             )

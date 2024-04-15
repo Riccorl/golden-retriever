@@ -191,7 +191,7 @@ def main(args: Namespace) -> None:
     optimize(
         fn=lambda x: x,
         inputs=inputs,  # Provide any inputs. The fn is applied on each item.
-        output_dir="/home/ric/Projects/golden-retriever/data/dpr-like/el/litdata",  # The directory where the optimized data are stored.
+        output_dir="/home/ric/Projects/golden-retriever/data/dpr-like/el/litdata/val",  # The directory where the optimized data are stored.
         num_workers=1,  # The number of workers. The inputs are distributed among them.
         chunk_size=10_000,  # The number of inputs per chunk.
         # chunk_bytes="64MB",  # The maximum number of bytes to write into a data chunk.

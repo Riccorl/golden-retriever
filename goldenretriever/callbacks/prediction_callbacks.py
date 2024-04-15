@@ -15,6 +15,7 @@ from goldenretriever.common.log import get_logger
 from goldenretriever.common.model_inputs import ModelInputs
 from goldenretriever.data.base.datasets import BaseDataset
 from goldenretriever.data.datasets import GoldenRetrieverDataset
+from goldenretriever.data.streaming_dataset import GoldenRetrieverCollator, GoldenRetrieverStreamingDataset
 from goldenretriever.indexers.base import BaseDocumentIndex
 from goldenretriever.lightning_modules.pl_modules import GoldenRetrieverPLModule
 from goldenretriever.pytorch_modules.model import GoldenRetriever
@@ -98,7 +99,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                     f"Computing passage embeddings for dataset {current_dataset.name}"
                 )
 
-            tokenizer = current_dataset.tokenizer
+            tokenizer = current_dataset.passage_tokenizer
 
             def collate_fn(x):
                 return ModelInputs(
@@ -140,11 +141,28 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                 force_reindex=force_reindex,
             )
 
+            # create new dataloader
+            eval_dataloader = DataLoader(
+                    GoldenRetrieverStreamingDataset(
+                    name="aida_val",
+                    question_tokenizer=tokenizer,
+                    local="/home/ric/Projects/golden-retriever/data/dpr-like/el/mosaic/val",
+                    batch_size=32,
+                    predownload=64*64,
+                    shuffle_seed=42,
+                ),
+                batch_size=32,
+                num_workers=0,
+                collate_fn=GoldenRetrieverCollator(tokenizer=tokenizer),
+                pin_memory=False,
+                shuffle=False,
+            )
+
             # now compute the question embeddings and compute the top-k accuracy
             predictions = []
             start = time.time()
             for batch in tqdm(
-                dataloader,
+                eval_dataloader,
                 desc=f"Computing predictions for dataset {current_dataset.name}",
                 disable=trainer.global_rank != 0,
             ):
