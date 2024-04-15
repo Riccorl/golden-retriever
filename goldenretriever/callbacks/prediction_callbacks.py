@@ -152,7 +152,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                     shuffle_seed=42,
                 ),
                 batch_size=32,
-                num_workers=0,
+                num_workers=self.num_workers,
                 collate_fn=GoldenRetrieverCollator(tokenizer=tokenizer),
                 pin_memory=False,
                 shuffle=False,
@@ -161,67 +161,72 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
             # now compute the question embeddings and compute the top-k accuracy
             predictions = []
             start = time.time()
-            for batch in tqdm(
-                eval_dataloader,
-                desc=f"Computing predictions for dataset {current_dataset.name}",
-                disable=trainer.global_rank != 0,
-            ):
-                # print(batch)
-                batch = batch.to(pl_module.device)
-                # get the top-k indices
-                retriever_output = retriever.retrieve(
-                    **batch.questions, k=self.k, precision=self.precision
-                )
-                # compute recall at k
-                for batch_idx, retrieved_samples in enumerate(retriever_output):
-                    # get the positive passages
-                    gold_passages = batch["positives"][batch_idx]
-                    # get the index of the gold passages in the retrieved passages
-                    gold_passage_indices = []
-                    for passage in gold_passages:
-                        try:
-                            gold_passage_indices.append(
-                                retriever.get_index_from_passage(passage)
-                            )
-                        except ValueError:
-                            if trainer.global_rank == 0:
-                                logger.warning(
-                                    f"Passage `{passage}` not found in the index. "
-                                    "We will skip it, but the results might not reflect the "
-                                    "actual performance."
-                                )
-                            pass
-                    retrieved_indices = [r.document.id for r in retrieved_samples if r]
-                    retrieved_passages = [
-                        retriever.get_passage_from_index(i) for i in retrieved_indices
-                    ]
-                    retrieved_scores = [r.score for r in retrieved_samples]
-                    # correct predictions are the passages that are in the top-k and are gold
-                    correct_indices = set(gold_passage_indices) & set(retrieved_indices)
-                    # wrong predictions are the passages that are in the top-k and are not gold
-                    wrong_indices = set(retrieved_indices) - set(gold_passage_indices)
-                    # add the predictions to the list
-                    prediction_output = dict(
-                        sample_idx=batch.sample_idx[batch_idx],
-                        gold=gold_passages,
-                        predictions=retrieved_passages,
-                        scores=retrieved_scores,
-                        correct=[
-                            retriever.get_passage_from_index(i) for i in correct_indices
-                        ],
-                        wrong=[
-                            retriever.get_passage_from_index(i) for i in wrong_indices
-                        ],
-                    )
-                    predictions.append(prediction_output)
-            end = time.time()
             if trainer.global_rank == 0:
-                logger.info(f"Time to retrieve: {str(end - start)}")
+                logger.info("Computing predictions")
+                for batch in tqdm(
+                    eval_dataloader,
+                    desc=f"Computing predictions for dataset {current_dataset.name}",
+                    disable=trainer.global_rank != 0,
+                ):
+                    # print(batch)
+                    logger.debug(f"Moving batch to device {pl_module.device}")
+                    batch = batch.to(pl_module.device)
+                    logger.debug(f"Batch moved to device {pl_module.device}")
+                    # get the top-k indices
+                    retriever_output = retriever.retrieve(
+                        **batch.questions, k=self.k, precision=self.precision
+                    )
+                    # compute recall at k
+                    for batch_idx, retrieved_samples in enumerate(retriever_output):
+                        # get the positive passages
+                        gold_passages = batch["positives"][batch_idx]
+                        # get the index of the gold passages in the retrieved passages
+                        gold_passage_indices = []
+                        for passage in gold_passages:
+                            try:
+                                gold_passage_indices.append(
+                                    retriever.get_index_from_passage(passage)
+                                )
+                            except ValueError:
+                                if trainer.global_rank == 0:
+                                    logger.warning(
+                                        f"Passage `{passage}` not found in the index. "
+                                        "We will skip it, but the results might not reflect the "
+                                        "actual performance."
+                                    )
+                                pass
+                        retrieved_indices = [r.document.id for r in retrieved_samples if r]
+                        retrieved_passages = [
+                            retriever.get_passage_from_index(i) for i in retrieved_indices
+                        ]
+                        retrieved_scores = [r.score for r in retrieved_samples]
+                        # correct predictions are the passages that are in the top-k and are gold
+                        correct_indices = set(gold_passage_indices) & set(retrieved_indices)
+                        # wrong predictions are the passages that are in the top-k and are not gold
+                        wrong_indices = set(retrieved_indices) - set(gold_passage_indices)
+                        # add the predictions to the list
+                        prediction_output = dict(
+                            sample_idx=batch.sample_idx[batch_idx],
+                            gold=gold_passages,
+                            predictions=retrieved_passages,
+                            scores=retrieved_scores,
+                            correct=[
+                                retriever.get_passage_from_index(i) for i in correct_indices
+                            ],
+                            wrong=[
+                                retriever.get_passage_from_index(i) for i in wrong_indices
+                            ],
+                        )
+                        predictions.append(prediction_output)
+                end = time.time()
+                if trainer.global_rank == 0:
+                    logger.info(f"Time to retrieve: {str(end - start)}")
 
-            dataloader_predictions[dataloader_idx] = predictions
+                dataloader_predictions[dataloader_idx] = predictions
 
             # if pl_module_original_device != pl_module.device:
             #     pl_module.to(pl_module_original_device)
 
+        trainer.strategy.barrier()
         # return the predictions
         return dataloader_predictions

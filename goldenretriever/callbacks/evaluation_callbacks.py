@@ -95,7 +95,7 @@ class RecallAtKEvaluationCallback(NLPTemplateCallback):
         else:
             metrics = {f"{stage.value}_{k}": v for k, v in metrics.items()}
         pl_module.log_dict(
-            metrics, on_step=False, on_epoch=True, prog_bar=self.prog_bar, sync_dist=True
+            metrics, on_step=False, on_epoch=True, prog_bar=self.prog_bar, sync_dist=False
         )
 
         if self.verbose:
@@ -202,7 +202,7 @@ class AvgRankingEvaluationCallback(NLPTemplateCallback):
             f"{prefix}_{k}": torch.as_tensor(v, dtype=torch.float32)
             for k, v in metrics.items()
         }
-        pl_module.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
+        pl_module.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=False, sync_dist=False)
 
         if self.verbose:
             if trainer.global_rank == 0:

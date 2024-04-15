@@ -51,15 +51,18 @@ class GoldenRetriever(torch.nn.Module):
         precision: Optional[Union[str, int]] = None,
         index_precision: Optional[Union[str, int]] = None,
         index_device: Optional[Union[str, torch.device]] = None,
+        use_hf_model: bool = False,
         *args,
         **kwargs,
     ):
         super().__init__()
 
+        model_class = GoldenRetrieverModel if not use_hf_model else tr.AutoModel
+
         self.passage_encoder_is_question_encoder = False
         # question encoder model
         if isinstance(question_encoder, str):
-            question_encoder = GoldenRetrieverModel.from_pretrained(
+            question_encoder = model_class.from_pretrained(
                 question_encoder, **kwargs
             )
         self.question_encoder = question_encoder
@@ -70,7 +73,7 @@ class GoldenRetriever(torch.nn.Module):
             # keep track of the fact that the passage encoder is the same as the question encoder
             self.passage_encoder_is_question_encoder = True
         if isinstance(passage_encoder, str):
-            passage_encoder = GoldenRetrieverModel.from_pretrained(
+            passage_encoder = model_class.from_pretrained(
                 passage_encoder, **kwargs
             )
         # passage encoder model

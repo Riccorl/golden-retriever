@@ -67,6 +67,10 @@ class GoldenRetrieverPLModule(pl.LightningModule):
             batch_size=batch["questions"]["input_ids"].size(0),
             sync_dist=True,
         )
+    
+    def configure_model(self):
+        if self.model is not None:
+            return
 
     def configure_optimizers(self):
         if isinstance(self.optimizer_config, DictConfig):

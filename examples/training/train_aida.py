@@ -8,6 +8,8 @@ from goldenretriever.indexers.inmemory import InMemoryDocumentIndex
 from goldenretriever.data.datasets import AidaInBatchNegativesDataset
 import os
 
+from lightning.pytorch.strategies import FSDPStrategy
+
 logger = get_logger(__name__)
 
 
@@ -17,6 +19,7 @@ if __name__ == "__main__":
     # instantiate retriever
     retriever = GoldenRetriever(
         question_encoder="intfloat/e5-small-v2",
+        use_hf_model=True,
         document_index=InMemoryDocumentIndex(
             documents=DocumentStore.from_file(
                 "/home/ric/Projects/golden-retriever/data/dpr-like/el/documents_only_data.jsonl"
@@ -28,18 +31,32 @@ if __name__ == "__main__":
         ),
     )
 
+    strategy = FSDPStrategy(
+        # # Default: Shard weights, gradients, optimizer state (1 + 2 + 3)
+        # sharding_strategy="FULL_SHARD",
+        # # Shard gradients, optimizer state (2 + 3)
+        # sharding_strategy="SHARD_GRAD_OP",
+        # # Full-shard within a machine, replicate across machines
+        # sharding_strategy="HYBRID_SHARD",
+        # Don't shard anything (similar to DDP)
+        sharding_strategy="NO_SHARD",
+    )
+
     trainer = Trainer(
         retriever=retriever,
         train_dataset=None,
         val_dataset=None,
         # test_dataset=test_dataset,
-        num_workers=0,
+        num_workers=8,
         max_steps=25_000,
         # log_to_wandb=False,
         wandb_online_mode=False,
         wandb_project_name="golden-retriever-aida",
         wandb_experiment_name="aida-e5-base-topics-from-blink",
         max_hard_negatives_to_mine=0,
+        # strategy="deepspeed_stage_2",
+        strategy=strategy,
+        devices=2,
         # strategy="ddp_find_unused_parameters_true",
         # devices=2,
         # accelerator="cuda",

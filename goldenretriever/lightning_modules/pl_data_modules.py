@@ -104,14 +104,18 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
             # self.train_dataset.to_torch_dataset(),
             # torch_dataset,
             self.train_dataset,
+            collate_fn=GoldenRetrieverCollator(tokenizer=self.train_dataset.question_tokenizer),
             shuffle=False,
             batch_size=32,
             num_workers=self.num_workers.train,
-            pin_memory=False,
-            # prefetch_factor=2,
-            # persistent_workers=True,
-            # collate_fn=lambda x: x,
-            collate_fn=GoldenRetrieverCollator(tokenizer=self.train_dataset.question_tokenizer),
+            pin_memory=True,
+            # prefetch_factor=(
+            #     max(1, 8 * self.train_dataset.batch_size // self.num_workers)
+            #     if self.num_workers > 0
+            #     else None
+            # ),
+            persistent_workers=True if self.num_workers.train > 0 else False,
+            timeout=0,
             # user a custom distributed sampler
             # sampler=GoldenDistributedSampler
         )
@@ -124,14 +128,21 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
                 DataLoader(
                     # torch_dataset,
                     dataset,
+                    collate_fn=GoldenRetrieverCollator(tokenizer=dataset.question_tokenizer),
                     shuffle=False,
                     batch_size=32,
                     num_workers=self.num_workers.val,
-                    pin_memory=False,
+                    pin_memory=True,
+                    # prefetch_factor=(
+                    #     max(1, 8 * self.train_dataset.batch_size // self.num_workers)
+                    #     if self.num_workers > 0
+                    #     else None
+                    # ),
+                    persistent_workers=True if self.num_workers.val > 0 else False,
+                    timeout=0,
                     # prefetch_factor=2,
                     # persistent_workers=True,
                     # collate_fn=lambda x: x,
-                    collate_fn=GoldenRetrieverCollator(tokenizer=dataset.question_tokenizer),
                     # sampler=GoldenDistributedSampler
                 )
             )
