@@ -635,8 +635,8 @@ class Trainer(FromConfig):
             # we need the largest k for the prediction callback
             # get the max top_k for the prediction callback
             k = sorted(self.top_k, reverse=True)[0]
-        # if metrics_callbacks is None:
-        #     metrics_callbacks = self.configure_metrics_callbacks()
+        if metrics_callbacks is None:
+            metrics_callbacks = self.configure_metrics_callbacks()
 
         prediction_callback = GoldenRetrieverPredictionCallback(
             batch_size=batch_size,

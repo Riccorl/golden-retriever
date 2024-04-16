@@ -52,21 +52,21 @@ class GoldenRetrieverPLModule(pl.LightningModule):
 
     def validation_step(self, batch: ModelInputs, batch_idx: int) -> None:
         forward_output = self.forward(**batch, return_loss=True)
-        # self.log(
-        #     "val_loss",
-        #     forward_output["loss"],
-        #     batch_size=batch["questions"]["input_ids"].size(0),
-        #     sync_dist=True,
-        # )
+        self.log(
+            "val_loss",
+            forward_output["loss"],
+            batch_size=batch["questions"]["input_ids"].size(0),
+            sync_dist=True,
+        )
 
     def test_step(self, batch: ModelInputs, batch_idx: int) -> Any:
         forward_output = self.forward(**batch, return_loss=True)
-        # self.log(
-        #     "test_loss",
-        #     forward_output["loss"],
-        #     batch_size=batch["questions"]["input_ids"].size(0),
-        #     sync_dist=True,
-        # )
+        self.log(
+            "test_loss",
+            forward_output["loss"],
+            batch_size=batch["questions"]["input_ids"].size(0),
+            sync_dist=True,
+        )
     
     def configure_model(self):
         if self.model is not None:

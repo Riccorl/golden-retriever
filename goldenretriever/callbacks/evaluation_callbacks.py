@@ -76,6 +76,7 @@ class RecallAtKEvaluationCallback(NLPTemplateCallback):
                 f"Stage {stage} not supported, only `validate` and `test` are supported."
             )
 
+        # if trainer.global_rank == 0:
         for dataloader_idx, samples in predictions.items():
             hits, total = 0, 0
             for sample in samples:
@@ -86,24 +87,27 @@ class RecallAtKEvaluationCallback(NLPTemplateCallback):
                 total += len(set(sample["gold"]))
 
             # compute the mean recall at k
-            recall_at_k = hits / total
+            recall_at_k = hits / total if total > 0 else 0
             metrics[f"recall@{self.k}_{dataloader_idx}"] = recall_at_k
         metrics[f"recall@{self.k}"] = sum(metrics.values()) / len(metrics)
 
-        if self.prefix is not None:
-            metrics = {f"{self.prefix}_{k}": v for k, v in metrics.items()}
-        else:
-            metrics = {f"{stage.value}_{k}": v for k, v in metrics.items()}
+        prefix = self.prefix or stage.value
+        metrics = {f"{prefix}_{k}": v for k, v in metrics.items()}
         pl_module.log_dict(
-            metrics, on_step=False, on_epoch=True, prog_bar=self.prog_bar, sync_dist=False
+            metrics,
+            prog_bar=self.prog_bar,
+            sync_dist=True,
+            # we call it just on the main process for now
+            reduce_fx="sum",
         )
 
         if self.verbose:
             if trainer.global_rank == 0:
                 logger.info(
-                    f"Recall@{self.k} on {stage.value}: {metrics[f'{stage.value}_recall@{self.k}']}"
+                    f"Recall@{self.k} on {stage.value}: \t {metrics[f'{stage.value}_recall@{self.k}']}"
                 )
 
+        # trainer.strategy.barrier()
         return metrics
 
 
@@ -168,10 +172,6 @@ class AvgRankingEvaluationCallback(NLPTemplateCallback):
                 logger.warning("No predictions to compute the AVG Ranking metrics.")
             return {}
 
-        if self.verbose:
-            if trainer.global_rank == 0:
-                logger.info(f"Computing AVG Ranking@{self.k}")
-
         # metrics to return
         metrics = {}
 
@@ -181,6 +181,7 @@ class AvgRankingEvaluationCallback(NLPTemplateCallback):
                 f"Stage `{stage}` not supported, only `validate` and `test` are supported."
             )
 
+        # if trainer.global_rank == 0:
         for dataloader_idx, samples in predictions.items():
             rankings = []
             for sample in samples:
@@ -192,24 +193,27 @@ class AvgRankingEvaluationCallback(NLPTemplateCallback):
 
             avg_ranking = sum(rankings) / len(rankings) if len(rankings) > 0 else 0
             metrics[f"avg_ranking@{self.k}_{dataloader_idx}"] = avg_ranking
-        if len(metrics) == 0:
-            metrics[f"avg_ranking@{self.k}"] = 0
-        else:
-            metrics[f"avg_ranking@{self.k}"] = sum(metrics.values()) / len(metrics)
+
+        metrics[f"avg_ranking@{self.k}"] = (
+            sum(metrics.values()) / len(metrics) if len(metrics) > 0 else 0
+        )
 
         prefix = self.prefix or stage.value
-        metrics = {
-            f"{prefix}_{k}": torch.as_tensor(v, dtype=torch.float32)
-            for k, v in metrics.items()
-        }
-        pl_module.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=False, sync_dist=False)
+        metrics = {f"{prefix}_{k}": v for k, v in metrics.items()}
+        pl_module.log_dict(
+            metrics,
+            sync_dist=True,
+            # we call it just on the main process for now
+            reduce_fx="sum",
+        )
 
         if self.verbose:
             if trainer.global_rank == 0:
                 logger.info(
-                    f"AVG Ranking@{self.k} on {prefix}: {metrics[f'{prefix}_avg_ranking@{self.k}']}"
+                    f"AVG-Ranking@{self.k} on {prefix}: \t {metrics[f'{prefix}_avg_ranking@{self.k}']}"
                 )
 
+        # trainer.strategy.barrier()
         return metrics
 
 
@@ -266,7 +270,11 @@ class LRAPEvaluationCallback(NLPTemplateCallback):
             for k, v in metrics.items()
         }
         pl_module.log_dict(
-            metrics, on_step=False, on_epoch=True, prog_bar=self.prog_bar, sync_dist=True
+            metrics,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=self.prog_bar,
+            sync_dist=True,
         )
 
         if self.verbose:

@@ -19,7 +19,7 @@ if __name__ == "__main__":
     # instantiate retriever
     retriever = GoldenRetriever(
         question_encoder="intfloat/e5-small-v2",
-        use_hf_model=True,
+        # use_hf_model=True,
         document_index=InMemoryDocumentIndex(
             documents=DocumentStore.from_file(
                 "/home/ric/Projects/golden-retriever/data/dpr-like/el/documents_only_data.jsonl"
@@ -54,8 +54,9 @@ if __name__ == "__main__":
         wandb_project_name="golden-retriever-aida",
         wandb_experiment_name="aida-e5-base-topics-from-blink",
         max_hard_negatives_to_mine=0,
-        strategy="deepspeed_stage_2",
-        # strategy=strategy,
+        gradient_clip_val=0.0,
+        # strategy="deepspeed_stage_2",
+        strategy=strategy,
         devices=2,
         # strategy="ddp_find_unused_parameters_true",
         # devices=2,

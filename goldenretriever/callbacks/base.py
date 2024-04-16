@@ -73,11 +73,9 @@ class PredictionCallback(pl.Callback):
         # it should return the predictions
         raise NotImplementedError
 
-    # @rank_zero_only
     def on_validation_epoch_end(
         self, trainer: pl.Trainer, pl_module: pl.LightningModule
     ):
-        # if trainer.global_rank == 0:
         predictions = self(trainer, pl_module)
         for callback in self.other_callbacks:
             callback(
@@ -87,9 +85,7 @@ class PredictionCallback(pl.Callback):
                 predictions=predictions,
             )
 
-    # @rank_zero_only
     def on_test_epoch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule):
-        # if trainer.global_rank == 0:
         predictions = self(trainer, pl_module)
         for callback in self.other_callbacks:
             callback(
