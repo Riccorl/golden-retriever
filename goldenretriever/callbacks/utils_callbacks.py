@@ -10,6 +10,7 @@ from lightning.pytorch.trainer.states import RunningStage
 
 from goldenretriever.callbacks.base import NLPTemplateCallback, PredictionCallback
 from goldenretriever.common.log import get_logger
+from goldenretriever.data.utils import HardNegativesManagerThread
 from goldenretriever.pytorch_modules.hf import GoldenRetrieverModel
 
 logger = get_logger(__name__, level=logging.INFO)
@@ -195,6 +196,15 @@ class PrefetchTrainDatasetCallback(pl.Callback):
             # if trainer.current_epoch != self.previous_epoch:
             trainer.datamodule.train_dataset.prefetch()
             self.previous_epoch = trainer.current_epoch
+
+
+# class HardNegativeCallback(pl.Callback):
+    # def __init__(self) -> None:
+    #     super().__init__()
+    #     self.hn_manager = HardNegativesManagerThread()
+
+    # def on_train_batch_start(self, trainer: pl.Trainer, *args, **kwargs):
+    #     trainer.
 
 
 class SubsampleTrainDatasetCallback(pl.Callback):

@@ -17,8 +17,13 @@ from goldenretriever.callbacks.prediction_callbacks import (
 )
 from goldenretriever.common.log import get_logger
 from goldenretriever.data.base.datasets import BaseDataset
+
 # from goldenretriever.data.streaming_dataset import GoldenRetrieverCollator
-from goldenretriever.data.utils import HardNegativesManager
+from goldenretriever.data.streaming_dataset import (
+    GoldenRetrieverCollator,
+    GoldenRetrieverStreamingDataset,
+)
+from goldenretriever.data.utils import HardNegativesManager, HardNegativesManagerThread
 
 logger = get_logger(__name__, level=logging.INFO)
 
@@ -63,22 +68,22 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
     """
 
     def __init__(
-            self,
-            k: int = 100,
-            batch_size: int = 32,
-            num_workers: int = 0,
-            force_reindex: bool = False,
-            retriever_dir: Optional[Path] = None,
-            stages: Sequence[Union[str, RunningStage]] = None,
-            other_callbacks: Optional[List[DictConfig]] = None,
-            dataset: Optional[Union[DictConfig, BaseDataset]] = None,
-            metrics_to_monitor: List[str] = None,
-            threshold: float = 0.8,
-            max_negatives: int = 5,
-            add_with_probability: float = 1.0,
-            refresh_every_n_epochs: int = 1,
-            *args,
-            **kwargs,
+        self,
+        k: int = 100,
+        batch_size: int = 32,
+        num_workers: int = 0,
+        force_reindex: bool = False,
+        retriever_dir: Optional[Path] = None,
+        stages: Sequence[Union[str, RunningStage]] = None,
+        other_callbacks: Optional[List[DictConfig]] = None,
+        dataset: Optional[Union[DictConfig, BaseDataset]] = None,
+        metrics_to_monitor: List[str] = None,
+        threshold: float = 0.8,
+        max_negatives: int = 5,
+        add_with_probability: float = 1.0,
+        refresh_every_n_epochs: int = 1,
+        *args,
+        **kwargs,
     ):
         super().__init__(
             k=k,
@@ -102,11 +107,11 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
 
     @torch.no_grad()
     def __call__(
-            self,
-            trainer: pl.Trainer,
-            pl_module: pl.LightningModule,
-            *args,
-            **kwargs,
+        self,
+        trainer: pl.Trainer,
+        pl_module: pl.LightningModule,
+        *args,
+        **kwargs,
     ) -> dict:
         """
         Computes the predictions of a retriever model on a dataset and computes the negative
@@ -170,48 +175,69 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
 
         # make a copy of the dataset to avoid modifying the original one
         trainer.datamodule.train_dataset.hn_manager = None
-        dataset_copy = deepcopy(trainer.datamodule.train_dataset)
+        dataset = trainer.train_dataloader.dataset
+        # dataset = GoldenRetrieverStreamingDataset(
+        #     name="aida_train_hn",
+        #     question_tokenizer=trainer.train_dataloader.dataset.question_tokenizer,
+        #     local="/home/ric/Projects/golden-retriever/data/dpr-like/el/mosaic/train",
+        #     batch_size=32,
+        #     predownload=64*64,
+        #     shuffle_seed=42,
+        # )
+        # dataset_copy = deepcopy(trainer.datamodule.train_dataset)
         predictions = super().__call__(
             trainer,
             pl_module,
-            datasets=dataset_copy,
+            datasets=dataset,
             dataloaders=DataLoader(
-                dataset_copy, #.to_torch_dataset(),
+                dataset,  # .to_torch_dataset(),
                 shuffle=False,
-                batch_size=None,
+                batch_size=64,
                 num_workers=self.num_workers,
                 pin_memory=True,
                 # collate_fn=lambda x: x,
-                collate_fn=GoldenRetrieverCollator(tokenizer=dataset_copy.tokenizer),
+                collate_fn=GoldenRetrieverCollator(
+                    tokenizer=dataset.question_tokenizer,
+                    max_passage_length=dataset.max_passage_length,
+                ),
             ),
             *args,
             **kwargs,
         )
         if trainer.global_rank == 0:
             logger.info(f"Computing hard negatives for epoch {trainer.current_epoch}")
-        # predictions is a dict with the dataloader index as key and the predictions as value
-        # since we only have one dataloader, we can get the predictions directly
-        predictions = list(predictions.values())[0]
-        # store the predictions in a dictionary for faster access based on the sample index
-        hard_negatives_list = {}
-        for prediction in tqdm(predictions, desc="Collecting hard negatives"):
-            if random.random() < 1 - self.add_with_probability:
-                continue
-            top_k_passages = prediction["predictions"]
-            gold_passages = prediction["gold"]
-            # get the ids of the max_negatives wrong passages with the highest similarity
-            wrong_passages = [
-                                 passage_id
-                                 for passage_id in top_k_passages
-                                 if passage_id not in gold_passages
-                             ][: self.max_negatives]
-            hard_negatives_list[prediction["sample_idx"]] = wrong_passages
+            # predictions is a dict with the dataloader index as key and the predictions as value
+            # since we only have one dataloader, we can get the predictions directly
+            predictions = list(predictions.values())[0]
+            # store the predictions in a dictionary for faster access based on the sample index
+            hard_negatives_list = {}
+            for prediction in tqdm(predictions, desc="Collecting hard negatives"):
+                if random.random() < 1 - self.add_with_probability:
+                    continue
+                top_k_passages = prediction["predictions"]
+                gold_passages = prediction["gold"]
+                # get the ids of the max_negatives wrong passages with the highest similarity
+                wrong_passages = [
+                    passage_id
+                    for passage_id in top_k_passages
+                    if passage_id not in gold_passages
+                ][: self.max_negatives]
+                hard_negatives_list[prediction["sample_idx"]] = wrong_passages
 
-        trainer.datamodule.train_dataset.hn_manager = HardNegativesManager(
-            tokenizer=trainer.datamodule.train_dataset.tokenizer,
-            max_length=trainer.datamodule.train_dataset.max_passage_length,
-            data=hard_negatives_list,
-        )
+            # hn_manager = HardNegativesManager(
+            #     tokenizer=trainer.datamodule.train_dataset.passage_tokenizer,
+            #     max_length=trainer.datamodule.train_dataset.max_passage_length,
+            #     data=hard_negatives_list,
+            # )
+            # HardNegativesManager is a singleton, so we need
+            # to reset it before adding new hard negatives
+            hn_manager = HardNegativesManagerThread(
+                tokenizer=dataset.passage_tokenizer,
+                max_length=dataset.max_passage_length,
+            )
+            hn_manager.reset()
+            hn_manager.add(hard_negatives_list.keys(), hard_negatives_list.values())
+            hn_manager.tokenize()
 
         # normalize predictions as in the original GoldenRetrieverPredictionCallback
         predictions = {0: predictions}
@@ -219,8 +245,12 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
 
 
 class CustomModelCheckpoint(ModelCheckpoint):
-    def on_train_end(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
+    def on_train_end(
+        self, trainer: "pl.Trainer", pl_module: "pl.LightningModule"
+    ) -> None:
         self.save_checkpoint(trainer)
 
-    def on_keyboard_interrupt(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
+    def on_keyboard_interrupt(
+        self, trainer: "pl.Trainer", pl_module: "pl.LightningModule"
+    ) -> None:
         self.save_checkpoint(trainer)

@@ -2,8 +2,10 @@ import os
 from copy import deepcopy
 from pathlib import Path
 from typing import List, Literal
+
 # from goldenretriever.data.streaming_dataset import StreamingGoldenRetrieverDataset
 from goldenretriever.data.lit_dataset import GoldenStreamingDataset
+from goldenretriever.data.streaming_dataset import GoldenRetrieverStreamingDataset
 from goldenretriever.trainer.utils import PRECISION_INPUT_STR_ALIAS_CONVERSION
 
 import hydra
@@ -45,26 +47,45 @@ from goldenretriever.indexers.base import BaseDocumentIndex
 from goldenretriever.lightning_modules.pl_data_modules import (
     GoldenRetrieverPLDataModule,
 )
-from goldenretriever.lightning_modules.pl_modules import GoldenRetrieverPLModule
+from goldenretriever.lightning_modules.pl_modules import (
+    GoldenRetrieverPLModule,
+    HardNegativeAlgorithm,
+)
 from goldenretriever.pytorch_modules.loss import MultiLabelNCELoss
 from goldenretriever.pytorch_modules.model import GoldenRetriever
 from goldenretriever.pytorch_modules.optim import RAdamW
 from goldenretriever.pytorch_modules.scheduler import LinearScheduler
 
-logger = get_logger()
+import transformers as tr
+
+logger = get_logger(__name__)
 
 
 class Trainer(FromConfig):
     def __init__(
         self,
         retriever: GoldenRetriever,
-        train_dataset: GoldenRetrieverDataset | None = None,
+        train_dataset: str | GoldenRetrieverStreamingDataset | None = None,
+        train_batch_size: int = 32,
+        train_dataset_kwargs: dict | None = None,
         val_dataset: (
-            GoldenRetrieverDataset | list[GoldenRetrieverDataset] | None
+            str
+            | List[str]
+            | GoldenRetrieverStreamingDataset
+            | list[GoldenRetrieverStreamingDataset]
+            | None
         ) = None,
+        val_batch_size: int = 32,
+        val_dataset_kwargs: dict | list[dict] | None = None,
         test_dataset: (
-            GoldenRetrieverDataset | list[GoldenRetrieverDataset] | None
+            str
+            | List[str]
+            | GoldenRetrieverDataset
+            | list[GoldenRetrieverDataset]
+            | None
         ) = None,
+        test_batch_size: int = 32,
+        test_dataset_kwargs: dict | list[dict] | None = None,
         num_workers: int = 4,
         optimizer: torch.optim.Optimizer = RAdamW,
         lr: float = 1e-5,
@@ -130,8 +151,14 @@ class Trainer(FromConfig):
         self.retriever = retriever
         # datasets
         self.train_dataset = train_dataset
+        self.train_batch_size = train_batch_size
+        self.train_dataset_kwargs = train_dataset_kwargs or {}
         self.val_dataset = val_dataset
+        self.val_batch_size = val_batch_size
+        self.val_dataset_kwargs = val_dataset_kwargs or {}
         self.test_dataset = test_dataset
+        self.test_batch_size = test_batch_size
+        self.test_dataset_kwargs = test_dataset_kwargs or {}
         self.num_workers = num_workers
         # trainer parameters
         self.optimizer = optimizer
@@ -308,20 +335,32 @@ class Trainer(FromConfig):
         self.trainer: pl.Trainer | None = None
 
     def configure_lightning_datamodule(self, *args, **kwargs):
+        
+        self.train_dataset_kwargs["batch_size"] = self.train_batch_size
+
         # lightning data module declaration
         if self.val_dataset is not None and isinstance(
-            self.val_dataset, (GoldenRetrieverDataset, GoldenStreamingDataset)
+            self.val_dataset, (GoldenRetrieverDataset, GoldenStreamingDataset, str)
         ):
             self.val_dataset = [self.val_dataset]
+            self.val_dataset_kwargs["batch_size"] = self.val_batch_size
+            self.val_batch_size = [self.val_batch_size]
+            self.val_dataset_kwargs = [self.val_dataset_kwargs]
         if self.test_dataset is not None and isinstance(
-            self.test_dataset, (GoldenRetrieverDataset, GoldenStreamingDataset)
+            self.test_dataset, (GoldenRetrieverDataset, GoldenStreamingDataset, str)
         ):
             self.test_dataset = [self.test_dataset]
+            self.test_dataset_kwargs["batch_size"] = self.test_batch_size
+            self.test_batch_size = [self.test_batch_size]
+            self.test_dataset_kwargs = [self.test_dataset_kwargs]
 
         self.lightning_datamodule = GoldenRetrieverPLDataModule(
             train_dataset=self.train_dataset,
+            train_dataset_kwargs=self.train_dataset_kwargs,
             val_datasets=self.val_dataset,
+            val_datasets_kwargs=self.val_dataset_kwargs,
             test_datasets=self.test_dataset,
+            test_datasets_kwargs=self.test_dataset_kwargs,
             num_workers=self.num_workers,
             tokenizer=self.retriever.question_tokenizer,
             *args,
@@ -725,7 +764,6 @@ class Trainer(FromConfig):
             self.lightning_module,
             datamodule=self.lightning_datamodule,
             ckpt_path=self.resume_from_checkpoint_path,
-
         )
 
     def test(

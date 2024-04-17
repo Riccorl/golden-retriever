@@ -6,6 +6,7 @@ import torch
 from omegaconf import DictConfig
 
 from goldenretriever.common.model_inputs import ModelInputs
+from goldenretriever.data.utils import HardNegativesManagerThread
 
 
 class GoldenRetrieverPLModule(pl.LightningModule):
@@ -24,6 +25,11 @@ class GoldenRetrieverPLModule(pl.LightningModule):
         else:
             self.model = model
 
+        self.hn_algo = HardNegativeAlgorithm(
+            # self.model.question_tokenizer,
+            # self.trainer.train_dataloader.dataset.max_passage_length,
+        )
+
         self.optimizer_config = optimizer
         self.lr_scheduler_config = lr_scheduler
 
@@ -40,14 +46,15 @@ class GoldenRetrieverPLModule(pl.LightningModule):
         return self.model(**kwargs)
 
     def training_step(self, batch: ModelInputs, batch_idx: int) -> torch.Tensor:
+        batch = self.hn_algo(batch, self)
         forward_output = self.forward(**batch, return_loss=True)
-        # self.log(
-        #     "loss",
-        #     forward_output["loss"],
-        #     batch_size=batch["questions"]["input_ids"].size(0),
-        #     prog_bar=True,
-        #     sync_dist=True,
-        # )
+        self.log(
+            "loss",
+            forward_output["loss"],
+            batch_size=batch["questions"]["input_ids"].size(0),
+            prog_bar=True,
+            sync_dist=True,
+        )
         return forward_output["loss"]
 
     def validation_step(self, batch: ModelInputs, batch_idx: int) -> None:
@@ -67,7 +74,7 @@ class GoldenRetrieverPLModule(pl.LightningModule):
             batch_size=batch["questions"]["input_ids"].size(0),
             sync_dist=True,
         )
-    
+
     def configure_model(self):
         if self.model is not None:
             return
@@ -128,3 +135,128 @@ class GoldenRetrieverPLModule(pl.LightningModule):
             "frequency": 1,
         }
         return [optimizer], [lr_scheduler_config]
+
+
+class HardNegativeAlgorithm:
+
+    def __init__(self, tokenizer=None, max_length: int = None):
+        # self.tokenizer = tokenizer
+        # self.max_length = max_length
+        # self.hn_manager = HardNegativesManagerThread(tokenizer, max_length=max_length)
+        if tokenizer is not None and max_length is not None:
+            self.hn_manager = HardNegativesManagerThread(
+                tokenizer, max_length=max_length
+            )
+        else:
+            # delay the initialization of the hn_manager
+            self.hn_manager = None
+
+    # def match(self, event: Event, state: State) -> bool:
+    #     return event in [Event.BEFORE_FORWARD]
+
+    def __call__(self, batch, pl_module: GoldenRetrieverPLModule) -> None:
+        # get the hard negatives
+        # batch = state.batch
+        try:
+            self.hn_manager = HardNegativesManagerThread()
+        except TypeError:
+            return batch
+
+        sample_idxs = batch["sample_idx"]
+        hn_passages = {}
+        i = 0
+        for sample in sample_idxs:
+            if sample in self.hn_manager:
+                i += 1
+                hn_passages.update(
+                    {
+                        tuple(passage["input_ids"]): passage
+                        for passage in self.hn_manager.get(sample)
+                    }
+                )
+
+        # if there are no hard negatives, return
+        if len(hn_passages) == 0:
+            return batch
+
+        # get dataloader collator
+        collator = pl_module.trainer.train_dataloader.collate_fn
+        hn_passages = list(hn_passages.values())
+        hn_passages_batch = ModelInputs(collator.convert_to_batch(hn_passages))
+        hn_passages_batch = hn_passages_batch.to(pl_module.device)
+        # get the questions
+        questions = batch["questions"]
+        # get the passages
+        passages = batch["passages"]
+        # build an index to map the position of the passage in the batch
+        passage_index = {tuple(c["input_ids"]): i for i, c in enumerate(hn_passages)}
+
+        # now we can create the labels
+        labels = torch.zeros(
+            questions["input_ids"].shape[0], hn_passages_batch["input_ids"].shape[0]
+        )
+        labels = labels.to(batch.labels.device)
+        # iterate over the questions and set the labels to 1 if the passage is positive
+        for sample_idx in range(len(questions["input_ids"])):
+            for pssg in batch["positives_pssgs"][sample_idx]:
+                # get the index of the positive passage
+                index = passage_index.get(tuple(pssg["input_ids"]), None)
+                # set the label to 1
+                if index is not None:
+                    labels[sample_idx, index] = 1
+
+        # now concatenate the passages and the hard negatives
+        passages_ids = torch.cat(
+            [batch.passages["input_ids"], hn_passages_batch["input_ids"]], dim=0
+        )
+        # concatenate the attention masks
+        attention_mask = torch.cat(
+            [batch.passages["attention_mask"], hn_passages_batch["attention_mask"]],
+            dim=0,
+        )
+        # concatenate the token type ids
+        token_type_ids = torch.cat(
+            [batch.passages["token_type_ids"], hn_passages_batch["token_type_ids"]],
+            dim=0,
+        )
+        # concatenate the labels
+        labels = torch.cat([batch.labels, labels], dim=1)
+        # update the batch
+        passages = {
+            "input_ids": passages_ids,
+            "attention_mask": attention_mask,
+            "token_type_ids": token_type_ids,
+        }
+
+        batch["passages"] = passages
+        batch["labels"] = labels
+
+        return batch
+
+        # update the batch
+        # state.batch_set_item("passages", passages)
+        # state.batch_set_item("labels", labels)
+
+    @staticmethod
+    def duplicate(tensor_one: torch.Tensor, tensor_two: torch.Tensor) -> torch.Tensor:
+        """
+        Check if two tensors have the same elements.
+
+        Args:
+            tensor_one (`torch.Tensor`): The first tensor.
+            tensor_two (`torch.Tensor`): The second tensor.
+
+        Returns:
+            `torch.Tensor`: A boolean tensor with the same shape as the input tensors.
+        """
+        # dimensions
+        shape1 = tensor_one.shape[0]
+        shape2 = tensor_two.shape[0]
+        c = tensor_one.shape[1]
+        assert c == tensor_two.shape[1], "Tensors must have same number of columns"
+
+        a_expand = tensor_one.unsqueeze(1).expand(-1, shape2, c)
+        b_expand = tensor_two.unsqueeze(0).expand(shape1, -1, c)
+        # element-wise equality
+        mask = (a_expand == b_expand).all(-1).any(-1)
+        return mask

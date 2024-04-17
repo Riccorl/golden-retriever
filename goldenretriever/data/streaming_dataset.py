@@ -15,14 +15,17 @@ from tqdm import tqdm
 from transformers import PreTrainedTokenizerBase
 
 # from goldenretriever.common.hf_utils import build_hf_dataset
+from goldenretriever.common.hf_utils import build_hf_dataset
 from goldenretriever.common.log import get_logger
 from goldenretriever.common.model_inputs import ModelInputs
+
 # from goldenretriever.common.torch_utils import build_dataloader
 from goldenretriever.common.utils import (
     GOLDENRETRIEVER_CACHE_DIR,
     file_exists,
     url_to_filename,
 )
+from goldenretriever.data.utils import HardNegativesManagerThread
 
 logger = get_logger(__name__)
 
@@ -348,107 +351,108 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
         )
         return output
 
-    # @staticmethod
-    # def _preprocess_to_mds(
-    #     source: str | os.PathLike,
-    #     tokenizer_fn: callable = None,
-    #     cache_dir: str | os.PathLike | None = None,
-    # ) -> str | os.PathLike:
-    #     """Preprocess the dataset to a markdown file.
+    @staticmethod
+    def preprocess_to_mds(
+        source: str | os.PathLike,
+        tokenizer_fn: callable = None,
+        cache_dir: str | os.PathLike | None = None,
+    ) -> str | os.PathLike:
+        """Preprocess the dataset to a markdown file.
 
-    #     Args:
-    #         source (str | os.PathLike): The source file or directory to preprocess.
-    #     """
-    #     source = Path(source)
+        Args:
+            source (str | os.PathLike): The source file or directory to preprocess.
+        """
+        source = Path(source)
 
-    #     if source.is_dir():
-    #         basename = get_index_basename()
-    #         # filename = os.path.join(self.local, self.split, basename)  # pyright: ignore
-    #         hashed_filename = source / basename
-    #         if hashed_filename.exists():
-    #             logger.info(f"Found existing index file {hashed_filename}")
-    #             return source
+        if source.is_dir():
+            basename = get_index_basename()
+            # filename = os.path.join(self.local, self.split, basename)  # pyright: ignore
+            hashed_filename = source / basename
+            if hashed_filename.exists():
+                logger.info(f"Found existing index file {hashed_filename}")
+                return source
 
-    #     # No index.json file found, so we need to create it
-    #     if cache_dir is None:
-    #         cache_dir = GOLDENRETRIEVER_CACHE_DIR
-    #     # check if cache dir exists
-    #     Path(cache_dir).mkdir(parents=True, exist_ok=True)
-    #     # get filename from the url
-    #     hashed_filename = url_to_filename(str(source), None)
-    #     # get cache path to put the file
-    #     cache_path = cache_dir / hashed_filename
+        # No index.json file found, so we need to create it
+        if cache_dir is None:
+            cache_dir = GOLDENRETRIEVER_CACHE_DIR
+        # check if cache dir exists
+        Path(cache_dir).mkdir(parents=True, exist_ok=True)
+        # get filename from the url
+        hashed_filename = url_to_filename(str(source), None)
+        # get cache path to put the file
+        cache_path = cache_dir / hashed_filename
 
-    #     # cache_path = str(cache_path)
+        # cache_path = str(cache_path)
 
-    #     # the file is already here, return it
-    #     if file_exists(cache_path):  # and not force_download:
-    #         logger.info(
-    #             f"{source} found in cache"  # , set `force_download=True` to force the download"
-    #         )
-    #         return str(cache_path)
+        # the file is already here, return it
+        if file_exists(cache_path):  # and not force_download:
+            logger.info(
+                f"{source} found in cache"  # , set `force_download=True` to force the download"
+            )
+            return str(cache_path)
 
-    #     dataset = build_hf_dataset(
-    #         dataset_name=str(source),
-    #         data_subset=None,
-    #         split="train",
-    #         shuffle=False,
-    #         is_local=True,
-    #         # num_workers=args.num_workers,
-    #     )
-    #     num_workers = None
-    #     if tokenizer_fn is not None:
-    #         if num_workers is None:
-    #             # Multiple workers is only supported on linux machines
-    #             if "linux" or "macos" in platform.platform().lower():
-    #                 num_workers = max(1, psutil.cpu_count())
-    #             else:
-    #                 num_workers = 0
-    #         dataset = dataset.map(tokenizer_fn, desc="Tokenizing data")
-    #     # dataloader = build_dataloader(
-    #     #     dataset=dataset, batch_size=None, num_workers=None
-    #     # )
+        dataset = build_hf_dataset(
+            dataset_name=str(source),
+            data_subset=None,
+            split="train",
+            shuffle=False,
+            is_local=True,
+            # num_workers=args.num_workers,
+        )
+        num_workers = None
+        if tokenizer_fn is not None:
+            if num_workers is None:
+                # Multiple workers is only supported on linux machines
+                if "linux" or "macos" in platform.platform().lower():
+                    num_workers = max(1, psutil.cpu_count())
+                else:
+                    num_workers = 0
+            dataset = dataset.map(tokenizer_fn, desc="Tokenizing data")
+        # dataloader = build_dataloader(
+        #     dataset=dataset, batch_size=None, num_workers=None
+        # )
 
-    #     # def generate_samples(loader, tokenizer_fn=None):
-    #     #     for batch in loader:
-    #     #         if tokenizer_fn is not None:
-    #     #             batch = tokenizer_fn(batch)
-    #     #         yield batch
-    #     # batch has key: list of values, we want to yield a list of dicts
-    #     # keys = list(batch.keys())
-    #     # current_bs = len(batch[keys[0]])
-    #     # for idx in range(current_bs):
-    #     #     yield {k: v[idx] if isinstance(v, list) else v for k, v in batch.items()}
+        # def generate_samples(loader, tokenizer_fn=None):
+        #     for batch in loader:
+        #         if tokenizer_fn is not None:
+        #             batch = tokenizer_fn(batch)
+        #         yield batch
+        # batch has key: list of values, we want to yield a list of dicts
+        # keys = list(batch.keys())
+        # current_bs = len(batch[keys[0]])
+        # for idx in range(current_bs):
+        #     yield {k: v[idx] if isinstance(v, list) else v for k, v in batch.items()}
 
-    #     if tokenizer_fn is None:
-    #         columns = {
-    #             "id": "str",
-    #             "question": "str",
-    #             "positive_ctxs": "pkl",
-    #             "negative_ctxs": "pkl",
-    #             "hard_negative_ctxs": "pkl",
-    #         }
-    #     else:
-    #         columns = {
-    #             "id": "str",
-    #             "question": "pkl",
-    #             "passage": "pkl",
-    #             "positive_pssgs": "pkl",
-    #             "positives": "pkl",
-    #             "negatives": "pkl",
-    #             "hard_negatives": "pkl",
-    #         }
-    #     with MDSWriter(columns=columns, out=str(cache_path)) as out:
-    #         for sample in tqdm(dataset, desc=f"Converting {source} to MDS"):
-    #             out.write(sample)
+        if tokenizer_fn is None:
+            columns = {
+                "id": "str",
+                "question": "str",
+                "positive_ctxs": "pkl",
+                "negative_ctxs": "pkl",
+                "hard_negative_ctxs": "pkl",
+            }
+        else:
+            columns = {
+                "id": "str",
+                "question": "pkl",
+                "passage": "pkl",
+                "positive_pssgs": "pkl",
+                "positives": "pkl",
+                "negatives": "pkl",
+                "hard_negatives": "pkl",
+            }
+        with MDSWriter(columns=columns, out=str(cache_path)) as out:
+            for sample in tqdm(dataset, desc=f"Converting {source} to MDS"):
+                out.write(sample)
 
-    #     return str(cache_path)
+        return str(cache_path)
 
 
 class GoldenRetrieverCollator:
 
-    def __init__(self, tokenizer) -> None:
+    def __init__(self, tokenizer, max_passage_length) -> None:
         self.tokenizer = tokenizer
+        self.max_passage_length = max_passage_length
         self.padding_ops = {
             "input_ids": partial(
                 self.pad_sequence,
@@ -460,6 +464,10 @@ class GoldenRetrieverCollator:
                 value=self.tokenizer.pad_token_type_id,
             ),
         }
+
+        self.hn_manager = HardNegativesManagerThread(
+            tokenizer=tokenizer, max_length=max_passage_length
+        )
 
     @staticmethod
     def pad_sequence(
