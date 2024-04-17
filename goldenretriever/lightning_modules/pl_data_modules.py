@@ -1,3 +1,4 @@
+from functools import partial
 import os
 from typing import Any, List, Optional, Sequence, Union
 
@@ -92,23 +93,41 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
                 data_path = self.train_dataset
             elif isinstance(self.train_dataset, DictConfig()):
                 # TODO
-                data_path = self.train_dataset.local
+                data_path = self.train_dataset["local"]
             else:
                 logger.debug("No data path found, skipping preprocessing")
-            GoldenRetrieverStreamingDataset.preprocess_to_mds(data_path, self.tokenizer)
+            GoldenRetrieverStreamingDataset.preprocess_to_mds(
+                data_path,
+                partial(
+                    GoldenRetrieverStreamingDataset.tokenize,
+                    **{
+                        "question_tokenizer": self.question_tokenizer,
+                        "passage_tokenizer": self.passage_tokenizer,
+                        **self.train_dataset_kwargs,
+                    },
+                ),
+            )
 
         if self.val_datasets is not None:
-            for dataset in self.val_datasets:
+            for i, dataset in enumerate(self.val_datasets):
                 data_path = None
                 if isinstance(dataset, (str, os.PathLike)):
                     data_path = dataset
                 elif isinstance(dataset, DictConfig()):
                     # TODO
-                    data_path = dataset.local
+                    data_path = dataset["local"]
                 else:
                     logger.debug("No data path found, skipping preprocessing")
                 GoldenRetrieverStreamingDataset.preprocess_to_mds(
-                    data_path, self.tokenizer
+                    data_path,
+                    partial(
+                        GoldenRetrieverStreamingDataset.tokenize,
+                        **{
+                            "question_tokenizer": self.question_tokenizer,
+                            "passage_tokenizer": self.passage_tokenizer,
+                            **self.val_datasets_kwargs[i],
+                        },
+                    ),
                 )
 
         if self.test_datasets is not None:
@@ -118,11 +137,19 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
                     data_path = dataset
                 elif isinstance(dataset, DictConfig()):
                     # TODO
-                    data_path = dataset.local
+                    data_path = dataset["local"]
                 else:
                     logger.debug("No data path found, skipping preprocessing")
                 GoldenRetrieverStreamingDataset.preprocess_to_mds(
-                    data_path, self.tokenizer
+                    data_path,
+                    partial(
+                        GoldenRetrieverStreamingDataset.tokenize,
+                        **{
+                            "question_tokenizer": self.question_tokenizer,
+                            "passage_tokenizer": self.passage_tokenizer,
+                            **self.val_datasets_kwargs[i],
+                        },
+                    ),
                 )
 
     def setup(self, stage: str | None = None):
@@ -213,23 +240,42 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
                     for dataset_cfg in self.datasets.test
                 ]
 
-        # setup hn manager
-        # hn_manager = HardNegativesManagerThread(
-        #     tokenizer=self.train_dataset.question_tokenizer,
-        #     max_passage_length=self.train_dataset.max_passage_length,
-        # )
+            _test_dataset = []
+            # keep track also of the kwargs
+            _test_dataset_kwargs = []
+            for i, dataset in enumerate(self.test_datasets):
+                if isinstance(dataset, (str, os.PathLike)):
+                    test_dataset, ds_kwargs = self.dataset_builder(
+                        dataset=dataset,
+                        name=f"test_dataset_{i}",
+                        question_tokenizer=self.question_tokenizer,
+                        passage_tokenizer=self.passage_tokenizer,
+                        shuffle=False,
+                        shuffle_seed=self.seed,
+                        dataset_kwargs=self.test_datasets_kwargs[i],
+                    )
+                elif isinstance(dataset, DictConfig):
+                    test_dataset = hydra.utils.instantiate(dataset)
+                else:
+                    test_dataset = dataset
+
+                _test_dataset.append(test_dataset)
+                # keep track of the kwargs
+                _test_dataset_kwargs.append(ds_kwargs)
+
+            # update val_dataset with the new datasets
+            self.test_datasets = _test_dataset
+            # update val_dataset_kwargs with the new kwargs
+            self.test_datasets_kwargs = _test_dataset_kwargs
 
     def train_dataloader(self, *args, **kwargs) -> DataLoader:
-        # torch_dataset = self.train_dataset.to_torch_dataset()
         return DataLoader(
-            # self.train_dataset.to_torch_dataset(),
-            # torch_dataset,
             self.train_dataset,
             collate_fn=GoldenRetrieverCollator(
                 tokenizer=self.train_dataset.question_tokenizer,
                 max_passage_length=self.train_dataset.max_passage_length,
             ),
-            shuffle=False,
+            shuffle=True,
             batch_size=self.train_dataset_kwargs.get("batch_size"),
             num_workers=self.num_workers.train,
             pin_memory=True,
@@ -240,17 +286,13 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
             ),
             persistent_workers=True if self.num_workers.train > 0 else False,
             timeout=0,
-            # user a custom distributed sampler
-            # sampler=GoldenDistributedSampler
         )
 
     def val_dataloader(self, *args, **kwargs) -> Union[DataLoader, List[DataLoader]]:
         dataloaders = []
         for i, dataset in enumerate(self.val_datasets):
-            # torch_dataset = dataset.to_torch_dataset()
             dataloaders.append(
                 DataLoader(
-                    # torch_dataset,
                     dataset,
                     collate_fn=GoldenRetrieverCollator(
                         tokenizer=dataset.question_tokenizer,
@@ -261,32 +303,42 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
                     num_workers=self.num_workers.val,
                     pin_memory=True,
                     prefetch_factor=(
-                        max(1, 8 * self.train_dataset.batch_size // self.num_workers.val)
+                        max(
+                            1, 8 * self.train_dataset.batch_size // self.num_workers.val
+                        )
                         if self.num_workers.val > 0
                         else None
                     ),
                     persistent_workers=True if self.num_workers.val > 0 else False,
                     timeout=0,
-                    # prefetch_factor=2,
-                    # persistent_workers=True,
-                    # collate_fn=lambda x: x,
-                    # sampler=GoldenDistributedSampler
                 )
             )
         return dataloaders
 
     def test_dataloader(self, *args, **kwargs) -> Union[DataLoader, List[DataLoader]]:
         dataloaders = []
-        for dataset in self.test_datasets:
-            torch_dataset = dataset.to_torch_dataset()
+        for i, dataset in enumerate(self.test_datasets):
             dataloaders.append(
                 DataLoader(
-                    torch_dataset,
+                    dataset,
+                    collate_fn=GoldenRetrieverCollator(
+                        tokenizer=dataset.question_tokenizer,
+                        max_passage_length=dataset.max_passage_length,
+                    ),
                     shuffle=False,
-                    batch_size=None,
-                    num_workers=self.num_workers.test,
-                    pin_memory=False,
-                    collate_fn=lambda x: x,
+                    batch_size=self.test_datasets_kwargs[i].get("batch_size"),
+                    num_workers=self.num_workers.val,
+                    pin_memory=True,
+                    prefetch_factor=(
+                        max(
+                            1,
+                            8 * self.train_dataset.batch_size // self.num_workers.test,
+                        )
+                        if self.num_workers.test > 0
+                        else None
+                    ),
+                    persistent_workers=True if self.num_workers.test > 0 else False,
+                    timeout=0,
                 )
             )
         return dataloaders

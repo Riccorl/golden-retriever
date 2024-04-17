@@ -107,7 +107,7 @@ class Trainer(FromConfig):
         deterministic: bool = True,
         fast_dev_run: bool = False,
         precision: int | str = 16,
-        reload_dataloaders_every_n_epochs: int = 1,
+        reload_dataloaders_every_n_epochs: int = 0,
         resume_from_checkpoint_path: str | os.PathLike | None = None,
         trainer_kwargs: dict | None = None,
         # eval parameters
@@ -725,7 +725,7 @@ class Trainer(FromConfig):
         if self.max_hard_negatives_to_mine > 0:
             self.callbacks_store.append(self.configure_hard_negatives_callback())
 
-        # self.callbacks_store.append(FreeUpIndexerVRAMCallback())
+        self.callbacks_store.append(FreeUpIndexerVRAMCallback())
 
         if self.trainer is None:
             logger.info("Instantiating the Trainer")

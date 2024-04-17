@@ -62,9 +62,7 @@ class GoldenRetriever(torch.nn.Module):
         self.passage_encoder_is_question_encoder = False
         # question encoder model
         if isinstance(question_encoder, str):
-            question_encoder = model_class.from_pretrained(
-                question_encoder, **kwargs
-            )
+            question_encoder = model_class.from_pretrained(question_encoder, **kwargs)
         self.question_encoder = question_encoder
         if passage_encoder is None:
             # if no passage encoder is provided,
@@ -73,9 +71,7 @@ class GoldenRetriever(torch.nn.Module):
             # keep track of the fact that the passage encoder is the same as the question encoder
             self.passage_encoder_is_question_encoder = True
         if isinstance(passage_encoder, str):
-            passage_encoder = model_class.from_pretrained(
-                passage_encoder, **kwargs
-            )
+            passage_encoder = model_class.from_pretrained(passage_encoder, **kwargs)
         # passage encoder model
         self.passage_encoder = passage_encoder
 
@@ -302,6 +298,13 @@ class GoldenRetriever(torch.nn.Module):
         Returns:
             `List[List[RetrievedSample]]`: The retrieved passages and their indices.
         """
+        if "mac" in platform.platform().lower():
+            num_workers = 0
+            logger.warning(
+                "DataLoader with num_workers > 0 is not supported on MacOS. "
+                "Setting `num_workers=0`."
+            )
+
         if self.document_index is None:
             raise ValueError(
                 "The indexer must be indexed before it can be used within the retriever."
@@ -347,21 +350,11 @@ class GoldenRetriever(torch.nn.Module):
             dataloader = tqdm(dataloader, desc="Retrieving passages")
 
         retrieved = []
-        try:
-            with get_autocast_context(self.device, precision):
-                for batch in dataloader:
-                    batch = batch.to(self.device)
-                    question_encodings = self.question_encoder(**batch).pooler_output
-                    retrieved += self.document_index.search(question_encodings, k)
-        except AttributeError as e:
-            # apparently num_workers > 0 gives some issue on MacOS as of now
-            if "mac" in platform.platform().lower():
-                raise ValueError(
-                    "DataLoader with num_workers > 0 is not supported on MacOS. "
-                    "Please set num_workers=0 or try to run on a different machine."
-                ) from e
-            else:
-                raise e
+        with get_autocast_context(self.device, precision):
+            for batch in dataloader:
+                batch = batch.to(self.device)
+                question_encodings = self.question_encoder(**batch).pooler_output
+                retrieved += self.document_index.search(question_encodings, k)
 
         if progress_bar:
             dataloader.close()
@@ -636,9 +629,11 @@ class GoldenRetriever(torch.nn.Module):
         config = {
             "_target_": f"{cls.__class__.__module__}.{cls.__class__.__name__}",
             "question_encoder": cls.question_encoder.config.name_or_path,
-            "passage_encoder": cls.passage_encoder.config.name_or_path
-            if not cls.passage_encoder_is_question_encoder
-            else None,
+            "passage_encoder": (
+                cls.passage_encoder.config.name_or_path
+                if not cls.passage_encoder_is_question_encoder
+                else None
+            ),
             "document_index": to_config(cls.document_index),
         }
         return config

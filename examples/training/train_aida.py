@@ -18,11 +18,11 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 if __name__ == "__main__":
     # instantiate retriever
     retriever = GoldenRetriever(
-        question_encoder="intfloat/e5-small-v2",
+        question_encoder="riccorl/e5-base-v2-blink-1M-32words-windows",
         # use_hf_model=True,
         document_index=InMemoryDocumentIndex(
             documents=DocumentStore.from_file(
-                "/home/ric/Projects/golden-retriever/data/dpr-like/el/documents_only_data.jsonl"
+                "/root/golden-retriever/data/entitylinking/documents.jsonl"
             ),
             metadata_fields=["definition"],
             separator=" <def> ",
@@ -44,17 +44,23 @@ if __name__ == "__main__":
 
     trainer = Trainer(
         retriever=retriever,
-        train_dataset="/home/ric/Projects/golden-retriever/data/dpr-like/el/mosaic/train",
-        val_dataset="/home/ric/Projects/golden-retriever/data/dpr-like/el/mosaic/val",
+        train_dataset="/root/golden-retriever/data/entitylinking/aida_32_tokens_topic/train.jsonl",
+        train_dataset_kwargs={"max_question_length": 64},
+        val_dataset="/root/golden-retriever/data/entitylinking/aida_32_tokens_topic/val.jsonl",
+        val_dataset_kwargs={"max_question_length": 64},
+        train_batch_size=64,
+        val_batch_size=64,
+        accumulate_grad_batches=4,
         # test_dataset=test_dataset,
         num_workers=8,
         max_steps=25_000,
         # log_to_wandb=False,
         wandb_online_mode=False,
+        wandb_log_model=False,
         wandb_project_name="golden-retriever-aida",
-        wandb_experiment_name="aida-e5-base-topics-from-blink",
-        max_hard_negatives_to_mine=5,
-        gradient_clip_val=0.0,
+        wandb_experiment_name="aida-e5-base-topics-from-blink-1M-32words-windows-streaming",
+        max_hard_negatives_to_mine=15,
+        # gradient_clip_val=1.0,
         # strategy="deepspeed_stage_2",
         # strategy=strategy,
         # devices=2,

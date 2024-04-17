@@ -55,6 +55,14 @@ class GoldenRetrieverPLModule(pl.LightningModule):
             prog_bar=True,
             sync_dist=True,
         )
+        # log the passage batch size
+        self.log(
+            "passage_batch_size",
+            batch["passages"]["input_ids"].size(0),
+            batch_size=batch["questions"]["input_ids"].size(0),
+            prog_bar=True,
+            sync_dist=True,
+        )
         return forward_output["loss"]
 
     def validation_step(self, batch: ModelInputs, batch_idx: int) -> None:

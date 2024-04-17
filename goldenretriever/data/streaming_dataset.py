@@ -210,8 +210,8 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
         max_negatives: int = -1,
         max_hard_negatives: int = -1,
         max_passages: int = -1,
-        max_question_length: int = 40,
-        max_passage_length: int = 40,
+        max_question_length: int = 256,
+        max_passage_length: int = 64,
         metadata_fields: Optional[Sequence[str]] = None,
         metadata_separator: str = "\t",
         **kwargs: Any,
@@ -219,7 +219,7 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
 
         if len(kwargs) > 0:
             raise ValueError(
-                f"GoldenRetrieverStreamingDataset() got an unexpected keyword argument: {kwargs}"
+                f"`GoldenRetrieverStreamingDataset()` got an unexpected keyword argument: {kwargs}"
             )
 
         if local is not None and (remote is None or (local == remote)):
@@ -227,7 +227,7 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
                 contents = set(os.listdir(local))
                 if split is not None and split not in contents:
                     raise ValueError(
-                        f"local directory {local} does not contain split {split}"
+                        f"local directory `{local}` does not contain split `{split}`"
                     )
 
         # TODO: discover where yamls are being converted incorrect, but temporary workaround
@@ -249,7 +249,26 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
         self.metadata_separator = metadata_separator
 
         # get data to MDS format
-        # local = self._preprocess_to_mds(local, self._tokenize if preprocess else None)
+        local = self.preprocess_to_mds(
+            local,
+            (
+                partial(
+                    self.tokenize,
+                    question_tokenizer=self.question_tokenizer,
+                    passage_tokenizer=self.passage_tokenizer,
+                    max_positives=max_positives,
+                    max_negatives=max_negatives,
+                    max_hard_negatives=max_hard_negatives,
+                    max_passages=max_passages,
+                    max_question_length=max_question_length,
+                    max_passage_length=max_passage_length,
+                    metadata_fields=metadata_fields,
+                    metadata_separator=metadata_separator,
+                )
+                if preprocess
+                else None
+            ),
+        )
 
         # Build Dataset
         super().__init__(
@@ -282,59 +301,94 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
         sample = super().__getitem__(idx)
         # check if the sample has been tokenized already
         if isinstance(sample["question"], str):
-            return self._tokenize(sample)
+            return self.tokenize(
+                sample,
+                question_tokenizer=self.question_tokenizer,
+                passage_tokenizer=self.passage_tokenizer,
+                max_positives=self.max_positives,
+                max_negatives=self.max_negatives,
+                max_hard_negatives=self.max_hard_negatives,
+                max_passages=self.max_passages,
+                max_question_length=self.max_question_length,
+                max_passage_length=self.max_passage_length,
+                metadata_fields=self.metadata_fields,
+                metadata_separator=self.metadata_separator,
+            )
         else:
             return sample
 
-    def _get_passages(self, passages: List[Dict[str, str]]) -> List[str]:
-        formatted_passages = []
-        for passage in passages:
-            formatted_passage = passage["text"]
-            if self.metadata_fields is not None:
-                metadata = self.metadata_separator.join(
-                    [passage.get(field, "") for field in self.metadata_fields]
-                )
-                formatted_passage = (
-                    f"{formatted_passage}{self.metadata_separator}{metadata}"
-                )
-            formatted_passages.append(formatted_passage)
-
-        # remove duplicates
-        formatted_passages = list(set(formatted_passages))
-        return formatted_passages
-
     # How to tokenize a text sample to a token sample
-    def _tokenize(self, sample: Mapping) -> Dict[str, List[int]]:
+    @staticmethod
+    def tokenize(
+        sample: Mapping,
+        question_tokenizer: PreTrainedTokenizerBase,
+        passage_tokenizer: PreTrainedTokenizerBase,
+        max_positives: int = -1,
+        max_negatives: int = -1,
+        max_hard_negatives: int = -1,
+        max_passages: int = -1,
+        max_question_length: int = 40,
+        max_passage_length: int = 40,
+        metadata_fields: Optional[Sequence[str]] = None,
+        metadata_separator: str = "\t",
+        **kwargs: Any,
+    ) -> Dict[str, List[int]]:
+
+        def _get_passages(
+            passages: List[Dict[str, str]], metadata_fields, metadata_separator
+        ) -> List[str]:
+            formatted_passages = []
+            for passage in passages:
+                formatted_passage = passage["text"]
+                if metadata_fields is not None:
+                    metadata = metadata_separator.join(
+                        [passage.get(field, "") for field in metadata_fields]
+                    )
+                    formatted_passage = (
+                        f"{formatted_passage}{metadata_separator}{metadata}"
+                    )
+                formatted_passages.append(formatted_passage)
+
+            # remove duplicates
+            formatted_passages = list(set(formatted_passages))
+            return formatted_passages
+
         # remove duplicates and limit the number of passages
         # positives = list(set([p["text"] for p in sample["positive_ctxs"]]))
-        positives = self._get_passages(sample["positive_ctxs"])
-        if self.max_positives != -1:
-            positives = positives[: self.max_positives]
+        positives = _get_passages(
+            sample["positive_ctxs"], metadata_fields, metadata_separator
+        )
+        if max_positives != -1:
+            positives = positives[:max_positives]
 
         # negatives = list(set([n["text"] for n in sample["negative_ctxs"]]))
-        negatives = self._get_passages(sample["negative_ctxs"])
-        if self.max_negatives != -1:
-            negatives = negatives[: self.max_negatives]
+        negatives = _get_passages(
+            sample["negative_ctxs"], metadata_fields, metadata_separator
+        )
+        if max_negatives != -1:
+            negatives = negatives[:max_negatives]
 
         # hard_negatives = list(set([h["text"] for h in sample["hard_negative_ctxs"]]))
-        hard_negatives = self._get_passages(sample["hard_negative_ctxs"])
-        if self.max_hard_negatives != -1:
-            hard_negatives = hard_negatives[: self.max_hard_negatives]
+        hard_negatives = _get_passages(
+            sample["hard_negative_ctxs"], metadata_fields, metadata_separator
+        )
+        if max_hard_negatives != -1:
+            hard_negatives = hard_negatives[:max_hard_negatives]
 
         text_pair = sample.get("doc_topic", None)
-        question = self.question_tokenizer(
+        question = question_tokenizer(
             sample["question"],
             text_pair=text_pair,
-            max_length=self.max_question_length,
+            max_length=max_question_length,
             truncation=True,
         )
 
         passage = positives + negatives + hard_negatives
-        if self.max_passages != -1:
-            passage = passage[: self.max_passages]
+        if max_passages != -1:
+            passage = passage[:max_passages]
 
-        passage = self.passage_tokenizer(
-            passage, max_length=self.max_passage_length, truncation=True
+        passage = passage_tokenizer(
+            passage, max_length=max_passage_length, truncation=True
         )
 
         # invert the passage data structure from a dict of lists to a list of dicts
@@ -387,9 +441,18 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
         # the file is already here, return it
         if file_exists(cache_path):  # and not force_download:
             logger.info(
-                f"{source} found in cache"  # , set `force_download=True` to force the download"
+                f"{source} found in cache."  # , set `force_download=True` to force the download"
             )
             return str(cache_path)
+
+        logger.info("Converting dataset to MDS format")
+        num_workers = None
+        if num_workers is None:
+            # Multiple workers is only supported on linux machines
+            if "linux" in platform.platform().lower():
+                num_workers = max(1, psutil.cpu_count())
+            else:
+                num_workers = 0
 
         dataset = build_hf_dataset(
             dataset_name=str(source),
@@ -397,31 +460,10 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
             split="train",
             shuffle=False,
             is_local=True,
-            # num_workers=args.num_workers,
+            num_workers=num_workers,
         )
-        num_workers = None
         if tokenizer_fn is not None:
-            if num_workers is None:
-                # Multiple workers is only supported on linux machines
-                if "linux" or "macos" in platform.platform().lower():
-                    num_workers = max(1, psutil.cpu_count())
-                else:
-                    num_workers = 0
             dataset = dataset.map(tokenizer_fn, desc="Tokenizing data")
-        # dataloader = build_dataloader(
-        #     dataset=dataset, batch_size=None, num_workers=None
-        # )
-
-        # def generate_samples(loader, tokenizer_fn=None):
-        #     for batch in loader:
-        #         if tokenizer_fn is not None:
-        #             batch = tokenizer_fn(batch)
-        #         yield batch
-        # batch has key: list of values, we want to yield a list of dicts
-        # keys = list(batch.keys())
-        # current_bs = len(batch[keys[0]])
-        # for idx in range(current_bs):
-        #     yield {k: v[idx] if isinstance(v, list) else v for k, v in batch.items()}
 
         if tokenizer_fn is None:
             columns = {
