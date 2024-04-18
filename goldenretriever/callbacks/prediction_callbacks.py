@@ -10,12 +10,15 @@ from omegaconf import DictConfig
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from goldenretriever.callbacks.base import PredictionCallback, NLPTemplateCallback
+from goldenretriever.callbacks.base import NLPTemplateCallback, PredictionCallback
 from goldenretriever.common.log import get_logger
 from goldenretriever.common.model_inputs import ModelInputs
 from goldenretriever.data.base.datasets import BaseDataset
 from goldenretriever.data.datasets import GoldenRetrieverDataset
-from goldenretriever.data.streaming_dataset import GoldenRetrieverCollator, GoldenRetrieverStreamingDataset
+from goldenretriever.data.streaming_dataset import (
+    GoldenRetrieverCollator,
+    GoldenRetrieverStreamingDataset,
+)
 from goldenretriever.indexers.base import BaseDocumentIndex
 from goldenretriever.lightning_modules.pl_modules import GoldenRetrieverPLModule
 from goldenretriever.pytorch_modules.model import GoldenRetriever
@@ -141,9 +144,9 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                     compute_on_cpu=False,
                     force_reindex=force_reindex,
                 )
-            
+
             trainer.strategy.barrier()
-            
+
             # # create new dataloader
             # eval_dataloader = DataLoader(
             #         GoldenRetrieverStreamingDataset(
@@ -195,15 +198,22 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                                         "actual performance."
                                     )
                                 pass
-                        retrieved_indices = [r.document.id for r in retrieved_samples if r]
+                        retrieved_indices = [
+                            r.document.id for r in retrieved_samples if r
+                        ]
                         retrieved_passages = [
-                            retriever.get_passage_from_index(i) for i in retrieved_indices
+                            retriever.get_passage_from_index(i)
+                            for i in retrieved_indices
                         ]
                         retrieved_scores = [r.score for r in retrieved_samples]
                         # correct predictions are the passages that are in the top-k and are gold
-                        correct_indices = set(gold_passage_indices) & set(retrieved_indices)
+                        correct_indices = set(gold_passage_indices) & set(
+                            retrieved_indices
+                        )
                         # wrong predictions are the passages that are in the top-k and are not gold
-                        wrong_indices = set(retrieved_indices) - set(gold_passage_indices)
+                        wrong_indices = set(retrieved_indices) - set(
+                            gold_passage_indices
+                        )
                         # add the predictions to the list
                         prediction_output = dict(
                             sample_idx=batch.sample_idx[batch_idx],
@@ -211,15 +221,16 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                             predictions=retrieved_passages,
                             scores=retrieved_scores,
                             correct=[
-                                retriever.get_passage_from_index(i) for i in correct_indices
+                                retriever.get_passage_from_index(i)
+                                for i in correct_indices
                             ],
                             wrong=[
-                                retriever.get_passage_from_index(i) for i in wrong_indices
+                                retriever.get_passage_from_index(i)
+                                for i in wrong_indices
                             ],
                         )
                         predictions.append(prediction_output)
                 end = time.time()
-            # if trainer.global_rank == 0:
                 logger.info(f"Time to retrieve: {str(end - start)}")
 
             dataloader_predictions[dataloader_idx] = predictions

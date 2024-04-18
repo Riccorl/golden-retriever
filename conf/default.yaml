@@ -37,12 +37,12 @@ val_dataset:
 num_workers: 4
 
 # optimizer section
-# optimizer: goldenretriever.pytorch_modules.optim.RAdamW
-# lr: 1e-5
-# weight_decay: 0.01
-# lr_scheduler: goldenretriever.pytorch_modules.scheduler.LinearScheduler
-max_steps: 25_000
-# max_epochs: 1
+optimizer: goldenretriever.pytorch_modules.optim.RAdamW
+lr: 1e-5
+weight_decay: 0.01
+lr_scheduler: goldenretriever.pytorch_modules.scheduler.LinearScheduler
+# max_steps: 25_000
+max_epochs: 1
 accumulate_grad_batches: 4
 gradient_clip_val: 1.0
 deterministic: True

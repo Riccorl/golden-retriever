@@ -126,7 +126,7 @@ class FreeUpIndexerVRAMCallback(pl.Callback):
         **kwargs,
     ) -> Any:
         # if trainer.global_rank == 0:
-            # pl_module.trainer.global_rank == 
+        # pl_module.trainer.global_rank ==
         logger.info("Freeing up GPU memory")
 
         # remove the index from the GPU memory
@@ -169,7 +169,9 @@ class ShuffleTrainDatasetCallback(pl.Callback):
         if self.verbose:
             if trainer.current_epoch != self.previous_epoch:
                 if trainer.global_rank == 0:
-                    logger.info(f"Shuffling train dataset at epoch {trainer.current_epoch}")
+                    logger.info(
+                        f"Shuffling train dataset at epoch {trainer.current_epoch}"
+                    )
 
             # logger.info(f"Shuffling train dataset at epoch {trainer.current_epoch}")
         if trainer.current_epoch != self.previous_epoch:
@@ -199,12 +201,12 @@ class PrefetchTrainDatasetCallback(pl.Callback):
 
 
 # class HardNegativeCallback(pl.Callback):
-    # def __init__(self) -> None:
-    #     super().__init__()
-    #     self.hn_manager = HardNegativesManagerThread()
+# def __init__(self) -> None:
+#     super().__init__()
+#     self.hn_manager = HardNegativesManagerThread()
 
-    # def on_train_batch_start(self, trainer: pl.Trainer, *args, **kwargs):
-    #     trainer.
+# def on_train_batch_start(self, trainer: pl.Trainer, *args, **kwargs):
+#     trainer.
 
 
 class SubsampleTrainDatasetCallback(pl.Callback):
@@ -216,7 +218,9 @@ class SubsampleTrainDatasetCallback(pl.Callback):
     def on_validation_epoch_end(self, trainer: pl.Trainer, *args, **kwargs):
         if self.verbose:
             if trainer.global_rank == 0:
-                logger.info(f"Subsampling train dataset at epoch {trainer.current_epoch}")
+                logger.info(
+                    f"Subsampling train dataset at epoch {trainer.current_epoch}"
+                )
                 trainer.datamodule.train_dataset.random_subsample(
                     seed=self.seed + trainer.current_epoch + 1
                 )

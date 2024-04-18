@@ -249,7 +249,7 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
             _test_dataset_kwargs = []
             for i, dataset in enumerate(self.test_datasets):
                 if isinstance(dataset, (str, os.PathLike)):
-                    ds_kwargs  = None
+                    ds_kwargs = None
                     test_dataset, ds_kwargs = self.dataset_builder(
                         dataset=dataset,
                         name=f"test_dataset_{i}",
@@ -311,9 +311,7 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
                     num_workers=self.num_workers.val,
                     pin_memory=True,
                     prefetch_factor=(
-                        max(
-                            1, 8 * dataset.batch_size // self.num_workers.val
-                        )
+                        max(1, 8 * dataset.batch_size // self.num_workers.val)
                         if self.num_workers.val > 0
                         else None
                     ),

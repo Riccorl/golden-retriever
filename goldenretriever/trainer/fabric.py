@@ -142,9 +142,13 @@ class FabricTrainer:
         self.fabric.launch()
 
         # setup dataloaders
-        train_loader = self.fabric.setup_dataloaders(train_loader, use_distributed_sampler=self.use_distributed_sampler)
+        train_loader = self.fabric.setup_dataloaders(
+            train_loader, use_distributed_sampler=self.use_distributed_sampler
+        )
         if val_loader is not None:
-            val_loader = self.fabric.setup_dataloaders(val_loader, use_distributed_sampler=self.use_distributed_sampler)
+            val_loader = self.fabric.setup_dataloaders(
+                val_loader, use_distributed_sampler=self.use_distributed_sampler
+            )
 
         # setup model and optimizer
         if isinstance(self.fabric.strategy, L.fabric.strategies.fsdp.FSDPStrategy):
@@ -152,7 +156,9 @@ class FabricTrainer:
             # as it would require fabric to hold a reference to the model, which we don't want to.
             raise NotImplementedError("BYOT currently does not support FSDP")
 
-        optimizer, scheduler_cfg = self._parse_optimizers_schedulers(model.configure_optimizers())
+        optimizer, scheduler_cfg = self._parse_optimizers_schedulers(
+            model.configure_optimizers()
+        )
         assert optimizer is not None
         model, optimizer = self.fabric.setup(model, optimizer)
 
@@ -166,18 +172,27 @@ class FabricTrainer:
                 self.load(state, latest_checkpoint_path)
 
                 # check if we even need to train here
-                if self.max_epochs is not None and self.current_epoch >= self.max_epochs:
+                if (
+                    self.max_epochs is not None
+                    and self.current_epoch >= self.max_epochs
+                ):
                     self.should_stop = True
 
         while not self.should_stop:
             self.train_loop(
-                model, optimizer, train_loader, limit_batches=self.limit_train_batches, scheduler_cfg=scheduler_cfg
+                model,
+                optimizer,
+                train_loader,
+                limit_batches=self.limit_train_batches,
+                scheduler_cfg=scheduler_cfg,
             )
 
             if self.should_validate:
                 self.val_loop(model, val_loader, limit_batches=self.limit_val_batches)
 
-            self.step_scheduler(model, scheduler_cfg, level="epoch", current_value=self.current_epoch)
+            self.step_scheduler(
+                model, scheduler_cfg, level="epoch", current_value=self.current_epoch
+            )
 
             self.current_epoch += 1
 
@@ -196,7 +211,9 @@ class FabricTrainer:
         optimizer: torch.optim.Optimizer,
         train_loader: torch.utils.data.DataLoader,
         limit_batches: Union[int, float] = float("inf"),
-        scheduler_cfg: Optional[Mapping[str, Union[L.fabric.utilities.types.LRScheduler, bool, str, int]]] = None,
+        scheduler_cfg: Optional[
+            Mapping[str, Union[L.fabric.utilities.types.LRScheduler, bool, str, int]]
+        ] = None,
     ):
         """The training loop running a single training epoch.
 
@@ -213,7 +230,9 @@ class FabricTrainer:
         """
         self.fabric.call("on_train_epoch_start")
         iterable = self.progbar_wrapper(
-            train_loader, total=min(len(train_loader), limit_batches), desc=f"Epoch {self.current_epoch}"
+            train_loader,
+            total=min(len(train_loader), limit_batches),
+            desc=f"Epoch {self.current_epoch}",
         )
 
         for batch_idx, batch in enumerate(iterable):
@@ -230,7 +249,14 @@ class FabricTrainer:
                 self.fabric.call("on_before_optimizer_step", optimizer, 0)
 
                 # optimizer step runs train step internally through closure
-                optimizer.step(partial(self.training_step, model=model, batch=batch, batch_idx=batch_idx))
+                optimizer.step(
+                    partial(
+                        self.training_step,
+                        model=model,
+                        batch=batch,
+                        batch_idx=batch_idx,
+                    )
+                )
                 self.fabric.call("on_before_zero_grad", optimizer)
 
                 optimizer.zero_grad()
@@ -239,11 +265,15 @@ class FabricTrainer:
                 # gradient accumulation -> no optimizer step
                 self.training_step(model=model, batch=batch, batch_idx=batch_idx)
 
-            self.fabric.call("on_train_batch_end", self._current_train_return, batch, batch_idx)
+            self.fabric.call(
+                "on_train_batch_end", self._current_train_return, batch, batch_idx
+            )
 
             # this guard ensures, we only step the scheduler once per global step
             if should_optim_step:
-                self.step_scheduler(model, scheduler_cfg, level="step", current_value=self.global_step)
+                self.step_scheduler(
+                    model, scheduler_cfg, level="step", current_value=self.global_step
+                )
 
             # add output values to progress bar
             self._format_iterable(iterable, self._current_train_return, "train")
@@ -278,7 +308,9 @@ class FabricTrainer:
             return
 
         # no validation but warning if val_loader was passed, but validation_step not implemented
-        if val_loader is not None and not is_overridden("validation_step", _unwrap_objects(model)):
+        if val_loader is not None and not is_overridden(
+            "validation_step", _unwrap_objects(model)
+        ):
             L.fabric.utilities.rank_zero_warn(
                 "Your LightningModule does not have a validation_step implemented, "
                 "but you passed a validation dataloder. Skipping Validation."
@@ -291,7 +323,9 @@ class FabricTrainer:
 
         self.fabric.call("on_validation_epoch_start")
 
-        iterable = self.progbar_wrapper(val_loader, total=min(len(val_loader), limit_batches), desc="Validation")
+        iterable = self.progbar_wrapper(
+            val_loader, total=min(len(val_loader), limit_batches), desc="Validation"
+        )
 
         for batch_idx, batch in enumerate(iterable):
             # end epoch if stopping training completely or max batches for this epoch reached
@@ -314,7 +348,9 @@ class FabricTrainer:
         self.fabric.call("on_validation_model_train")
         torch.set_grad_enabled(True)
 
-    def training_step(self, model: L.LightningModule, batch: Any, batch_idx: int) -> torch.Tensor:
+    def training_step(
+        self, model: L.LightningModule, batch: Any, batch_idx: int
+    ) -> torch.Tensor:
         """A single training step, running forward and backward. The optimizer step is called separately, as this is
         given as a closure to the optimizer step.
 
@@ -324,7 +360,9 @@ class FabricTrainer:
             batch_idx: index of the current batch w.r.t the current epoch
 
         """
-        outputs: Union[torch.Tensor, Mapping[str, Any]] = model.training_step(batch, batch_idx=batch_idx)
+        outputs: Union[torch.Tensor, Mapping[str, Any]] = model.training_step(
+            batch, batch_idx=batch_idx
+        )
 
         loss = outputs if isinstance(outputs, torch.Tensor) else outputs["loss"]
 
@@ -333,14 +371,18 @@ class FabricTrainer:
         self.fabric.call("on_after_backward")
 
         # avoid gradients in stored/accumulated values -> prevents potential OOM
-        self._current_train_return = apply_to_collection(outputs, dtype=torch.Tensor, function=lambda x: x.detach())
+        self._current_train_return = apply_to_collection(
+            outputs, dtype=torch.Tensor, function=lambda x: x.detach()
+        )
 
         return loss
 
     def step_scheduler(
         self,
         model: L.LightningModule,
-        scheduler_cfg: Optional[Mapping[str, Union[L.fabric.utilities.types.LRScheduler, bool, str, int]]],
+        scheduler_cfg: Optional[
+            Mapping[str, Union[L.fabric.utilities.types.LRScheduler, bool, str, int]]
+        ],
         level: Literal["step", "epoch"],
         current_value: int,
     ) -> None:
@@ -372,15 +414,21 @@ class FabricTrainer:
         if isinstance(self._current_train_return, torch.Tensor):
             possible_monitor_vals.update("train_loss", self._current_train_return)
         elif isinstance(self._current_train_return, Mapping):
-            possible_monitor_vals.update({"train_" + k: v for k, v in self._current_train_return.items()})
+            possible_monitor_vals.update(
+                {"train_" + k: v for k, v in self._current_train_return.items()}
+            )
 
         if isinstance(self._current_val_return, torch.Tensor):
             possible_monitor_vals.update("val_loss", self._current_val_return)
         elif isinstance(self._current_val_return, Mapping):
-            possible_monitor_vals.update({"val_" + k: v for k, v in self._current_val_return.items()})
+            possible_monitor_vals.update(
+                {"val_" + k: v for k, v in self._current_val_return.items()}
+            )
 
         try:
-            monitor = possible_monitor_vals[cast(Optional[str], scheduler_cfg["monitor"])]
+            monitor = possible_monitor_vals[
+                cast(Optional[str], scheduler_cfg["monitor"])
+            ]
         except KeyError as ex:
             possible_keys = list(possible_monitor_vals.keys())
             raise KeyError(
@@ -437,7 +485,10 @@ class FabricTrainer:
 
         state.update(global_step=self.global_step, current_epoch=self.current_epoch)
 
-        self.fabric.save(os.path.join(self.checkpoint_dir, f"epoch-{self.current_epoch:04d}.ckpt"), state)
+        self.fabric.save(
+            os.path.join(self.checkpoint_dir, f"epoch-{self.current_epoch:04d}.ckpt"),
+            state,
+        )
 
     @staticmethod
     def get_latest_checkpoint(checkpoint_dir: str) -> Optional[str]:
@@ -457,11 +508,11 @@ class FabricTrainer:
 
         return os.path.join(checkpoint_dir, items[-1])
 
-    def _parse_optimizers_schedulers(
-        self, configure_optim_output
-    ) -> Tuple[
+    def _parse_optimizers_schedulers(self, configure_optim_output) -> Tuple[
         Optional[L.fabric.utilities.types.Optimizable],
-        Optional[Mapping[str, Union[L.fabric.utilities.types.LRScheduler, bool, str, int]]],
+        Optional[
+            Mapping[str, Union[L.fabric.utilities.types.LRScheduler, bool, str, int]]
+        ],
     ]:
         """Recursively parses the output of :meth:`lightning.pytorch.LightningModule.configure_optimizers`.
 
@@ -470,7 +521,11 @@ class FabricTrainer:
                 For supported values, please refer to :meth:`lightning.pytorch.LightningModule.configure_optimizers`.
 
         """
-        _lr_sched_defaults = {"interval": "epoch", "frequency": 1, "monitor": "val_loss"}
+        _lr_sched_defaults = {
+            "interval": "epoch",
+            "frequency": 1,
+            "monitor": "val_loss",
+        }
 
         # single optimizer
         if isinstance(configure_optim_output, L.fabric.utilities.types.Optimizable):
@@ -487,7 +542,10 @@ class FabricTrainer:
 
         # list or tuple
         if isinstance(configure_optim_output, (list, tuple)):
-            if all(isinstance(_opt_cand, L.fabric.utilities.types.Optimizable) for _opt_cand in configure_optim_output):
+            if all(
+                isinstance(_opt_cand, L.fabric.utilities.types.Optimizable)
+                for _opt_cand in configure_optim_output
+            ):
                 # single optimizer in list
                 if len(configure_optim_output) == 1:
                     return configure_optim_output[0][0], None
@@ -500,7 +558,10 @@ class FabricTrainer:
             ):
                 # single scheduler in list
                 if len(configure_optim_output) == 1:
-                    return None, self._parse_optimizers_schedulers(configure_optim_output[0])[1]
+                    return (
+                        None,
+                        self._parse_optimizers_schedulers(configure_optim_output[0])[1],
+                    )
 
             # optimizer and lr scheduler
             elif len(configure_optim_output) == 2:
@@ -514,7 +575,11 @@ class FabricTrainer:
 
     @staticmethod
     def _format_iterable(
-        prog_bar, candidates: Optional[Union[torch.Tensor, Mapping[str, Union[torch.Tensor, float, int]]]], prefix: str
+        prog_bar,
+        candidates: Optional[
+            Union[torch.Tensor, Mapping[str, Union[torch.Tensor, float, int]]]
+        ],
+        prefix: str,
     ):
         """Adds values as postfix string to progressbar.
 
@@ -526,7 +591,9 @@ class FabricTrainer:
         """
         if isinstance(prog_bar, tqdm) and candidates is not None:
             postfix_str = ""
-            float_candidates = apply_to_collection(candidates, torch.Tensor, lambda x: x.item())
+            float_candidates = apply_to_collection(
+                candidates, torch.Tensor, lambda x: x.item()
+            )
             if isinstance(candidates, torch.Tensor):
                 postfix_str += f" {prefix}_loss: {float_candidates:.3f}"
             elif isinstance(candidates, Mapping):

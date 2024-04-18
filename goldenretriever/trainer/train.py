@@ -37,7 +37,7 @@ from goldenretriever.callbacks.utils_callbacks import (
 )
 from goldenretriever.common.from_config import FromConfig
 from goldenretriever.common.log import get_logger
-from goldenretriever.common.utils import to_config
+from goldenretriever.common.utils import get_callable_from_string, to_config
 from goldenretriever.data.datasets import GoldenRetrieverDataset
 
 from goldenretriever.data.streaming_dataset import GoldenRetrieverStreamingDataset
@@ -413,7 +413,6 @@ class Trainer(FromConfig):
                     documents.add_document(sample)
 
     def configure_lightning_module(self, *args, **kwargs):
-
         # lightning module declaration
         self.lightning_module = GoldenRetrieverPLModule(
             model=self.retriever,
@@ -422,10 +421,15 @@ class Trainer(FromConfig):
             *args,
             **kwargs,
         )
-
         return self.lightning_module
 
     def configure_optimizers(self, *args, **kwargs):
+
+        # cast the optimizer to the class
+        if isinstance(self.optimizer, str):
+            # convert string to a callable
+            self.optimizer = get_callable_from_string(self.optimizer)
+
         # check if it is the class or the instance
         if isinstance(self.optimizer, type):
             param_optimizer = list(self.retriever.named_parameters())
@@ -469,6 +473,9 @@ class Trainer(FromConfig):
         # LR Scheduler declaration
         # check if it is the class, the instance or a function
         if self.lr_scheduler is not None:
+            if isinstance(self.lr_scheduler, str):
+                # convert string to a callable
+                self.lr_scheduler = get_callable_from_string(self.lr_scheduler)
             if isinstance(self.lr_scheduler, type):
                 self.lr_scheduler = self.lr_scheduler(
                     optimizer=self.optimizer,
