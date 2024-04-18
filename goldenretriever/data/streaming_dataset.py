@@ -575,7 +575,7 @@ class GoldenRetrieverCollator:
 
     @staticmethod
     def split_batch(
-        batch: Union[Dict[str, Any], ModelInputs], microbatch_size: int
+        batch: Union[Dict[str, Any], ModelInputs], microbatch_size: int | None = None
     ) -> List[ModelInputs]:
         """
         Split a batch into multiple batches of size `question_batch_size` while keeping

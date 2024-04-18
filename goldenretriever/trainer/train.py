@@ -81,12 +81,14 @@ class Trainer(FromConfig):
         test_batch_size: int = 32,
         test_dataset_kwargs: dict | list[dict] | None = None,
         num_workers: int = 4,
+        add_documents_from_dataset: bool = False,
         optimizer: torch.optim.Optimizer = RAdamW,
         lr: float = 1e-5,
         weight_decay: float = 0.01,
         lr_scheduler: torch.optim.lr_scheduler.LRScheduler = LinearScheduler,
         num_warmup_steps: int = 0,
         loss: torch.nn.Module = MultiLabelNCELoss,
+        micro_batch_size: int | None = None,
         callbacks: list | None = None,
         accelerator: str = "auto",
         devices: int = 1,
@@ -154,6 +156,7 @@ class Trainer(FromConfig):
         self.test_batch_size = test_batch_size
         self.test_dataset_kwargs = test_dataset_kwargs or {}
         self.num_workers = num_workers
+        self.add_documents_from_dataset = add_documents_from_dataset
         # trainer parameters
         self.optimizer = optimizer
         self.lr = lr
@@ -161,6 +164,7 @@ class Trainer(FromConfig):
         self.lr_scheduler = lr_scheduler
         self.num_warmup_steps = num_warmup_steps
         self.loss = loss
+        self.micro_batch_size = micro_batch_size
         self.callbacks = callbacks
         self.accelerator = accelerator
         self.devices = devices
@@ -244,6 +248,9 @@ class Trainer(FromConfig):
             self.max_steps = (
                 len(self.lightning_datamodule.train_dataloader()) * self.max_epochs
             )
+
+        if self.add_documents_from_dataset:
+            self.add_documents_from_dataset()
 
         # optimizer declaration
         self.optimizer, self.lr_scheduler = self.configure_optimizers()
@@ -363,7 +370,6 @@ class Trainer(FromConfig):
             num_workers=self.num_workers,
             question_tokenizer=self.retriever.question_tokenizer,
             passage_tokenizer=self.retriever.passage_tokenizer,
-            # tokenizer=self.retriever.question_tokenizer,
             *args,
             **kwargs,
         )
@@ -380,37 +386,37 @@ class Trainer(FromConfig):
 
         return self.retriever
 
-    def add_documents_from_dataset(self, force: bool = False, add_test: bool = False):
+    def add_documents_from_dataset(self, add_test: bool = False):
         # # check if Index is empty
-        if len(self.retriever.document_index) == 0 or force:
-            logger.info("Adding documents from the datasets to the Index")
-            # add the docs from the datasets
-            logger.info("Document Index is empty. Adding documents from the datasets.")
-            documents = self.retriever.document_index.documents
-            for sample in tqdm(self.train_dataset, desc="Adding documents from train"):
-                [documents.add_document(s) for s in sample["positives"]]
-                [documents.add_document(s) for s in sample["negatives"]]
-                [documents.add_document(s) for s in sample["hard_negatives"]]
+        # if len(self.retriever.document_index) == 0 or force:
+        logger.info("Adding documents from the datasets to the Index")
+        # add the docs from the datasets
+        logger.info("Document Index is empty. Adding documents from the datasets.")
+        documents = self.retriever.document_index.documents
+        for sample in tqdm(self.train_dataset, desc="Adding documents from train"):
+            [documents.add_document(s) for s in sample["positives"]]
+            [documents.add_document(s) for s in sample["negatives"]]
+            [documents.add_document(s) for s in sample["hard_negatives"]]
 
-            if self.val_dataset is not None:
-                val_passages = []
-                for ds in self.val_dataset:
-                    for sample in ds:
-                        val_passages.extend(sample["positives"])
-                        val_passages.extend(sample["negatives"])
-                        val_passages.extend(sample["hard_negatives"])
-                for sample in tqdm(val_passages, desc="Adding documents from val"):
-                    documents.add_document(sample)
+        if self.val_dataset is not None:
+            val_passages = []
+            for ds in self.val_dataset:
+                for sample in ds:
+                    val_passages.extend(sample["positives"])
+                    val_passages.extend(sample["negatives"])
+                    val_passages.extend(sample["hard_negatives"])
+            for sample in tqdm(val_passages, desc="Adding documents from val"):
+                documents.add_document(sample)
 
-            if self.test_dataset is not None and add_test:
-                test_passages = []
-                for ds in self.test_dataset:
-                    for sample in ds:
-                        test_passages.extend(sample["positives"])
-                        test_passages.extend(sample["negatives"])
-                        test_passages.extend(sample["hard_negatives"])
-                for sample in tqdm(test_passages, desc="Adding documents from test"):
-                    documents.add_document(sample)
+        if self.test_dataset is not None and add_test:
+            test_passages = []
+            for ds in self.test_dataset:
+                for sample in ds:
+                    test_passages.extend(sample["positives"])
+                    test_passages.extend(sample["negatives"])
+                    test_passages.extend(sample["hard_negatives"])
+            for sample in tqdm(test_passages, desc="Adding documents from test"):
+                documents.add_document(sample)
 
     def configure_lightning_module(self, *args, **kwargs):
         # lightning module declaration
@@ -418,6 +424,7 @@ class Trainer(FromConfig):
             model=self.retriever,
             optimizer=self.optimizer,
             lr_scheduler=self.lr_scheduler,
+            micro_batch_size=self.micro_batch_size,
             *args,
             **kwargs,
         )

@@ -1,4 +1,4 @@
-from typing import Any, Union
+from typing import Any, List, Union
 
 import hydra
 import lightning as pl
@@ -15,6 +15,7 @@ class GoldenRetrieverPLModule(pl.LightningModule):
         model: Union[torch.nn.Module, DictConfig],
         optimizer: Union[torch.optim.Optimizer, DictConfig],
         lr_scheduler: Union[torch.optim.lr_scheduler.LRScheduler, DictConfig] = None,
+        micro_batch_size: int | None = None,
         *args,
         **kwargs,
     ) -> None:
@@ -29,6 +30,7 @@ class GoldenRetrieverPLModule(pl.LightningModule):
 
         self.optimizer_config = optimizer
         self.lr_scheduler_config = lr_scheduler
+        self.micro_batch_size = micro_batch_size
 
     def forward(self, **kwargs) -> dict:
         """
@@ -44,23 +46,36 @@ class GoldenRetrieverPLModule(pl.LightningModule):
 
     def training_step(self, batch: ModelInputs, batch_idx: int) -> torch.Tensor:
         batch = self.hn_algo(batch, self)
-        forward_output = self.forward(**batch, return_loss=True)
-        self.log(
-            "loss",
-            forward_output["loss"],
-            batch_size=batch["questions"]["input_ids"].size(0),
-            prog_bar=True,
-            sync_dist=True,
+        batch = self.trainer.train_dataloader.collate_fn.split_batch(
+            batch, self.micro_batch_size
         )
-        # log the passage batch size
-        self.log(
-            "passage_batch_size",
-            batch["passages"]["input_ids"].size(0),
-            batch_size=batch["questions"]["input_ids"].size(0),
-            prog_bar=True,
-            sync_dist=True,
-        )
-        return forward_output["loss"]
+        loss = self._training_step(batch)
+        # forward_output = self.forward(**batch, return_loss=True)
+        return loss
+
+    def _training_step(
+        self, batches: List[ModelInputs], batch_idx: int
+    ) -> torch.Tensor:
+        loss = torch.tensor(0.0, device=self.device)
+        for batch in batches:
+            forward_output = self.forward(**batch, return_loss=True)
+            loss += forward_output["loss"]
+            self.log(
+                "loss",
+                forward_output["loss"],
+                batch_size=batch["questions"]["input_ids"].size(0),
+                prog_bar=True,
+                sync_dist=True,
+            )
+            # log the passage batch size
+            self.log(
+                "passage_batch_size",
+                batch["passages"]["input_ids"].size(0),
+                batch_size=batch["questions"]["input_ids"].size(0),
+                prog_bar=True,
+                sync_dist=True,
+            )
+        return loss / len(batches)
 
     def validation_step(self, batch: ModelInputs, batch_idx: int) -> None:
         forward_output = self.forward(**batch, return_loss=True)
