@@ -26,6 +26,7 @@ To create the package for pypi.
 9. Copy the release notes from RELEASE.md to the tag in github once everything is looking hunky-dory.
 10. Run `make post-release` (or `make post-patch` for a patch release).
 """
+
 from collections import defaultdict
 
 import setuptools
@@ -83,7 +84,16 @@ def parse_requirements_file(
     return requirements, extras, find_links
 
 
-allowed_extras = {"all", "all-cpu", "all-gpu", "onnx", "onnx-gpu", "serve", "dev", "faiss"}
+allowed_extras = {
+    "all",
+    "all-cpu",
+    "all-gpu",
+    "onnx",
+    "onnx-gpu",
+    "serve",
+    "dev",
+    "faiss",
+}
 
 # Load requirements.
 install_requirements, extras, find_links = parse_requirements_file(
@@ -121,4 +131,7 @@ setuptools.setup(
     install_requires=install_requirements,
     extras_require=extras,
     python_requires=">=3.10",
+    entry_points={
+        "console_scripts": ["golden-retriever = goldenretriever.cli.cli:app"],
+    },
 )

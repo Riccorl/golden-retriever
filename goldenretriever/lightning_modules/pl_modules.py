@@ -25,10 +25,7 @@ class GoldenRetrieverPLModule(pl.LightningModule):
         else:
             self.model = model
 
-        self.hn_algo = HardNegativeAlgorithm(
-            # self.model.question_tokenizer,
-            # self.trainer.train_dataloader.dataset.max_passage_length,
-        )
+        self.hn_algo = HardNegativeAlgorithm()
 
         self.optimizer_config = optimizer
         self.lr_scheduler_config = lr_scheduler
@@ -148,26 +145,21 @@ class GoldenRetrieverPLModule(pl.LightningModule):
 class HardNegativeAlgorithm:
 
     def __init__(self, tokenizer=None, max_length: int = None):
-        # self.tokenizer = tokenizer
-        # self.max_length = max_length
-        # self.hn_manager = HardNegativesManagerThread(tokenizer, max_length=max_length)
         if tokenizer is not None and max_length is not None:
             self.hn_manager = HardNegativesManagerThread(
                 tokenizer, max_length=max_length
             )
         else:
+            # we don't have the tokenizer and the max_length yet
             # delay the initialization of the hn_manager
             self.hn_manager = None
 
-    # def match(self, event: Event, state: State) -> bool:
-    #     return event in [Event.BEFORE_FORWARD]
-
     def __call__(self, batch, pl_module: GoldenRetrieverPLModule) -> None:
-        # get the hard negatives
-        # batch = state.batch
         try:
             self.hn_manager = HardNegativesManagerThread()
         except TypeError:
+            # a little hack to avoid the initialization of the hn_manager
+            # without the tokenizer and the max_length
             return batch
 
         sample_idxs = batch["sample_idx"]
@@ -240,10 +232,6 @@ class HardNegativeAlgorithm:
         batch["labels"] = labels
 
         return batch
-
-        # update the batch
-        # state.batch_set_item("passages", passages)
-        # state.batch_set_item("labels", labels)
 
     @staticmethod
     def duplicate(tensor_one: torch.Tensor, tensor_two: torch.Tensor) -> torch.Tensor:

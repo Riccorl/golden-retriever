@@ -1,9 +1,9 @@
 import base64
 import json
 import os
+import platform
 from functools import partial
 from pathlib import Path
-import platform
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Union
 
 import numpy as np
@@ -14,18 +14,14 @@ from streaming.base.format import get_index_basename
 from tqdm import tqdm
 from transformers import PreTrainedTokenizerBase
 
-# from goldenretriever.common.hf_utils import build_hf_dataset
 from goldenretriever.common.hf_utils import build_hf_dataset
 from goldenretriever.common.log import get_logger
 from goldenretriever.common.model_inputs import ModelInputs
-
-# from goldenretriever.common.torch_utils import build_dataloader
 from goldenretriever.common.utils import (
     GOLDENRETRIEVER_CACHE_DIR,
     file_exists,
     url_to_filename,
 )
-from goldenretriever.data.utils import HardNegativesManagerThread
 
 logger = get_logger(__name__)
 
@@ -354,21 +350,18 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
             return formatted_passages
 
         # remove duplicates and limit the number of passages
-        # positives = list(set([p["text"] for p in sample["positive_ctxs"]]))
         positives = _get_passages(
             sample["positive_ctxs"], metadata_fields, metadata_separator
         )
         if max_positives != -1:
             positives = positives[:max_positives]
 
-        # negatives = list(set([n["text"] for n in sample["negative_ctxs"]]))
         negatives = _get_passages(
             sample["negative_ctxs"], metadata_fields, metadata_separator
         )
         if max_negatives != -1:
             negatives = negatives[:max_negatives]
 
-        # hard_negatives = list(set([h["text"] for h in sample["hard_negative_ctxs"]]))
         hard_negatives = _get_passages(
             sample["hard_negative_ctxs"], metadata_fields, metadata_separator
         )
@@ -436,8 +429,6 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
         # get cache path to put the file
         cache_path = cache_dir / hashed_filename
 
-        # cache_path = str(cache_path)
-
         # the file is already here, return it
         if file_exists(cache_path):  # and not force_download:
             logger.info(
@@ -462,6 +453,7 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
             is_local=True,
             num_workers=num_workers,
         )
+        logger.debug(f"Tokenizer fn: {tokenizer_fn}")
         if tokenizer_fn is not None:
             dataset = dataset.map(tokenizer_fn, desc="Tokenizing data")
 
@@ -506,10 +498,6 @@ class GoldenRetrieverCollator:
                 value=self.tokenizer.pad_token_type_id,
             ),
         }
-
-        self.hn_manager = HardNegativesManagerThread(
-            tokenizer=tokenizer, max_length=max_passage_length
-        )
 
     @staticmethod
     def pad_sequence(

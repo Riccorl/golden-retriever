@@ -3,15 +3,11 @@ from copy import deepcopy
 from pathlib import Path
 from typing import List, Literal
 
-# from goldenretriever.data.streaming_dataset import StreamingGoldenRetrieverDataset
-from goldenretriever.data.lit_dataset import GoldenStreamingDataset
-from goldenretriever.data.streaming_dataset import GoldenRetrieverStreamingDataset
-from goldenretriever.trainer.utils import PRECISION_INPUT_STR_ALIAS_CONVERSION
-
 import hydra
 import lightning as pl
 import omegaconf
 import torch
+import transformers as tr
 
 # from lightning import Trainer
 from lightning.pytorch.callbacks import (
@@ -43,20 +39,18 @@ from goldenretriever.common.from_config import FromConfig
 from goldenretriever.common.log import get_logger
 from goldenretriever.common.utils import to_config
 from goldenretriever.data.datasets import GoldenRetrieverDataset
+
+from goldenretriever.data.streaming_dataset import GoldenRetrieverStreamingDataset
 from goldenretriever.indexers.base import BaseDocumentIndex
 from goldenretriever.lightning_modules.pl_data_modules import (
     GoldenRetrieverPLDataModule,
 )
-from goldenretriever.lightning_modules.pl_modules import (
-    GoldenRetrieverPLModule,
-    HardNegativeAlgorithm,
-)
+from goldenretriever.lightning_modules.pl_modules import GoldenRetrieverPLModule
 from goldenretriever.pytorch_modules.loss import MultiLabelNCELoss
 from goldenretriever.pytorch_modules.model import GoldenRetriever
 from goldenretriever.pytorch_modules.optim import RAdamW
 from goldenretriever.pytorch_modules.scheduler import LinearScheduler
-
-import transformers as tr
+from goldenretriever.trainer.utils import PRECISION_INPUT_STR_ALIAS_CONVERSION
 
 logger = get_logger(__name__)
 
@@ -109,7 +103,7 @@ class Trainer(FromConfig):
         precision: int | str = 16,
         reload_dataloaders_every_n_epochs: int = 0,
         resume_from_checkpoint_path: str | os.PathLike | None = None,
-        trainer_kwargs: dict | None = None,
+        lightning_trainer_kwargs: dict | None = None,
         # eval parameters
         metric_to_monitor: str = "validate_recall@{top_k}",
         monitor_mode: str = "max",
@@ -124,7 +118,7 @@ class Trainer(FromConfig):
         wandb_experiment_name: str | None = None,
         wandb_project_name: str = "golden-retriever",
         wandb_save_dir: str | os.PathLike = "./",  # TODO: i don't like this default
-        wandb_log_model: bool = True,
+        wandb_log_model: bool = False,
         wandb_online_mode: bool = False,
         wandb_watch: str = "all",
         wandb_kwargs: dict | None = None,
@@ -183,7 +177,7 @@ class Trainer(FromConfig):
         self.precision = precision
         self.reload_dataloaders_every_n_epochs = reload_dataloaders_every_n_epochs
         self.resume_from_checkpoint_path = resume_from_checkpoint_path
-        self.trainer_kwargs = trainer_kwargs or {}
+        self.trainer_kwargs = lightning_trainer_kwargs or {}
         # eval parameters
         self.metric_to_monitor = metric_to_monitor
         self.monitor_mode = monitor_mode
@@ -238,6 +232,9 @@ class Trainer(FromConfig):
         pl.seed_everything(self.seed)
         # set the precision of matmul operations
         torch.set_float32_matmul_precision(self.float32_matmul_precision)
+
+        # check if the retriever is a DictConfig
+        self.retriever = self.configure_retriever()
 
         # lightning data module declaration
         self.lightning_datamodule = self.configure_lightning_datamodule()
@@ -335,19 +332,21 @@ class Trainer(FromConfig):
         self.trainer: pl.Trainer | None = None
 
     def configure_lightning_datamodule(self, *args, **kwargs):
-        
+
         self.train_dataset_kwargs["batch_size"] = self.train_batch_size
 
         # lightning data module declaration
         if self.val_dataset is not None and isinstance(
-            self.val_dataset, (GoldenRetrieverDataset, GoldenStreamingDataset, str)
+            self.val_dataset,
+            (GoldenRetrieverDataset, GoldenRetrieverStreamingDataset, str),
         ):
             self.val_dataset = [self.val_dataset]
             self.val_dataset_kwargs["batch_size"] = self.val_batch_size
             self.val_batch_size = [self.val_batch_size]
             self.val_dataset_kwargs = [self.val_dataset_kwargs]
         if self.test_dataset is not None and isinstance(
-            self.test_dataset, (GoldenRetrieverDataset, GoldenStreamingDataset, str)
+            self.test_dataset,
+            (GoldenRetrieverDataset, GoldenRetrieverStreamingDataset, str),
         ):
             self.test_dataset = [self.test_dataset]
             self.test_dataset_kwargs["batch_size"] = self.test_batch_size
@@ -362,15 +361,29 @@ class Trainer(FromConfig):
             test_datasets=self.test_dataset,
             test_datasets_kwargs=self.test_dataset_kwargs,
             num_workers=self.num_workers,
-            tokenizer=self.retriever.question_tokenizer,
+            question_tokenizer=self.retriever.question_tokenizer,
+            passage_tokenizer=self.retriever.passage_tokenizer,
+            # tokenizer=self.retriever.question_tokenizer,
             *args,
             **kwargs,
         )
         return self.lightning_datamodule
 
-    def configure_lightning_module(self, *args, **kwargs):
-        # check if Index is empty
-        if len(self.retriever.document_index) == 0:
+    def configure_retriever(self, *args, **kwargs):
+        # check if the retriever is a DictConfig
+        if isinstance(self.retriever, omegaconf.DictConfig):
+            self.retriever = hydra.utils.instantiate(self.retriever, *args, **kwargs)
+
+        # add loss object to the retriever
+        if self.retriever.loss_type is None:
+            self.retriever.loss_type = self.loss()
+
+        return self.retriever
+
+    def add_documents_from_dataset(self, force: bool = False, add_test: bool = False):
+        # # check if Index is empty
+        if len(self.retriever.document_index) == 0 or force:
+            logger.info("Adding documents from the datasets to the Index")
             # add the docs from the datasets
             logger.info("Document Index is empty. Adding documents from the datasets.")
             documents = self.retriever.document_index.documents
@@ -389,7 +402,7 @@ class Trainer(FromConfig):
                 for sample in tqdm(val_passages, desc="Adding documents from val"):
                     documents.add_document(sample)
 
-            if self.test_dataset is not None:
+            if self.test_dataset is not None and add_test:
                 test_passages = []
                 for ds in self.test_dataset:
                     for sample in ds:
@@ -399,9 +412,7 @@ class Trainer(FromConfig):
                 for sample in tqdm(test_passages, desc="Adding documents from test"):
                     documents.add_document(sample)
 
-        # add loss object to the retriever
-        if self.retriever.loss_type is None:
-            self.retriever.loss_type = self.loss()
+    def configure_lightning_module(self, *args, **kwargs):
 
         # lightning module declaration
         self.lightning_module = GoldenRetrieverPLModule(
@@ -562,6 +573,8 @@ class Trainer(FromConfig):
             dirpath = (
                 self.experiment_path / "checkpoints" if self.experiment_path else None
             )
+        else:
+            dirpath = Path(dirpath)
         if filename is None:
             filename = (
                 "checkpoint-" + monitor + "_{" + monitor + ":.4f}-epoch_{epoch:02d}"
@@ -583,17 +596,6 @@ class Trainer(FromConfig):
             **kwargs,
         )
 
-        # update the kwargs
-        # TODO: this is bad
-        # kwargs.update(
-        #     dirpath=self.checkpoint_dir,
-        #     filename=self.checkpoint_filename,
-        # )
-        # modelcheckpoint_kwargs = dict(
-        #     dirpath=self.checkpoint_dir,
-        #     filename=self.checkpoint_filename,
-        # )
-        # modelcheckpoint_kwargs.update(kwargs)
         self.model_checkpoint_callback = ModelCheckpoint(**kwargs)
         return self.model_checkpoint_callback
 
@@ -745,10 +747,8 @@ class Trainer(FromConfig):
                 precision=PRECISION_INPUT_STR_ALIAS_CONVERSION.get(
                     self.precision, self.precision
                 ),
-                # reload_dataloaders_every_n_epochs=self.reload_dataloaders_every_n_epochs,
                 callbacks=self.callbacks_store,
                 logger=self.wandb_logger,
-                # use_distributed_sampler=False,
                 **self.trainer_kwargs,
             )
 

@@ -1,11 +1,11 @@
-from functools import partial
 import os
+from functools import partial
 from typing import Any, List, Optional, Sequence, Union
 
 import hydra
 import lightning as pl
-from litdata import StreamingDataLoader
 import torch
+import transformers as tr
 from lightning.pytorch.utilities.types import EVAL_DATALOADERS
 from omegaconf import DictConfig
 from torch.utils.data import DataLoader
@@ -13,19 +13,11 @@ from torch.utils.data import DataLoader
 from goldenretriever.common.log import get_logger
 from goldenretriever.data.datasets import GoldenRetrieverDataset
 
-# from goldenretriever.data.streaming_dataset import GoldenRetrieverCollator, StreamingGoldenRetrieverDataset
-from goldenretriever.data.lit_dataset import GoldenStreamingDataset
 from goldenretriever.data.streaming_dataset import (
     GoldenRetrieverCollator,
     GoldenRetrieverStreamingDataset,
 )
-from goldenretriever.data.utils import (
-    GoldenDistributedSampler,
-    HardNegativesManagerThread,
-)
-from goldenretriever.data.utils import HardNegativesManagerThread
-
-import transformers as tr
+from omegaconf import OmegaConf, open_dict
 
 logger = get_logger(__name__)
 
@@ -44,6 +36,7 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
         tokenizer=None,
         question_tokenizer=None,
         passage_tokenizer=None,
+        preprocess: bool = True,
         seed: int = 42,
         *args,
         **kwargs,
@@ -79,6 +72,7 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
         self.passage_tokenizer = passage_tokenizer or tokenizer
 
         # other stuff
+        self.preprocess = preprocess
         self.seed = seed
 
     def prepare_data(self, *args, **kwargs):
@@ -91,21 +85,23 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
             data_path = None
             if isinstance(self.train_dataset, (str, os.PathLike)):
                 data_path = self.train_dataset
-            elif isinstance(self.train_dataset, DictConfig()):
+                kwargs = self.train_dataset_kwargs
+            elif isinstance(self.train_dataset, DictConfig):
                 # TODO
                 data_path = self.train_dataset["local"]
+                kwargs = self.train_dataset
             else:
                 logger.debug("No data path found, skipping preprocessing")
+            preprocessing_fn = partial(
+                GoldenRetrieverStreamingDataset.tokenize,
+                **{
+                    "question_tokenizer": self.question_tokenizer,
+                    "passage_tokenizer": self.passage_tokenizer,
+                    **kwargs,
+                },
+            )
             GoldenRetrieverStreamingDataset.preprocess_to_mds(
-                data_path,
-                partial(
-                    GoldenRetrieverStreamingDataset.tokenize,
-                    **{
-                        "question_tokenizer": self.question_tokenizer,
-                        "passage_tokenizer": self.passage_tokenizer,
-                        **self.train_dataset_kwargs,
-                    },
-                ),
+                data_path, preprocessing_fn if self.preprocess else None
             )
 
         if self.val_datasets is not None:
@@ -113,21 +109,24 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
                 data_path = None
                 if isinstance(dataset, (str, os.PathLike)):
                     data_path = dataset
-                elif isinstance(dataset, DictConfig()):
+                    kwargs = self.val_datasets_kwargs[i]
+                elif isinstance(dataset, DictConfig):
                     # TODO
                     data_path = dataset["local"]
+                    kwargs = dataset
                 else:
                     logger.debug("No data path found, skipping preprocessing")
+                preprocessing_fn = partial(
+                    GoldenRetrieverStreamingDataset.tokenize,
+                    **{
+                        "question_tokenizer": self.question_tokenizer,
+                        "passage_tokenizer": self.passage_tokenizer,
+                        **kwargs,
+                    },
+                )
+                logger.debug(f"Preprocessing kwargs: {kwargs}")
                 GoldenRetrieverStreamingDataset.preprocess_to_mds(
-                    data_path,
-                    partial(
-                        GoldenRetrieverStreamingDataset.tokenize,
-                        **{
-                            "question_tokenizer": self.question_tokenizer,
-                            "passage_tokenizer": self.passage_tokenizer,
-                            **self.val_datasets_kwargs[i],
-                        },
-                    ),
+                    data_path, preprocessing_fn if self.preprocess else None
                 )
 
         if self.test_datasets is not None:
@@ -135,21 +134,21 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
                 data_path = None
                 if isinstance(dataset, (str, os.PathLike)):
                     data_path = dataset
-                elif isinstance(dataset, DictConfig()):
+                elif isinstance(dataset, DictConfig):
                     # TODO
                     data_path = dataset["local"]
                 else:
                     logger.debug("No data path found, skipping preprocessing")
+                preprocessing_fn = partial(
+                    GoldenRetrieverStreamingDataset.tokenize,
+                    **{
+                        "question_tokenizer": self.question_tokenizer,
+                        "passage_tokenizer": self.passage_tokenizer,
+                        **self.test_datasets_kwargs[i],
+                    },
+                )
                 GoldenRetrieverStreamingDataset.preprocess_to_mds(
-                    data_path,
-                    partial(
-                        GoldenRetrieverStreamingDataset.tokenize,
-                        **{
-                            "question_tokenizer": self.question_tokenizer,
-                            "passage_tokenizer": self.passage_tokenizer,
-                            **self.val_datasets_kwargs[i],
-                        },
-                    ),
+                    data_path, preprocessing_fn if self.preprocess else None
                 )
 
     def setup(self, stage: str | None = None):
@@ -157,37 +156,36 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
             # usually there is only one dataset for train
             # if you need more train loader, you can follow
             # the same logic as val and test datasets
-            # if self.train_dataset is None:
-            #     self.train_dataset = hydra.utils.instantiate(self.datasets.train)
-            #     self.val_datasets = [
-            #         hydra.utils.instantiate(dataset_cfg)
-            #         for dataset_cfg in self.datasets.val
-            #     ]
-            # self.train_dataset = GoldenRetrieverStreamingDataset(
-            #     name="aida_train",
-            #     question_tokenizer=self.tokenizer,
-            #     local="/home/ric/Projects/golden-retriever/data/dpr-like/el/mosaic/train",
-            #     batch_size=64,
-            #     predownload=64 * 64,
-            #     shuffle_seed=42,
-            # )
-            # self.train_dataset = GoldenStreamingDataset(
-            #     name="streaming_train",
-            #     question_tokenizer=self.tokenizer,
-            #     input_dir="/home/ric/Projects/golden-retriever/data/dpr-like/el/litdata/train",
-            # )
             if isinstance(self.train_dataset, (str, os.PathLike)):
                 self.train_dataset, self.train_dataset_kwargs = self.dataset_builder(
                     dataset=self.train_dataset,
                     name="train_dataset",
                     question_tokenizer=self.question_tokenizer,
                     passage_tokenizer=self.passage_tokenizer,
+                    shuffle=True,  # force shuffle True for training
                     shuffle_seed=self.seed,
                     dataset_kwargs=self.train_dataset_kwargs,
-                    shuffle=True,
                 )
             elif isinstance(self.train_dataset, DictConfig):
-                self.train_dataset = hydra.utils.instantiate(self.train_dataset)
+                if (
+                    "question_tokenizer" not in self.train_dataset
+                    and self.question_tokenizer is None
+                ):
+                    raise ValueError(
+                        "The question tokenizer is required for the dataset."
+                    )
+                if (
+                    "passage_tokenizer" not in self.train_dataset
+                    and self.passage_tokenizer is None
+                ):
+                    raise ValueError(
+                        "The passage tokenizer is required for the dataset."
+                    )
+                self.train_dataset = hydra.utils.instantiate(
+                    self.train_dataset,
+                    question_tokenizer=self.question_tokenizer,
+                    passage_tokenizer=self.passage_tokenizer,
+                )
             else:
                 self.train_dataset = self.train_dataset
 
@@ -195,6 +193,7 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
             # keep track also of the kwargs
             _val_dataset_kwargs = []
             for i, dataset in enumerate(self.val_datasets):
+                ds_kwargs = None
                 if isinstance(dataset, (str, os.PathLike)):
                     val_dataset, ds_kwargs = self.dataset_builder(
                         dataset=dataset,
@@ -206,33 +205,38 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
                         dataset_kwargs=self.val_datasets_kwargs[i],
                     )
                 elif isinstance(dataset, DictConfig):
-                    val_dataset = hydra.utils.instantiate(dataset)
+                    if (
+                        "question_tokenizer" not in dataset
+                        and self.question_tokenizer is None
+                    ):
+                        raise ValueError(
+                            "The question tokenizer is required for the dataset."
+                        )
+                    if (
+                        "passage_tokenizer" not in dataset
+                        and self.passage_tokenizer is None
+                    ):
+                        raise ValueError(
+                            "The passage tokenizer is required for the dataset."
+                        )
+                    val_dataset = hydra.utils.instantiate(
+                        dataset,
+                        question_tokenizer=self.question_tokenizer,
+                        passage_tokenizer=self.passage_tokenizer,
+                    )
                 else:
                     val_dataset = dataset
 
                 _val_dataset.append(val_dataset)
                 # keep track of the kwargs
-                _val_dataset_kwargs.append(ds_kwargs)
+                if ds_kwargs is not None:
+                    _val_dataset_kwargs.append(ds_kwargs)
 
             # update val_dataset with the new datasets
             self.val_datasets = _val_dataset
             # update val_dataset_kwargs with the new kwargs
             self.val_datasets_kwargs = _val_dataset_kwargs
 
-            # self.val_dataset = GoldenRetrieverStreamingDataset(
-            #     name="aida_val",
-            #     question_tokenizer=self.tokenizer,
-            #     local="/home/ric/Projects/golden-retriever/data/dpr-like/el/mosaic/val",
-            #     batch_size=64,
-            #     predownload=64 * 64,
-            #     shuffle_seed=42,
-            # )
-            # self.val_dataset = GoldenStreamingDataset(
-            #     name="streaming_val",
-            #     question_tokenizer=self.tokenizer,
-            #     input_dir="/home/ric/Projects/golden-retriever/data/dpr-like/el/litdata/val",
-            # )
-            # self.val_datasets = [self.val_dataset]
         if stage == "test":
             if self.test_datasets is None:
                 self.test_datasets = [
@@ -245,6 +249,7 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
             _test_dataset_kwargs = []
             for i, dataset in enumerate(self.test_datasets):
                 if isinstance(dataset, (str, os.PathLike)):
+                    ds_kwargs  = None
                     test_dataset, ds_kwargs = self.dataset_builder(
                         dataset=dataset,
                         name=f"test_dataset_{i}",
@@ -255,13 +260,18 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
                         dataset_kwargs=self.test_datasets_kwargs[i],
                     )
                 elif isinstance(dataset, DictConfig):
-                    test_dataset = hydra.utils.instantiate(dataset)
+                    test_dataset = hydra.utils.instantiate(
+                        dataset,
+                        question_tokenizer=self.question_tokenizer,
+                        passage_tokenizer=self.passage_tokenizer,
+                    )
                 else:
                     test_dataset = dataset
 
                 _test_dataset.append(test_dataset)
                 # keep track of the kwargs
-                _test_dataset_kwargs.append(ds_kwargs)
+                if ds_kwargs is not None:
+                    _test_dataset_kwargs.append(ds_kwargs)
 
             # update val_dataset with the new datasets
             self.test_datasets = _test_dataset
@@ -275,8 +285,7 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
                 tokenizer=self.train_dataset.question_tokenizer,
                 max_passage_length=self.train_dataset.max_passage_length,
             ),
-            shuffle=True,
-            batch_size=self.train_dataset_kwargs.get("batch_size"),
+            batch_size=self.train_dataset.batch_size,
             num_workers=self.num_workers.train,
             pin_memory=True,
             prefetch_factor=(
@@ -298,13 +307,12 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
                         tokenizer=dataset.question_tokenizer,
                         max_passage_length=dataset.max_passage_length,
                     ),
-                    shuffle=False,
-                    batch_size=self.val_datasets_kwargs[i].get("batch_size"),
+                    batch_size=dataset.batch_size,
                     num_workers=self.num_workers.val,
                     pin_memory=True,
                     prefetch_factor=(
                         max(
-                            1, 8 * self.train_dataset.batch_size // self.num_workers.val
+                            1, 8 * dataset.batch_size // self.num_workers.val
                         )
                         if self.num_workers.val > 0
                         else None
@@ -325,14 +333,13 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
                         tokenizer=dataset.question_tokenizer,
                         max_passage_length=dataset.max_passage_length,
                     ),
-                    shuffle=False,
-                    batch_size=self.test_datasets_kwargs[i].get("batch_size"),
+                    batch_size=dataset.batch_size,
                     num_workers=self.num_workers.val,
                     pin_memory=True,
                     prefetch_factor=(
                         max(
                             1,
-                            8 * self.train_dataset.batch_size // self.num_workers.test,
+                            8 * dataset.batch_size // self.num_workers.test,
                         )
                         if self.num_workers.test > 0
                         else None
