@@ -588,7 +588,7 @@ class Trainer(FromConfig):
                 self.experiment_path / "checkpoints" if self.experiment_path else None
             )
         else:
-            dirpath = Path(dirpath)
+            dirpath = Path(dirpath) / self.wandb_project_name
         if filename is None:
             filename = (
                 "checkpoint-" + monitor + "_{" + monitor + ":.4f}-epoch_{epoch:02d}"

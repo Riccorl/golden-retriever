@@ -1,7 +1,7 @@
 # model section
 retriever:
   _target_: goldenretriever.GoldenRetriever
-  question_encoder: "intfloat/e5-small-v2"
+  question_encoder: "riccorl/e5-base-v2-blink-1M-32words-windows"
   document_index:
     _target_: goldenretriever.indexers.inmemory.InMemoryDocumentIndex
     documents:
@@ -41,13 +41,15 @@ optimizer: goldenretriever.pytorch_modules.optim.RAdamW
 lr: 1e-5
 weight_decay: 0.01
 lr_scheduler: goldenretriever.pytorch_modules.scheduler.LinearScheduler
-# max_steps: 25_000
-max_epochs: 1
-accumulate_grad_batches: 4
+max_steps: 25_000
+# max_epochs: 1
+accumulate_grad_batches: 8
 gradient_clip_val: 1.0
 deterministic: True
+num_sanity_val_steps: null
 
 # compute section
+micro_batch_size: 32
 precision: 16
 accelerator: "auto"
 devices: 1
@@ -76,9 +78,9 @@ early_stopping_kwargs: null
 # logging section
 log_to_wandb: true
 wandb_entity: null
-wandb_experiment_name: "golden-retriever-default-exp"
-wandb_project_name: "golden-retriever"
-wandb_online_mode: false
+wandb_experiment_name: "golden-retriever-default-aida"
+wandb_project_name: "aida-e5-base-topics-from-blink-1M-32words-windows-streaming-cli"
+wandb_online_mode: true
 wandb_kwargs: null
 
 # checkpointing section

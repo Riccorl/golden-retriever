@@ -46,12 +46,33 @@ class GoldenRetrieverPLModule(pl.LightningModule):
 
     def training_step(self, batch: ModelInputs, batch_idx: int) -> torch.Tensor:
         batch = self.hn_algo(batch, self)
-        batch = self.trainer.train_dataloader.collate_fn.split_batch(
-            batch, self.micro_batch_size
+        # batch = self.trainer.train_dataloader.collate_fn.split_batch(
+        #     batch, self.micro_batch_size
+        # )
+        # loss = self._training_step(batch, batch_idx)
+        # self.log(
+        #     "loss",
+        #     loss,
+        #     batch_size=batch["questions"]["input_ids"].size(0),
+        #     prog_bar=True,
+        #     sync_dist=True,
+        # )
+        forward_output = self.forward(**batch, return_loss=True)
+        self.log(
+            "loss",
+            forward_output["loss"],
+            batch_size=batch["questions"]["input_ids"].size(0),
+            prog_bar=True,
+            sync_dist=True,
         )
-        loss = self._training_step(batch)
-        # forward_output = self.forward(**batch, return_loss=True)
-        return loss
+        self.log(
+            "passage_batch_size",
+            batch["passages"]["input_ids"].size(0),
+            batch_size=batch["questions"]["input_ids"].size(0),
+            prog_bar=True,
+            sync_dist=True,
+        )
+        return forward_output["loss"]
 
     def _training_step(
         self, batches: List[ModelInputs], batch_idx: int
@@ -60,13 +81,6 @@ class GoldenRetrieverPLModule(pl.LightningModule):
         for batch in batches:
             forward_output = self.forward(**batch, return_loss=True)
             loss += forward_output["loss"]
-            self.log(
-                "loss",
-                forward_output["loss"],
-                batch_size=batch["questions"]["input_ids"].size(0),
-                prog_bar=True,
-                sync_dist=True,
-            )
             # log the passage batch size
             self.log(
                 "passage_batch_size",

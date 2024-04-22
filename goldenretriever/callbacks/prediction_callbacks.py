@@ -1,4 +1,5 @@
 import logging
+import os
 import time
 from pathlib import Path
 from typing import List, Optional, Set
@@ -24,6 +25,8 @@ from goldenretriever.lightning_modules.pl_modules import GoldenRetrieverPLModule
 from goldenretriever.pytorch_modules.model import GoldenRetriever
 
 logger = get_logger(__name__, level=logging.INFO)
+
+os.environ["TOKENIZERS_PARALLELISM"] = os.environ.get("TOKENIZERS_PARALLELISM", "false")
 
 
 class GoldenRetrieverPredictionCallback(PredictionCallback):
