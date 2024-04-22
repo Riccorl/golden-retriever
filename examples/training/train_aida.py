@@ -1,7 +1,7 @@
 from tqdm import tqdm
 from goldenretriever.common.log import get_logger
 from goldenretriever.indexers.document import DocumentStore
-from goldenretriever.trainer import Trainer
+from goldenretriever import Trainer
 from goldenretriever import GoldenRetriever
 from goldenretriever.indexers.inmemory import InMemoryDocumentIndex
 from goldenretriever.data.datasets import AidaInBatchNegativesDataset
@@ -11,7 +11,7 @@ logger = get_logger(__name__)
 if __name__ == "__main__":
     # instantiate retriever
     retriever = GoldenRetriever(
-        question_encoder="/root/golden-retriever/wandb/blink-first1M-e5-base-topics/files/retriever/question_encoder",
+        question_encoder="riccorl/e5-base-v2-blink-1M-32words-windows",
         document_index=InMemoryDocumentIndex(
             documents=DocumentStore.from_file(
                 "/root/golden-retriever/data/entitylinking/documents.jsonl"
@@ -70,8 +70,9 @@ if __name__ == "__main__":
         num_workers=4,
         max_steps=25_000,
         wandb_online_mode=True,
+        wandb_log_model=False,
         wandb_project_name="golden-retriever-aida",
-        wandb_experiment_name="aida-e5-base-topics-from-blink",
+        wandb_experiment_name="aida-e5-base-topics-from-blink-1M-32words-windows",
         max_hard_negatives_to_mine=15,
     )
 

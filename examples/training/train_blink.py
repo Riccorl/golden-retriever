@@ -18,13 +18,16 @@ if __name__ == "__main__":
 
     train_dataset = AidaInBatchNegativesDataset(
         name="aida_train",
-        path="/media/data/EL/blink/window_32_tokens/random_1M/dpr-like/first_1M.jsonl",
+        # path="/media/data/EL/blink/window_32_tokens/random_1M/dpr-like/first_1M.jsonl",
+        path="/media/data/EL/blink/window_32_tokens_25032024/train.fixed.jsonl",
         tokenizer=retriever.question_tokenizer,
-        question_batch_size=64,
+        question_batch_size=32,
         passage_batch_size=400,
         max_passage_length=64,
         shuffle=True,
-        subsample_strategy=SubsampleStrategyEnum.RANDOM,
+        subsample_strategy=SubsampleStrategyEnum.IN_ORDER,
+        subsample_portion=100_000,
+        prefetch=True
         # use_topics=True,
     )
     val_dataset = AidaInBatchNegativesDataset(
@@ -64,14 +67,16 @@ if __name__ == "__main__":
         val_dataset=val_dataset,
         test_dataset=None,
         num_workers=0,
-        max_steps=400_000,
+        max_steps=600_000,
+        early_stopping=False,
         wandb_online_mode=True,
         wandb_project_name="golden-retriever-blink",
-        wandb_experiment_name="blink-first1M-e5-base-topics",
+        wandb_experiment_name="blink-coverage-e5-base-topics",
         max_hard_negatives_to_mine=15,
         mine_hard_negatives_with_probability=0.2,
+        accumulate_grad_batches=2,
         save_last=True,
-        resume_from_checkpoint_path="/root/golden-retriever/wandb/run-20231219_151810-8ntynf5t/files/checkpoints/last-12-28888.ckpt",
+        # resume_from_checkpoint_path="/root/golden-retriever/wandb/run-20240326_105401-34vldlhh/files/checkpoints/checkpoint-validate_recall@100_0.9542-epoch_11.ckpt",
     )
 
     trainer.train()

@@ -6,6 +6,7 @@ experiments/*
 retrievers
 outputs
 model
+models
 wandb
 
 # Created by https://www.toptal.com/developers/gitignore/api/jetbrains+all,vscode,python,jupyternotebooks,linux,windows,macos
