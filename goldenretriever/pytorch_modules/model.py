@@ -24,6 +24,7 @@ from goldenretriever.indexers.document import Document
 from goldenretriever.indexers.inmemory import InMemoryDocumentIndex
 from goldenretriever.pytorch_modules import PRECISION_MAP, RetrievedSample
 from goldenretriever.pytorch_modules.hf import GoldenRetrieverModel
+from goldenretriever.pytorch_modules.loss import MultiLabelNCELoss
 
 logger = get_logger(__name__, level=logging.INFO)
 
@@ -42,7 +43,7 @@ class GoldenRetriever(torch.nn.Module):
     def __init__(
         self,
         question_encoder: Union[str, tr.PreTrainedModel],
-        loss_type: Optional[torch.nn.Module] = None,
+        loss_type: torch.nn.Module = MultiLabelNCELoss,
         passage_encoder: Optional[Union[str, tr.PreTrainedModel]] = None,
         document_index: Optional[Union[str, BaseDocumentIndex]] = None,
         question_tokenizer: Optional[Union[str, tr.PreTrainedTokenizer]] = None,
@@ -76,17 +77,19 @@ class GoldenRetriever(torch.nn.Module):
         self.passage_encoder = passage_encoder
 
         # loss function
+        if isinstance(loss_type, type):
+            loss_type = loss_type()
         self.loss_type = loss_type
 
         # indexer stuff
         index_device = index_device or device
         index_precision = index_precision or precision
-        if document_index is None:
-            # if no indexer is provided, create a new one
-            document_index = InMemoryDocumentIndex(
-                device=index_device, precision=index_precision, **kwargs
-            )
-        if isinstance(document_index, str):
+        # if document_index is None:
+        #     # if no indexer is provided, create a new one
+        #     document_index = InMemoryDocumentIndex(
+        #         device=index_device, precision=index_precision, **kwargs
+        #     )
+        if document_index is not None and isinstance(document_index, str):
             document_index = BaseDocumentIndex.from_pretrained(
                 document_index, device=index_device, precision=index_precision, **kwargs
             )
@@ -207,6 +210,8 @@ class GoldenRetriever(torch.nn.Module):
         force_reindex: bool = False,
         compute_on_cpu: bool = False,
         precision: Optional[Union[str, int]] = None,
+        document_index: BaseDocumentIndex | str | None = None,
+        document_index_kwargs: Optional[Dict] = None,
         *args,
         **kwargs,
     ):
@@ -229,13 +234,22 @@ class GoldenRetriever(torch.nn.Module):
             precision (`Optional[Union[str, int]]`):
                 The precision to use for the model.
         """
-        if self.document_index is None:
+        document_index = document_index or self.document_index
+        if document_index is None:
             raise ValueError(
-                "The retriever must be initialized with an indexer to index "
-                "the passages within the retriever."
+                "The indexer must be provided or set in the retriever before indexing."
             )
+
+        # initialize the indexer if it is not already initialized
+        if isinstance(document_index, str):
+            if document_index_kwargs is None:
+                document_index_kwargs = {}
+            document_index = BaseDocumentIndex.from_pretrained(
+                document_index, **document_index_kwargs
+            )
+
         # TODO: add kwargs
-        return self.document_index.index(
+        return document_index.index(
             retriever=self,
             batch_size=batch_size,
             num_workers=num_workers,
@@ -264,6 +278,8 @@ class GoldenRetriever(torch.nn.Module):
         batch_size: int | None = None,
         num_workers: int = 4,
         progress_bar: bool = False,
+        document_index: BaseDocumentIndex | str | None = None,
+        document_index_kwargs: Optional[Dict] = None,
         **kwargs,
     ) -> List[List[RetrievedSample]]:
         """
@@ -305,10 +321,19 @@ class GoldenRetriever(torch.nn.Module):
                 "Setting `num_workers=0`."
             )
 
-        if self.document_index is None:
+        document_index = document_index or self.document_index
+        if document_index is None:
             raise ValueError(
                 "The indexer must be indexed before it can be used within the retriever."
             )
+
+        if isinstance(document_index, str):
+            if document_index_kwargs is None:
+                document_index_kwargs = {}
+            document_index = BaseDocumentIndex.from_pretrained(
+                document_index, **document_index_kwargs
+            )
+
         if text is None and input_ids is None:
             raise ValueError(
                 "Either `text` or `input_ids` must be provided to retrieve the passages."
@@ -354,7 +379,7 @@ class GoldenRetriever(torch.nn.Module):
             for batch in dataloader:
                 batch = batch.to(self.device)
                 question_encodings = self.question_encoder(**batch).pooler_output
-                retrieved += self.document_index.search(question_encodings, k)
+                retrieved += document_index.search(question_encodings, k)
 
         if progress_bar:
             dataloader.close()

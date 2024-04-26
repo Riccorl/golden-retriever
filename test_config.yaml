@@ -1,0 +1,77 @@
+self: <goldenretriever.trainer.fabric.FabricTrainer object at 0x7f3758a15180>
+retriever: '{''_target_'': ''goldenretriever.GoldenRetriever'', ''question_encoder'':
+  ''riccorl/e5-base-v2-blink-1M-32words-windows'', ''document_index'': {''_target_'':
+  ''goldenretriever.indexers.inmemory.InMemoryDocumentIndex'', ''documents'': {''_target_'':
+  ''goldenretriever.indexers.document.DocumentStore.from_file'', ''file_path'': ''/root/golden-retriever/data/entitylinking/documents.jsonl''},
+  ''metadata_fields'': [''definition''], ''separator'': '' <def> '', ''device'': ''cuda'',
+  ''precision'': ''16''}}'
+train_dataset: '{''_target_'': ''goldenretriever.data.streaming_dataset.GoldenRetrieverStreamingDataset'',
+  ''name'': ''train_dataset'', ''local'': ''/root/golden-retriever/data/entitylinking/aida_32_tokens_topic/train.jsonl'',
+  ''shuffle'': True, ''shuffle_seed'': 42, ''max_question_length'': 64, ''max_passage_length'':
+  64, ''batch_size'': 32}'
+train_batch_size: 32
+train_dataset_kwargs: null
+val_dataset: '[{''_target_'': ''goldenretriever.data.streaming_dataset.GoldenRetrieverStreamingDataset'',
+  ''name'': ''val_dataset'', ''local'': ''/root/golden-retriever/data/entitylinking/aida_32_tokens_topic/val.jsonl'',
+  ''shuffle'': True, ''shuffle_seed'': 42, ''max_question_length'': 64, ''max_passage_length'':
+  64, ''batch_size'': 32}]'
+val_batch_size: 32
+val_dataset_kwargs: null
+test_dataset: null
+test_batch_size: 32
+test_dataset_kwargs: null
+num_workers: 4
+add_documents_from_dataset: false
+optimizer: goldenretriever.pytorch_modules.optim.RAdamW
+lr: 1.0e-05
+weight_decay: 0.01
+lr_scheduler: goldenretriever.pytorch_modules.scheduler.LinearScheduler
+num_warmup_steps: 0
+loss: <class 'goldenretriever.pytorch_modules.loss.MultiLabelNCELoss'>
+micro_batch_size: 32
+callbacks: null
+accelerator: auto
+devices: 1
+num_nodes: 1
+strategy: auto
+accumulate_grad_batches: 8
+gradient_clip_val: 1.0
+val_check_interval: 1.0
+check_val_every_n_epoch: 1
+max_steps: 25000
+max_epochs: null
+deterministic: true
+fast_dev_run: false
+precision: 16
+reload_dataloaders_every_n_epochs: 0
+resume_from_checkpoint_path: null
+lightning_trainer_kwargs: null
+metric_to_monitor: validate_recall@{top_k}
+monitor_mode: max
+top_k: 100
+early_stopping: true
+early_stopping_patience: 10
+early_stopping_kwargs: null
+log_to_wandb: true
+wandb_entity: null
+wandb_experiment_name: golden-retriever-default-aida
+wandb_project_name: aida-e5-base-topics-from-blink-1M-32words-windows-streaming-cli
+wandb_save_dir: ./
+wandb_log_model: false
+wandb_online_mode: true
+wandb_watch: all
+wandb_kwargs: null
+model_checkpointing: true
+checkpoint_dir: checkpoints
+checkpoint_filename: null
+save_top_k: 1
+save_last: false
+checkpoint_kwargs: null
+prediction_batch_size: 128
+max_hard_negatives_to_mine: 15
+hard_negatives_threshold: 0.0
+metrics_to_monitor_for_hard_negatives: null
+mine_hard_negatives_with_probability: 1.0
+seed: 42
+float32_matmul_precision: medium
+kwargs: '{''num_sanity_val_steps'': None, ''test_kwargs'': None}'

@@ -16,6 +16,7 @@ from goldenretriever.data.datasets import GoldenRetrieverDataset
 from goldenretriever.data.streaming_dataset import (
     GoldenRetrieverCollator,
     GoldenRetrieverStreamingDataset,
+    GoldenStreamingDataLoader,
 )
 from omegaconf import OmegaConf, open_dict
 
@@ -279,11 +280,12 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
             self.test_datasets_kwargs = _test_dataset_kwargs
 
     def train_dataloader(self, *args, **kwargs) -> DataLoader:
-        return DataLoader(
+        # return DataLoader(
+        return GoldenStreamingDataLoader(
             self.train_dataset,
             collate_fn=GoldenRetrieverCollator(
-                tokenizer=self.train_dataset.question_tokenizer,
-                max_passage_length=self.train_dataset.max_passage_length,
+                pad_token_type_id=self.train_dataset.question_tokenizer.pad_token_type_id,
+                postpone_collate=True,
             ),
             batch_size=self.train_dataset.batch_size,
             num_workers=self.num_workers.train,
@@ -301,11 +303,12 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
         dataloaders = []
         for i, dataset in enumerate(self.val_datasets):
             dataloaders.append(
-                DataLoader(
+                # DataLoader(
+                GoldenStreamingDataLoader(
                     dataset,
                     collate_fn=GoldenRetrieverCollator(
-                        tokenizer=dataset.question_tokenizer,
-                        max_passage_length=dataset.max_passage_length,
+                        pad_token_type_id=dataset.question_tokenizer.pad_token_type_id,
+                        postpone_collate=False,
                     ),
                     batch_size=dataset.batch_size,
                     num_workers=self.num_workers.val,
@@ -325,11 +328,12 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
         dataloaders = []
         for i, dataset in enumerate(self.test_datasets):
             dataloaders.append(
-                DataLoader(
+                # DataLoader(
+                GoldenStreamingDataLoader(
                     dataset,
                     collate_fn=GoldenRetrieverCollator(
-                        tokenizer=dataset.question_tokenizer,
-                        max_passage_length=dataset.max_passage_length,
+                        pad_token_type_id=dataset.question_tokenizer.pad_token_type_id,
+                        postpone_collate=False,
                     ),
                     batch_size=dataset.batch_size,
                     num_workers=self.num_workers.val,

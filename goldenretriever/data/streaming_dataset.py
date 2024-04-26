@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Union
 import numpy as np
 import psutil
 import torch
-from streaming import MDSWriter, Stream, StreamingDataset
+from streaming import MDSWriter, Stream, StreamingDataset, StreamingDataLoader
 from streaming.base.format import get_index_basename
 from tqdm import tqdm
 from transformers import PreTrainedTokenizerBase
@@ -484,20 +484,22 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
 
 class GoldenRetrieverCollator:
 
-    def __init__(self, tokenizer, max_passage_length) -> None:
-        self.tokenizer = tokenizer
-        self.max_passage_length = max_passage_length
+    def __init__(
+        self, pad_token_type_id: int = 0, postpone_collate: bool = False
+    ) -> None:
+        self.pad_token_type_id = pad_token_type_id
         self.padding_ops = {
             "input_ids": partial(
                 self.pad_sequence,
-                value=self.tokenizer.pad_token_id,
+                value=pad_token_type_id,
             ),
             "attention_mask": partial(self.pad_sequence, value=0),
             "token_type_ids": partial(
                 self.pad_sequence,
-                value=self.tokenizer.pad_token_type_id,
+                value=pad_token_type_id,
             ),
         }
+        self.postpone_collate = postpone_collate
 
     @staticmethod
     def pad_sequence(
@@ -632,6 +634,9 @@ class GoldenRetrieverCollator:
             )
         return batches
 
+    # def merge_batches(self, batches: List[Dict[str, torch.Tensor]]) -> Dict[str, torch.Tensor]:
+    #     pass
+
     def convert_to_batch(
         self, samples: Any, *args, **kwargs
     ) -> Dict[str, torch.Tensor]:
@@ -657,8 +662,16 @@ class GoldenRetrieverCollator:
                 )
         return samples
 
-    def __call__(self, batch: Any, *args, **kwargs) -> Any:
+    def collate_fn(self, batch: Any, *args, **kwargs) -> Any:
+        """
+        Collate a batch of data.
 
+        Args:
+            batch (Any): A batch of data.
+
+        Returns:
+            Any: The collated batch.
+        """
         passages_in_batch = {}
         for sample in batch:
             passages_in_batch.update(
@@ -714,3 +727,105 @@ class GoldenRetrieverCollator:
             }
         )
         return model_inputs
+
+    def __call__(self, batch: Any, *args, **kwargs) -> Any:
+        if self.postpone_collate:
+            return batch
+        return self.collate_fn(batch, *args, **kwargs)
+
+
+# Copyright 2022-2024 MosaicML Streaming authors
+# SPDX-License-Identifier: Apache-2.0
+
+"""Streaming DataLoader."""
+
+from typing import Any, Dict, Iterator, Optional
+
+from torch import Tensor
+from torch.utils.data import DataLoader
+from transformers import BatchEncoding, BatchFeature
+
+from streaming.base.dataset import StreamingDataset
+from streaming.base.world import World
+
+
+class GoldenStreamingDataLoader(StreamingDataLoader):
+    """A streaming data loader.
+
+    Provides an additional checkpoint/resumption interface, for which it tracks the number of
+    samples seen by the model this rank.
+
+    Args:
+        *args: List arguments.
+        **kwargs: Keyword arguments.
+    """
+
+    def __init__(self, *args, **kwargs) -> None:  # pyright: ignore
+        super().__init__(*args, **kwargs)
+        self.num_samples_yielded = 0
+
+    def _get_batch_size(self, batch: Any) -> int:
+        """Get the number of samples in a batch.
+
+        Args:
+            batch (Any): The batch.
+
+        Returns:
+            int: Number of samples.
+        """
+        if isinstance(batch, Sequence):
+            return len(batch)
+        return batch["questions"]["input_ids"].shape[0]
+
+    def __iter__(self) -> Iterator[Any]:
+        """Iterate over this DataLoader, yielding batches.
+
+        Also tracks the number of samples seen this rank.
+
+        Returns:
+            Iterator[Any]: Each batch.
+        """
+        self.num_samples_yielded = 0
+        for batch in super().__iter__():
+            self.num_samples_yielded += self._get_batch_size(batch)
+            yield batch
+
+    def state_dict(self) -> Optional[Dict[str, Any]]:
+        """Get a dict containing training state (called from non-worker process).
+
+        This is called on rank zero.
+
+        Args:
+            samples_in_epoch (int): The number of samples processed so far in the current epoch.
+
+        Returns:
+            Optional[Dict[str, Any]]: The state, if a streaming dataset.
+        """
+        if isinstance(self.dataset, StreamingDataset):
+            world = World.detect()
+            num_samples = self.num_samples_yielded * world.num_ranks
+            if self.dataset.replication is not None:
+                # Check if we are using `replication`. If we are, then we need to adjust the
+                # `num_samples_yielded` to reflect the fact that sample ids are shared across
+                # `replication` consecutive devices. For example, if `replication` is 2, then the
+                # number of samples seen is half the number of samples yielded, since every pair
+                # of devices shares sample ids. So the index into the sample partition is halved.
+                num_samples = num_samples // self.dataset.replication
+            return self.dataset.state_dict(num_samples, False)
+        return None
+
+    def load_state_dict(self, obj: Dict[str, Any]) -> None:
+        """Load a dict containing training state (called from non-worker process).
+
+        This is called on each copy of the dataset when resuming.
+
+        Args:
+            obj (Dict[str, Any]): The state.
+        """
+        if isinstance(self.dataset, StreamingDataset):
+            self.dataset.load_state_dict(obj)
+
+    def __del__(self) -> None:
+        """Terminate the workers during cleanup."""
+        if self._iterator is not None:
+            self._iterator._shutdown_workers()  # type: ignore [reportGeneralTypeIssues]

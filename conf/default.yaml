@@ -6,7 +6,7 @@ retriever:
     _target_: goldenretriever.indexers.inmemory.InMemoryDocumentIndex
     documents:
       _target_: goldenretriever.indexers.document.DocumentStore.from_file
-      file_path: "/root/golden-retriever/data/entitylinking/documents.jsonl"
+      file_path: "data/dpr-like/el/documents_only_data.jsonl"
     metadata_fields:
       - "definition"
     separator: " <def> "
@@ -17,7 +17,7 @@ retriever:
 train_dataset:
   _target_: goldenretriever.data.streaming_dataset.GoldenRetrieverStreamingDataset
   name: "train_dataset"
-  local: "/root/golden-retriever/data/entitylinking/aida_32_tokens_topic/train.jsonl"
+  local: "data/dpr-like/el/aida_32_tokens_topic/train.jsonl"
   shuffle: True # force shuffle True for training
   shuffle_seed: 42
   max_question_length: 64
@@ -27,7 +27,7 @@ train_dataset:
 val_dataset:
   - _target_: goldenretriever.data.streaming_dataset.GoldenRetrieverStreamingDataset
     name: "val_dataset"
-    local: "/root/golden-retriever/data/entitylinking/aida_32_tokens_topic/val.jsonl"
+    local: "data/dpr-like/el/aida_32_tokens_topic/val.jsonl"
     shuffle: True # force shuffle True for training
     shuffle_seed: 42
     max_question_length: 64
@@ -49,11 +49,12 @@ deterministic: True
 num_sanity_val_steps: null
 
 # compute section
-micro_batch_size: 32
+micro_batch_size: 16
 precision: 16
 accelerator: "auto"
-devices: 1
-strategy: "auto"
+devices: 2
+# strategy: "auto"
+strategy: "fsdp"
 # FSDP
 # strategy:
 #   _target_: lightning.pytorch.strategies.FSDPStrategy
@@ -79,8 +80,8 @@ early_stopping_kwargs: null
 log_to_wandb: true
 wandb_entity: null
 wandb_experiment_name: "golden-retriever-default-aida"
-wandb_project_name: "aida-e5-base-topics-from-blink-1M-32words-windows-streaming-cli"
-wandb_online_mode: true
+wandb_project_name: "aida-e5-base-topics-from-blink-1M-32words-windows-streaming-cli-fabric"
+wandb_online_mode: false
 wandb_kwargs: null
 
 # checkpointing section
