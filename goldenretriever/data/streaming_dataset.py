@@ -1,10 +1,11 @@
 import base64
+from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 import platform
 from functools import partial
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Union
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Union, Iterator
 
 import numpy as np
 import psutil
@@ -22,6 +23,9 @@ from goldenretriever.common.utils import (
     file_exists,
     url_to_filename,
 )
+from threading import Event, Lock
+from concurrent.futures import ThreadPoolExecutor, wait
+from streaming.base.dataset import _Iterator
 
 logger = get_logger(__name__)
 
@@ -208,6 +212,7 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
         max_passages: int = -1,
         max_question_length: int = 256,
         max_passage_length: int = 64,
+        max_passage_batch_size: int = 400,
         metadata_fields: Optional[Sequence[str]] = None,
         metadata_separator: str = "\t",
         **kwargs: Any,
@@ -241,6 +246,7 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
         self.max_passages = max_passages
         self.max_question_length = max_question_length
         self.max_passage_length = max_passage_length
+        self.max_passage_batch_size = max_passage_batch_size
         self.metadata_fields = metadata_fields
         self.metadata_separator = metadata_separator
 
@@ -312,6 +318,76 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
             )
         else:
             return sample
+
+    def __iter__(self) -> Iterator[Dict[str, Any]]:
+        """Iterate over all the samples in our partition.
+
+        Returns:
+            Iterator[Dict[str, Any]]: Each sample.
+        """
+        # Exit the threads that are pre-downloading and iterating the shards for previous epoch, if
+        # it exists.
+        if hasattr(self, "_iterator"):
+            self._iterator.exit()
+
+        # For exception handling.
+        if not hasattr(self, "_executor"):
+            self._executor = ThreadPoolExecutor()
+        if not hasattr(self, "_event"):
+            self._event = Event()
+        elif self._event.is_set():
+            raise RuntimeError("Background thread failed. Check other traceback.")
+
+        # Discover where we left off, if there is a checkpoint, or start at the next epoch.
+        # Also pre-increment the epoch counter.
+        self._unique_worker_world = self._unique_rank_world.detect_workers()
+        self._parallel_worker_world = self._parallel_rank_world.detect_workers()
+        epoch, sample_in_epoch = self._resume_incr_epoch()
+
+        # Get this worker's partition of samples to process.
+        sample_ids = self._get_work(epoch, sample_in_epoch)
+        if not len(sample_ids):  # Resumed at end of epoch, out of samples.
+            return
+
+        # Iterate over the samples while downloading ahead.
+        self._iterator = it = _Iterator(sample_ids)
+        prepare_future = self._executor.submit(self._prepare_thread, it)
+        prepare_future.add_done_callback(self.on_exception)
+        ready_future = self._executor.submit(self._ready_thread, it)
+        ready_future.add_done_callback(self.on_exception)
+
+        # yield from map(self.__getitem__, self._each_sample_id(it))
+        # wait([prepare_future, ready_future], return_when='FIRST_EXCEPTION')
+        # it.exit()
+
+        batch = []
+        passages_in_batch = {}
+        for sample_id in self._each_sample_id(it):
+            sample = self.__getitem__(sample_id)
+            passages_in_batch.update(
+                {tuple(passage["input_ids"]): passage for passage in sample["passage"]}
+            )
+            if "mined_passages" in sample:
+                passages_in_batch.update(
+                    {
+                        tuple(passage["input_ids"]): passage
+                        for passage in sample["mined_passages"]
+                    }
+                )
+            batch.append(sample)
+            # batch.append(self.__getitem__(sample_id))
+            if len(passages_in_batch) >= self.max_passage_batch_size:
+                yield batch
+                batch = []
+                passages_in_batch = {}
+        if len(batch) > 0:
+            yield batch
+            batch = []
+            passages_in_batch = {}
+
+        # Exit the threads that are pre-downloading and iterating the shards for this epoch.
+        wait([prepare_future, ready_future], return_when="FIRST_EXCEPTION")
+        it.exit()
 
     # How to tokenize a text sample to a token sample
     @staticmethod

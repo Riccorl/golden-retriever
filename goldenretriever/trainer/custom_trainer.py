@@ -15,6 +15,11 @@ from lightning.pytorch.utilities.model_helpers import is_overridden
 from lightning_utilities import apply_to_collection
 from torchmetrics import RunningMean
 from tqdm import tqdm
+from lightning.pytorch.utilities.types import LRSchedulerConfig
+from torch.optim.lr_scheduler import LRScheduler
+
+from goldenretriever.data.utils import HardNegativesManagerThread
+from goldenretriever.lightning_modules.pl_modules import HardNegativeAlgorithm
 
 
 class MyCustomTrainer:
@@ -129,6 +134,9 @@ class MyCustomTrainer:
         self.checkpoint_dir = checkpoint_dir
         self.checkpoint_frequency = checkpoint_frequency
 
+        # self.hn_algo = HardNegativeAlgorithm()
+        self.hn_manager: HardNegativesManagerThread | None = None
+
     @staticmethod
     def compute_gradient_accumulation_iters(global_batch_size, micro_batch_size) -> int:
         devices = 1
@@ -145,7 +153,7 @@ class MyCustomTrainer:
             torch.utils.data.DataLoader | List[torch.utils.data.DataLoader] | None
         ) = None,
         ckpt_path: Optional[str] = None,
-        scheduler: torch.optim.lr_scheduler._LRScheduler | None = None,
+        scheduler: LRScheduler | LRSchedulerConfig | None = None,
         compile: bool = False,
     ):
         """The main entrypoint of the trainer, triggering the actual training.
@@ -185,8 +193,10 @@ class MyCustomTrainer:
             "train_dataloader": train_loader,
             # "train_dataset_state": train_loader.dataset.state_dict(),
         }
+
         if scheduler is not None:
             state["scheduler"] = scheduler
+
 
         # load last checkpoint if available
         if ckpt_path is not None and os.path.isdir(ckpt_path):
@@ -216,9 +226,17 @@ class MyCustomTrainer:
                 for vl in val_loader:
                     self.val_loop(model, vl, limit_batches=self.limit_val_batches)
 
-            self.step_scheduler(
-                scheduler, level="epoch", current_value=self.current_epoch
-            )
+                self.fabric.call(
+                    "hard_negative_augmentation",
+                    self.fabric,
+                    model,
+                    train_loader,
+                    self.current_epoch,
+                )
+
+            # self.step_scheduler(
+            #     scheduler, level="epoch", current_value=self.current_epoch
+            # )
 
             self.current_epoch += 1
 
@@ -242,7 +260,7 @@ class MyCustomTrainer:
         scheduler: Optional[
             Mapping[str, Union[L.fabric.utilities.types.LRScheduler, bool, str, int]]
         ] = None,
-        passage_batch_size: int = 200,
+        passage_batch_size: int = 400,
     ):
         """The training loop running a single training epoch.
 
@@ -257,7 +275,7 @@ class MyCustomTrainer:
                 for supported values.
 
         """
-        self.fabric.call("on_train_epoch_start")
+        self.fabric.call("on_train_epoch_start", self.fabric, self.global_step)
 
         # gradient_accumulation_steps = self.compute_gradient_accumulation_iters(
         #     global_batch_size, micro_batch_size
@@ -283,6 +301,27 @@ class MyCustomTrainer:
             if self.should_stop or batch_idx >= limit_batches:
                 break
 
+            try:
+                self.hn_manager = HardNegativesManagerThread()
+                sample_idxs = batch["sample_idx"]
+                i = 0
+                for sample in sample_idxs:
+                    if sample in self.hn_manager:
+                        i += 1
+                        if "mined_passages" not in sample:
+                            sample["mined_passages"] = {}
+                        sample["mined_passages"].update(
+                            {
+                                tuple(passage["input_ids"]): passage
+                                for passage in self.hn_manager.get(sample)
+                            }
+                        )
+            except TypeError:
+                # a little hack to avoid the initialization of the hn_manager
+                # without the tokenizer and the max_length
+                # return batch
+                pass
+
             for sample in batch:
                 passages_in_batch.update(
                     {
@@ -297,11 +336,11 @@ class MyCustomTrainer:
                             for passage in sample["mined_passages"]
                         }
                     )
-            
+
             batches.extend(batch)
             if len(passages_in_batch) < passage_batch_size:
                 continue
-            
+
             actual_batch = collator.collate_fn(batches)
             # now split passages into batches of micro_batch_size
             actual_batch = collator.split_batch(actual_batch, micro_batch_size)
@@ -311,19 +350,19 @@ class MyCustomTrainer:
             for i, ba in enumerate(actual_batch):
                 ba.to(self.fabric.device)
 
-                self.fabric.print("Questions in batch: ", ba["questions"]["input_ids"].shape[0])
-                self.fabric.print("Passages in batch: ", ba["passages"]["input_ids"].shape[0])
-
-                self.fabric.call("on_train_batch_start", ba, batch_idx)
+                self.fabric.call(
+                    "on_train_batch_start", self.fabric, self.global_step, ba, batch_idx
+                )
 
                 # check if optimizer should step in gradient accumulation
                 # should_optim_step = self.global_step % gradient_accumulation_steps == 0
                 should_optim_step = i == gradient_accumulation_steps - 1
                 # should_optim_step = True
-                with self.fabric.no_backward_sync(model, enabled=should_optim_step):
-                    forward_output = model.forward(**ba, return_loss=True)
-                    loss = forward_output["loss"]
-                    self.fabric.backward(loss / gradient_accumulation_steps)
+                # with self.fabric.no_backward_sync(model, enabled=should_optim_step):
+                forward_output = model.forward(**ba, return_loss=True)
+                loss = forward_output["loss"]
+                self.fabric.backward(loss)# / gradient_accumulation_steps)
+                self.fabric.log("loss", loss, step=self.global_step)
 
                 self._current_train_return = apply_to_collection(
                     forward_output, dtype=torch.Tensor, function=lambda x: x.detach()
@@ -331,48 +370,57 @@ class MyCustomTrainer:
 
                 # running_loss.update(loss.detach())
 
-                if should_optim_step:
-                    # currently only supports a single optimizer
-                    self.fabric.call("on_before_optimizer_step", optimizer, 0)
-                    # optimizer step runs train step internally through closure
-                    optimizer.step()
-                    # optimizer.step(
-                    #     partial(
-                    #         self.training_step,
-                    #         model=model,
-                    #         batch=batch,
-                    #         batch_idx=batch_idx,
-                    #     )
-                    # )
-                    self.fabric.call("on_before_zero_grad", optimizer)
+                # if should_optim_step:
+                # currently only supports a single optimizer
+                self.fabric.call("on_before_optimizer_step", optimizer, 0)
+                # optimizer step runs train step internally through closure
+                optimizer.step()
+                # optimizer.step(
+                #     partial(
+                #         self.training_step,
+                #         model=model,
+                #         batch=batch,
+                #         batch_idx=batch_idx,
+                #     )
+                # )
+                self.fabric.call("on_before_zero_grad", optimizer)
+                optimizer.zero_grad()
+                scheduler.scheduler.step()
+                # self.step_scheduler(
+                #     scheduler, level="step", current_value=self.global_step
+                # )
+                    # log the current learning rate for each group
+                    # lr_metric_dict = {
+                    #     f"lr_{i}": param_group["lr"]
+                    #     for i, param_group in enumerate(optimizer.param_groups)
+                    # }
+                    # self.fabric.log_dict(lr_metric_dict)
+                    # scheduler.step()
+                # else:
+                #     # gradient accumulation -> no optimizer step
+                #     self.training_step(model=model, batch=batch, batch_idx=batch_idx)
 
-                    optimizer.zero_grad()
-                    scheduler.step()
-            # else:
-            #     # gradient accumulation -> no optimizer step
-            #     self.training_step(model=model, batch=batch, batch_idx=batch_idx)
+                self.fabric.call(
+                    "on_train_batch_end", self._current_train_return, batch, batch_idx
+                )
 
-            self.fabric.call(
-                "on_train_batch_end", self._current_train_return, batch, batch_idx
-            )
+                # this guard ensures, we only step the scheduler once per global step
+                # if should_optim_step:
+                #     self.step_scheduler(
+                #         scheduler, level="step", current_value=self.global_step
+                #     )
 
-            # this guard ensures, we only step the scheduler once per global step
-            # if should_optim_step:
-            #     self.step_scheduler(
-            #         scheduler, level="step", current_value=self.global_step
-            #     )
+                # add output values to progress bar
+                self._format_iterable(iterable, self._current_train_return, "train")
 
-            # add output values to progress bar
-            self._format_iterable(iterable, self._current_train_return, "train")
+                # only increase global step if optimizer stepped
+                self.global_step += 1 #int(should_optim_step)
 
-            # only increase global step if optimizer stepped
-            self.global_step += int(should_optim_step)
+                # stopping criterion on step level
+                if self.max_steps is not None and self.global_step >= self.max_steps:
+                    self.should_stop = True
+                    break
 
-            # stopping criterion on step level
-            if self.max_steps is not None and self.global_step >= self.max_steps:
-                self.should_stop = True
-                break
-            
             # reset for next batch
             passages_in_batch = {}
             batches = []
@@ -440,7 +488,20 @@ class MyCustomTrainer:
 
             self._format_iterable(iterable, self._current_val_return, "val")
 
-        self.fabric.call("on_validation_epoch_end")
+        self.fabric.call(
+            "on_validation_epoch_end",
+            self.fabric,
+            model,
+            val_loader,
+            self.current_epoch,
+        )
+        self.fabric.call(
+            "validation_prediction_and_metrics",
+            self.fabric,
+            model,
+            val_loader,
+            self.current_epoch,
+        )
 
         self.fabric.call("on_validation_model_train")
         model.train()
@@ -500,12 +561,12 @@ class MyCustomTrainer:
             return
 
         # # wrong interval (step vs. epoch)
-        # if scheduler.interval != level:
-        #     return
+        if scheduler.interval != level:
+            return
 
-        # # right interval, but wrong step wrt frequency
-        # if current_value % cast(int, scheduler["frequency"]) != 0:
-        #     return
+        # right interval, but wrong step wrt frequency
+        if current_value % cast(int, scheduler.frequency) != 0:
+            return
 
         # assemble potential monitored values
         possible_monitor_vals = {None: None}
@@ -523,27 +584,28 @@ class MyCustomTrainer:
                 {"val_" + k: v for k, v in self._current_val_return.items()}
             )
 
-        scheduler.step()
-        # try:
-        #     monitor = possible_monitor_vals[cast(Optional[str], scheduler["monitor"])]
-        # except KeyError as ex:
-        #     possible_keys = list(possible_monitor_vals.keys())
-        #     raise KeyError(
-        #         f"monitor {scheduler['monitor']} is invalid. Possible values are {possible_keys}."
-        #     ) from ex
-        # # except Exception as ex:
+        try:
+            monitor = possible_monitor_vals[cast(Optional[str], scheduler.monitor)]
+        except KeyError as ex:
+            possible_keys = list(possible_monitor_vals.keys())
+            raise KeyError(
+                f"monitor {scheduler.monitor} is invalid. Possible values are {possible_keys}."
+            ) from ex
+        # except Exception as ex:
 
-        # if monitor is None:
-        #     scheduler.step()  # type: ignore[call-arg]
-        # else:
-        #     scheduler.step(monitor)
+        if monitor is None:
+            scheduler.scheduler.step()  # type: ignore[call-arg]
+        else:
+            scheduler.scheduler.step(monitor)
 
     @property
     def should_validate(self) -> bool:
         """Whether to currently run validation."""
         return self.current_epoch % self.validation_frequency == 0
 
-    def progbar_wrapper(self, iterable: Iterable, total: int, **kwargs: Any):
+    def progbar_wrapper(
+        self, iterable: Iterable | None = None, total: int | None = None, **kwargs: Any
+    ):
         """Wraps the iterable with tqdm for global rank zero.
 
         Args:

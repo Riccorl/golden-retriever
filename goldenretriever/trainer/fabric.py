@@ -1,10 +1,10 @@
-from datetime import timedelta
 import datetime
 import os
-from copy import deepcopy
-from pathlib import Path
 import pprint
 import time
+from copy import deepcopy
+from datetime import timedelta
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Literal
 
 import hydra
@@ -12,22 +12,22 @@ import lightning as L
 import omegaconf
 import torch
 import transformers as tr
-from torch.utils.data import DataLoader
-from lightning.fabric.utilities.throughput import ThroughputMonitor, measure_flops
-from torchmetrics.aggregation import RunningMean
 from composer.utils import dist, get_device, reproducibility
-
 from lightning.fabric.strategies import FSDPStrategy
+from lightning.fabric.utilities.throughput import ThroughputMonitor, measure_flops
+
 # from lightning import Trainer
 from lightning.pytorch.callbacks import (
     EarlyStopping,
-    LearningRateMonitor,
+    # LearningRateMonitor,
     ModelCheckpoint,
     ModelSummary,
 )
 from lightning.pytorch.loggers import WandbLogger
 from omegaconf import DictConfig, OmegaConf
 from pprintpp import pformat
+from torch.utils.data import DataLoader
+from torchmetrics.aggregation import RunningMean
 from tqdm import tqdm
 
 from goldenretriever.callbacks.base import NLPTemplateCallback
@@ -36,11 +36,13 @@ from goldenretriever.callbacks.evaluation_callbacks import (
     RecallAtKEvaluationCallback,
 )
 from goldenretriever.callbacks.prediction_callbacks import (
+    GoldenRetrieverFabricPredictionCallback,
     GoldenRetrieverPredictionCallback,
 )
-from goldenretriever.callbacks.training_callbacks import NegativeAugmentationCallback
+from goldenretriever.callbacks.training_callbacks import NegativeAugmentationCallback, NegativeAugmentationFabricCallback
 from goldenretriever.callbacks.utils_callbacks import (
     FreeUpIndexerVRAMCallback,
+    LearningRateMonitor,
     SavePredictionsCallback,
     SaveRetrieverCallback,
 )
@@ -48,7 +50,6 @@ from goldenretriever.common.from_config import FromConfig
 from goldenretriever.common.log import get_logger
 from goldenretriever.common.utils import get_callable_from_string, to_config
 from goldenretriever.data.datasets import GoldenRetrieverDataset
-
 from goldenretriever.data.streaming_dataset import GoldenRetrieverStreamingDataset
 from goldenretriever.indexers.base import BaseDocumentIndex
 from goldenretriever.lightning_modules.pl_data_modules import (
@@ -69,11 +70,13 @@ logger = get_logger(__name__)
 
 import inspect
 from dataclasses import asdict, is_dataclass
+
 # from torch import distributed as dist
-
 from composer.utils import dist
+from lightning.pytorch.utilities.types import LRSchedulerConfig
+from streaming.base.distributed import get_rank, get_world_size
+from torch.optim.lr_scheduler import LRScheduler
 
-from streaming.base.distributed import get_world_size, get_rank
 
 def maybe_init_dist(timeout: float = 300.0) -> bool:
     """Initialize torch.distributed ourselves, if necessary.
@@ -85,11 +88,17 @@ def maybe_init_dist(timeout: float = 300.0) -> bool:
     if get_world_size() == 1 or not dist.is_available() or dist.is_initialized():
         return False
     if torch.cuda.is_available() and dist.is_nccl_available():
-        backend = 'nccl'
+        backend = "nccl"
     else:
-        backend = 'gloo'
-    dist.init_process_group(backend=backend, rank=get_rank(), world_size=get_world_size(), timeout=timeout_timedelta)
+        backend = "gloo"
+    dist.init_process_group(
+        backend=backend,
+        rank=get_rank(),
+        world_size=get_world_size(),
+        timeout=timeout_timedelta,
+    )
     return True
+
 
 def capture_hparams() -> Dict[str, Any]:
     """Captures the local variables ('hyperparameters') from where this function gets called."""
@@ -187,7 +196,7 @@ class FabricTrainer(FromConfig):
         wandb_kwargs: dict | None = None,
         # checkpoint parameters
         model_checkpointing: bool = True,
-        checkpoint_dir: str | os.PathLike | None = None,
+        checkpoint_dir: str | os.PathLike = "./checkpoints",
         checkpoint_filename: str | os.PathLike | None = None,
         save_top_k: int = 1,
         save_last: bool = False,
@@ -405,8 +414,8 @@ class FabricTrainer(FromConfig):
         self.callbacks_store: List[L.Callback] = []  # self.configure_callbacks()
         # add default callbacks
         self.callbacks_store += [
-            ModelSummary(max_depth=2),
-            LearningRateMonitor(logging_interval="step"),
+            # ModelSummary(max_depth=2),
+            # LearningRateMonitor(logging_interval="step"),
         ]
 
         # lazy trainer declaration
@@ -698,9 +707,11 @@ class FabricTrainer(FromConfig):
         metrics_to_monitor = (
             self.metrics_to_monitor_for_hard_negatives or self.metric_to_monitor
         )
-        hard_negatives_callback = NegativeAugmentationCallback(
+        # hard_negatives_callback = NegativeAugmentationCallback(
+        hard_negatives_callback = NegativeAugmentationFabricCallback(
             k=self.target_top_k,
             batch_size=self.prediction_batch_size,
+            num_workers=self.num_workers,
             precision=self.precision,
             stages=["validate"],
             metrics_to_monitor=metrics_to_monitor,
@@ -750,9 +761,9 @@ class FabricTrainer(FromConfig):
         metrics_callbacks: List[NLPTemplateCallback] = [
             RecallAtKEvaluationCallback(k, verbose=True) for k in self.top_k
         ]
-        metrics_callbacks += [
-            AvgRankingEvaluationCallback(k, verbose=True) for k in self.top_k
-        ]
+        # metrics_callbacks += [
+        #     AvgRankingEvaluationCallback(k, verbose=True) for k in self.top_k
+        # ]
         if save_predictions:
             metrics_callbacks.append(SavePredictionsCallback())
         return metrics_callbacks
@@ -774,7 +785,8 @@ class FabricTrainer(FromConfig):
         if metrics_callbacks is None:
             metrics_callbacks = self.configure_metrics_callbacks()
 
-        prediction_callback = GoldenRetrieverPredictionCallback(
+        # prediction_callback = GoldenRetrieverPredictionCallback(
+        prediction_callback = GoldenRetrieverFabricPredictionCallback(
             batch_size=batch_size,
             precision=precision,
             k=k,
@@ -800,7 +812,7 @@ class FabricTrainer(FromConfig):
                 logger.info(f"Failed to get the experiment path: {e}")
 
         # set-up training specific callbacks
-        self.callbacks_store = self.training_callbacks()
+        # self.callbacks_store = self.training_callbacks()
         # add the evaluation callbacks
         self.callbacks_store.append(
             self.configure_prediction_callbacks(
@@ -812,7 +824,7 @@ class FabricTrainer(FromConfig):
         if self.max_hard_negatives_to_mine > 0:
             self.callbacks_store.append(self.configure_hard_negatives_callback())
 
-        self.callbacks_store.append(FreeUpIndexerVRAMCallback())
+        # self.callbacks_store.append(FreeUpIndexerVRAMCallback())
 
         # if self.fabric is None:
         #     self.fabric = L.Fabric(
@@ -835,7 +847,7 @@ class FabricTrainer(FromConfig):
 
         # retriever declaration
         if isinstance(self.retriever, DictConfig):
-        #     with self.fabric.init_module(empty_init=False):
+            #     with self.fabric.init_module(empty_init=False):
             self.retriever = self.configure_retriever()
         # if self.compile:
         #     self.retriever = torch.compile(self.retriever)
@@ -858,6 +870,20 @@ class FabricTrainer(FromConfig):
         # optimizer declaration
         self.optimizer, self.lr_scheduler = self.configure_optimizers()
         # self.optimizer = self.fabric.setup_optimizers(self.optimizer)
+
+        if isinstance(self.lr_scheduler, LRScheduler):
+            # create a LRSchedulerConfig from the LRScheduler
+            self.lr_scheduler = LRSchedulerConfig(
+                scheduler=self.lr_scheduler, interval="epoch", frequency=1
+            )
+
+        self.callbacks_store.append(
+            LearningRateMonitor(
+                optimizers=[self.optimizer],
+                lr_scheduler_configs=[self.lr_scheduler],
+                logging_interval="step",
+            )
+        )
 
         # add reload from checkpoint logic
         # state declaration
@@ -888,12 +914,13 @@ class FabricTrainer(FromConfig):
                 num_nodes=self.num_nodes,
                 precision=self.precision,
                 # plugins=
-                # callbacks=self.callbacks_store,
+                callbacks=self.callbacks_store,
                 loggers=[self.wandb_logger],
                 max_epochs=self.max_epochs,
                 max_steps=self.max_steps,
                 validation_frequency=self.val_check_interval,
                 seed=self.seed,
+                checkpoint_dir=str(Path(self.checkpoint_dir) / self.wandb_project_name),
             )
 
         self.trainer.fit(

@@ -1,4 +1,4 @@
-from typing import Any, List, Union
+from typing import Any, Callable, List, Union
 
 import hydra
 import lightning as pl
@@ -183,7 +183,9 @@ class HardNegativeAlgorithm:
             # delay the initialization of the hn_manager
             self.hn_manager = None
 
-    def __call__(self, batch, pl_module: GoldenRetrieverPLModule) -> None:
+    def __call__(
+        self, batch, pl_module: pl.LightningModule, collator: Callable | None = None
+    ) -> None:
         try:
             self.hn_manager = HardNegativesManagerThread()
         except TypeError:
@@ -209,7 +211,7 @@ class HardNegativeAlgorithm:
             return batch
 
         # get dataloader collator
-        collator = pl_module.trainer.train_dataloader.collate_fn
+        collator = collator or pl_module.trainer.train_dataloader.collate_fn
         hn_passages = list(hn_passages.values())
         hn_passages_batch = ModelInputs(collator.convert_to_batch(hn_passages))
         hn_passages_batch = hn_passages_batch.to(pl_module.device)

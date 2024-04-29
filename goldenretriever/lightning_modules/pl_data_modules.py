@@ -285,9 +285,10 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
             self.train_dataset,
             collate_fn=GoldenRetrieverCollator(
                 pad_token_type_id=self.train_dataset.question_tokenizer.pad_token_type_id,
-                postpone_collate=True,
+                # postpone_collate=True,
             ),
-            batch_size=self.train_dataset.batch_size,
+            # batch_size=self.train_dataset.batch_size,
+            batch_size=None,
             num_workers=self.num_workers.train,
             pin_memory=True,
             prefetch_factor=(
@@ -308,9 +309,10 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
                     dataset,
                     collate_fn=GoldenRetrieverCollator(
                         pad_token_type_id=dataset.question_tokenizer.pad_token_type_id,
-                        postpone_collate=False,
+                        # postpone_collate=False,
                     ),
-                    batch_size=dataset.batch_size,
+                    # batch_size=dataset.batch_size,
+                    batch_size=None,
                     num_workers=self.num_workers.val,
                     pin_memory=True,
                     prefetch_factor=(
@@ -333,9 +335,10 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
                     dataset,
                     collate_fn=GoldenRetrieverCollator(
                         pad_token_type_id=dataset.question_tokenizer.pad_token_type_id,
-                        postpone_collate=False,
+                        # postpone_collate=False,
                     ),
-                    batch_size=dataset.batch_size,
+                    # batch_size=dataset.batch_size,
+                    batch_size=None,
                     num_workers=self.num_workers.val,
                     pin_memory=True,
                     prefetch_factor=(

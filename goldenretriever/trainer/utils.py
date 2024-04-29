@@ -1,5 +1,9 @@
 from typing import Any, Iterable
-
+from lightning.pytorch.callbacks import TQDMProgressBar
+from lightning.pytorch.callbacks.progress.tqdm_progress import _update_n
+import lightning as pl
+from lightning.pytorch.utilities.types import STEP_OUTPUT
+from typing_extensions import override
 
 PRECISION_INPUT_STR_ALIAS_CONVERSION = {
     "64": "64-true",
@@ -8,6 +12,24 @@ PRECISION_INPUT_STR_ALIAS_CONVERSION = {
     16: "16-mixed",
     "bf16": "bf16-mixed",
 }
+
+
+class GoldenRetrieverProgressBar(TQDMProgressBar):
+    @override
+    def on_train_batch_end(
+        self,
+        trainer: "pl.Trainer",
+        pl_module: "pl.LightningModule",
+        outputs: STEP_OUTPUT,
+        batch: Any,
+        batch_idx: int,
+    ) -> None:
+        # get current step from the tqdm bar
+        n = self.train_progress_bar.n
+        n += batch["questions"]["input_ids"].size(0)
+        if self._should_update(n, self.train_progress_bar.total):
+            _update_n(self.train_progress_bar, n)
+            self.train_progress_bar.set_postfix(self.get_metrics(trainer, pl_module))
 
 
 class CycleIterator:

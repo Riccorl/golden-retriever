@@ -50,7 +50,7 @@ from goldenretriever.pytorch_modules.loss import MultiLabelNCELoss
 from goldenretriever.pytorch_modules.model import GoldenRetriever
 from goldenretriever.pytorch_modules.optim import RAdamW
 from goldenretriever.pytorch_modules.scheduler import LinearScheduler
-from goldenretriever.trainer.utils import PRECISION_INPUT_STR_ALIAS_CONVERSION
+from goldenretriever.trainer.utils import PRECISION_INPUT_STR_ALIAS_CONVERSION, GoldenRetrieverProgressBar
 
 logger = get_logger(__name__)
 
@@ -331,6 +331,7 @@ class Trainer(FromConfig):
         self.callbacks_store: List[pl.Callback] = []  # self.configure_callbacks()
         # add default callbacks
         self.callbacks_store += [
+            GoldenRetrieverProgressBar(),
             ModelSummary(max_depth=2),
             LearningRateMonitor(logging_interval="step"),
         ]
@@ -755,6 +756,7 @@ class Trainer(FromConfig):
                 max_steps=self.max_steps,
                 gradient_clip_val=self.gradient_clip_val,
                 val_check_interval=self.val_check_interval,
+                # num_sanity_val_steps=0,
                 check_val_every_n_epoch=self.check_val_every_n_epoch,
                 deterministic=self.deterministic,
                 fast_dev_run=self.fast_dev_run,

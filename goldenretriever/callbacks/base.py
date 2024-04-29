@@ -12,6 +12,8 @@ from goldenretriever.common.log import get_logger
 from goldenretriever.data.base.datasets import BaseDataset
 from lightning.pytorch.utilities import rank_zero_only
 
+from goldenretriever.pytorch_modules.model import GoldenRetriever
+
 logger = get_logger()
 
 
@@ -154,6 +156,83 @@ class PredictionCallback(pl.Callback):
                 else trainer.val_dataloaders
             )
         return datasets, dataloaders
+
+
+class PredictionFabricCallback:
+    def __init__(
+        self,
+        batch_size: int = 32,
+        stages: Optional[Set[Union[str, RunningStage]]] = None,
+        other_callbacks: Optional[
+            Union[List[DictConfig], List["NLPTemplateCallback"]]
+        ] = None,
+        datasets: Optional[Union[DictConfig, BaseDataset]] = None,
+        dataloaders: Optional[Union[DataLoader, List[DataLoader]]] = None,
+        *args,
+        **kwargs,
+    ):
+        # super().__init__()
+        # parameters
+        self.batch_size = batch_size
+        self.datasets = datasets
+        self.dataloaders = dataloaders
+
+        # callback initialization
+        if stages is None:
+            stages = DEFAULT_STAGES
+
+        # compatibily stuff
+        stages = {STAGES_COMPATIBILITY_MAP.get(stage, stage) for stage in stages}
+        self.stages = [RunningStage(stage) for stage in stages]
+        self.other_callbacks = other_callbacks or []
+        for i, callback in enumerate(self.other_callbacks):
+            if isinstance(callback, DictConfig):
+                self.other_callbacks[i] = hydra.utils.instantiate(
+                    callback, _recursive_=False
+                )
+
+    @torch.no_grad()
+    def __call__(
+        self,
+        trainer: pl.Trainer,
+        pl_module: pl.LightningModule,
+        *args,
+        **kwargs,
+    ) -> Any:
+        # it should return the predictions
+        raise NotImplementedError
+
+    def validation_prediction_and_metrics(
+        self,
+        fabric: pl.Fabric,
+        retriever: GoldenRetriever,
+        dataloaders: DataLoader | List[DataLoader] | None = None,
+        current_epoch: int = 0,
+    ):
+        predictions = self(fabric, retriever, dataloaders, current_epoch)
+        for callback in self.other_callbacks:
+            callback(
+                fabric=fabric,
+                retriever=retriever,
+                callback=self,
+                predictions=predictions,
+            )
+
+    # def on_test_epoch_end(
+    #     self,
+    #     fabric: pl.Fabric,
+    #     retriever: GoldenRetriever,
+    #     dataloaders: DataLoader | List[DataLoader] | None = None,
+    #     current_epoch: int = 0,
+    # ):
+    #     predictions = self(fabric, retriever, dataloaders, current_epoch)
+    #     for callback in self.other_callbacks:
+    #         callback(
+    #             fabric=fabric,
+    #             retriever=retriever,
+    #             callback=self,
+    #             predictions=predictions,
+    #         )
 
 
 class NLPTemplateCallback:
