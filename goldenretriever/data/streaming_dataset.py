@@ -507,8 +507,9 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
         # No index.json file found, so we need to create it
         if cache_dir is None:
             cache_dir = GOLDENRETRIEVER_CACHE_DIR
+        cache_dir = Path(cache_dir)
         # check if cache dir exists
-        Path(cache_dir).mkdir(parents=True, exist_ok=True)
+        cache_dir.mkdir(parents=True, exist_ok=True)
         # get filename from the url
         hashed_filename = url_to_filename(str(source), None)
         # get cache path to put the file
