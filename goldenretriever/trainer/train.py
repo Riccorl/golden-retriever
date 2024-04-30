@@ -98,6 +98,7 @@ class Trainer(FromConfig):
         gradient_clip_val: float = 1.0,
         val_check_interval: float = 1.0,
         check_val_every_n_epoch: int = 1,
+        num_sanity_val_steps: int | None = None,
         max_steps: int | None = None,
         max_epochs: int | None = None,
         deterministic: bool = True,
@@ -174,6 +175,7 @@ class Trainer(FromConfig):
         self.gradient_clip_val = gradient_clip_val
         self.val_check_interval = val_check_interval
         self.check_val_every_n_epoch = check_val_every_n_epoch
+        self.num_sanity_val_steps = num_sanity_val_steps
         self.max_steps = max_steps
         self.max_epochs = max_epochs
         self.deterministic = deterministic
@@ -331,7 +333,7 @@ class Trainer(FromConfig):
         self.callbacks_store: List[pl.Callback] = []  # self.configure_callbacks()
         # add default callbacks
         self.callbacks_store += [
-            GoldenRetrieverProgressBar(),
+            # GoldenRetrieverProgressBar(),
             ModelSummary(max_depth=2),
             LearningRateMonitor(logging_interval="step"),
         ]
@@ -754,9 +756,9 @@ class Trainer(FromConfig):
                 accumulate_grad_batches=self.accumulate_grad_batches,
                 max_epochs=self.max_epochs,
                 max_steps=self.max_steps,
-                gradient_clip_val=self.gradient_clip_val,
+                # gradient_clip_val=self.gradient_clip_val,
                 val_check_interval=self.val_check_interval,
-                # num_sanity_val_steps=0,
+                num_sanity_val_steps=self.num_sanity_val_steps,
                 check_val_every_n_epoch=self.check_val_every_n_epoch,
                 deterministic=self.deterministic,
                 fast_dev_run=self.fast_dev_run,

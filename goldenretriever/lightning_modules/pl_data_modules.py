@@ -125,7 +125,6 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
                         **kwargs,
                     },
                 )
-                logger.debug(f"Preprocessing kwargs: {kwargs}")
                 GoldenRetrieverStreamingDataset.preprocess_to_mds(
                     data_path, preprocessing_fn if self.preprocess else None
                 )
@@ -287,8 +286,8 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
                 pad_token_type_id=self.train_dataset.question_tokenizer.pad_token_type_id,
                 # postpone_collate=True,
             ),
-            # batch_size=self.train_dataset.batch_size,
-            batch_size=None,
+            batch_size=self.train_dataset.batch_size,
+            # batch_size=None,
             num_workers=self.num_workers.train,
             pin_memory=True,
             prefetch_factor=(
@@ -311,8 +310,8 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
                         pad_token_type_id=dataset.question_tokenizer.pad_token_type_id,
                         # postpone_collate=False,
                     ),
-                    # batch_size=dataset.batch_size,
-                    batch_size=None,
+                    batch_size=dataset.batch_size,
+                    # batch_size=None,
                     num_workers=self.num_workers.val,
                     pin_memory=True,
                     prefetch_factor=(
@@ -337,8 +336,8 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
                         pad_token_type_id=dataset.question_tokenizer.pad_token_type_id,
                         # postpone_collate=False,
                     ),
-                    # batch_size=dataset.batch_size,
-                    batch_size=None,
+                    batch_size=dataset.batch_size,
+                    # batch_size=None,
                     num_workers=self.num_workers.val,
                     pin_memory=True,
                     prefetch_factor=(

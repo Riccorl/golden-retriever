@@ -194,13 +194,12 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
             dataloaders=DataLoader(
                 dataset,  # .to_torch_dataset(),
                 shuffle=False,
-                batch_size=64,
+                batch_size=dataset.batch_size,
                 num_workers=self.num_workers,
                 pin_memory=True,
                 # collate_fn=lambda x: x,
                 collate_fn=GoldenRetrieverCollator(
-                    tokenizer=dataset.question_tokenizer,
-                    max_passage_length=dataset.max_passage_length,
+                    pad_token_type_id=dataset.question_tokenizer.pad_token_type_id,
                 ),
             ),
             *args,

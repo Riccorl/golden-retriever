@@ -32,6 +32,8 @@ class GoldenRetrieverPLModule(pl.LightningModule):
         self.lr_scheduler_config = lr_scheduler
         self.micro_batch_size = micro_batch_size
 
+        self.automatic_optimization = False
+
     def forward(self, **kwargs) -> dict:
         """
         Method for the forward pass.
@@ -45,22 +47,37 @@ class GoldenRetrieverPLModule(pl.LightningModule):
         return self.model(**kwargs)
 
     def training_step(self, batch: ModelInputs, batch_idx: int) -> torch.Tensor:
+        # apply hard negative algorithm
         batch = self.hn_algo(batch, self)
-        # batch = self.trainer.train_dataloader.collate_fn.split_batch(
-        #     batch, self.micro_batch_size
-        # )
-        # loss = self._training_step(batch, batch_idx)
-        # self.log(
-        #     "loss",
-        #     loss,
-        #     batch_size=batch["questions"]["input_ids"].size(0),
-        #     prog_bar=True,
-        #     sync_dist=True,
-        # )
-        forward_output = self.forward(**batch, return_loss=True)
+        # split the batch into micro-batches
+        micro_batches = self.trainer.train_dataloader.collate_fn.split_batch(
+            batch, self.micro_batch_size
+        )
+        accumulate_micro_batches = len(micro_batches)
+        cumulative_loss = torch.tensor(0.0, device=self.device)
+        for mb in micro_batches:
+            forward_output = self.forward(**mb, return_loss=True)
+            # scale losses by the number of micro-batches
+            loss = forward_output["loss"] / accumulate_micro_batches
+            self.manual_backward(loss)
+            # accumulate loss over micro-batches for logging
+            cumulative_loss += loss
+
+        # get the optimizer
+        opt = self.optimizers()
+        # clip gradients
+        self.clip_gradients(opt, gradient_clip_val=1.0, gradient_clip_algorithm="norm")
+        # update weights
+        opt.step()
+        opt.zero_grad()
+        # update lr schedulers
+        sch = self.lr_schedulers()
+        sch.step()
+
+        # log info
         self.log(
             "loss",
-            forward_output["loss"],
+            cumulative_loss,
             batch_size=batch["questions"]["input_ids"].size(0),
             prog_bar=True,
             sync_dist=True,

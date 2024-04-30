@@ -318,6 +318,15 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
             )
         else:
             return sample
+    
+    # def __len__(self) -> int:
+    #     """Get the length as a PyTorch IterableDataset.
+
+    #     Returns:
+    #         int: Dataset length.
+    #     """
+    #     # return self.length
+    #     None
 
     def __iter__(self) -> Iterator[Dict[str, Any]]:
         """Iterate over all the samples in our partition.
@@ -356,38 +365,38 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
         ready_future = self._executor.submit(self._ready_thread, it)
         ready_future.add_done_callback(self.on_exception)
 
-        # yield from map(self.__getitem__, self._each_sample_id(it))
-        # wait([prepare_future, ready_future], return_when='FIRST_EXCEPTION')
-        # it.exit()
-
-        batch = []
-        passages_in_batch = {}
-        for sample_id in self._each_sample_id(it):
-            sample = self.__getitem__(sample_id)
-            passages_in_batch.update(
-                {tuple(passage["input_ids"]): passage for passage in sample["passage"]}
-            )
-            if "mined_passages" in sample:
-                passages_in_batch.update(
-                    {
-                        tuple(passage["input_ids"]): passage
-                        for passage in sample["mined_passages"]
-                    }
-                )
-            batch.append(sample)
-            # batch.append(self.__getitem__(sample_id))
-            if len(passages_in_batch) >= self.max_passage_batch_size:
-                yield batch
-                batch = []
-                passages_in_batch = {}
-        if len(batch) > 0:
-            yield batch
-            batch = []
-            passages_in_batch = {}
-
-        # Exit the threads that are pre-downloading and iterating the shards for this epoch.
-        wait([prepare_future, ready_future], return_when="FIRST_EXCEPTION")
+        yield from map(self.__getitem__, self._each_sample_id(it))
+        wait([prepare_future, ready_future], return_when='FIRST_EXCEPTION')
         it.exit()
+
+        # batch = []
+        # passages_in_batch = {}
+        # for sample_id in self._each_sample_id(it):
+        #     sample = self.__getitem__(sample_id)
+        #     passages_in_batch.update(
+        #         {tuple(passage["input_ids"]): passage for passage in sample["passage"]}
+        #     )
+        #     if "mined_passages" in sample:
+        #         passages_in_batch.update(
+        #             {
+        #                 tuple(passage["input_ids"]): passage
+        #                 for passage in sample["mined_passages"]
+        #             }
+        #         )
+        #     batch.append(sample)
+        #     # batch.append(self.__getitem__(sample_id))
+        #     if len(passages_in_batch) >= self.max_passage_batch_size:
+        #         yield batch
+        #         batch = []
+        #         passages_in_batch = {}
+        # if len(batch) > 0:
+        #     yield batch
+        #     batch = []
+        #     passages_in_batch = {}
+
+        # # Exit the threads that are pre-downloading and iterating the shards for this epoch.
+        # wait([prepare_future, ready_future], return_when="FIRST_EXCEPTION")
+        # it.exit()
 
     # How to tokenize a text sample to a token sample
     @staticmethod

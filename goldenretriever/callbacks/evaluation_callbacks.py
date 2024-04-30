@@ -8,7 +8,6 @@ from sklearn.metrics import label_ranking_average_precision_score
 
 from goldenretriever.callbacks.base import DEFAULT_STAGES, NLPTemplateCallback
 from goldenretriever.common.log import get_logger
-from goldenretriever.pytorch_modules.model import GoldenRetriever
 
 logger = get_logger(__name__, level=logging.INFO)
 
@@ -48,8 +47,8 @@ class RecallAtKEvaluationCallback(NLPTemplateCallback):
     @torch.no_grad()
     def __call__(
         self,
-        fabric: pl.Fabric,
-        retriever: GoldenRetriever,
+        trainer: pl.Trainer,
+        pl_module: pl.LightningModule,
         predictions: Dict,
         *args,
         **kwargs,
@@ -71,11 +70,11 @@ class RecallAtKEvaluationCallback(NLPTemplateCallback):
         # metrics to return
         metrics = {}
 
-        # stage = fabric.state.stage
-        # if stage not in DEFAULT_STAGES:
-        #     raise ValueError(
-        #         f"Stage {stage} not supported, only `validate` and `test` are supported."
-        #     )
+        stage = trainer.state.stage
+        if stage not in DEFAULT_STAGES:
+            raise ValueError(
+                f"Stage {stage} not supported, only `validate` and `test` are supported."
+            )
 
         # if trainer.global_rank == 0:
         for dataloader_idx, samples in predictions.items():
@@ -92,21 +91,20 @@ class RecallAtKEvaluationCallback(NLPTemplateCallback):
             metrics[f"recall@{self.k}_{dataloader_idx}"] = recall_at_k
         metrics[f"recall@{self.k}"] = sum(metrics.values()) / len(metrics)
 
-        prefix = self.prefix or "val" #or stage.value
+        prefix = self.prefix or stage.value
         metrics = {f"{prefix}_{k}": v for k, v in metrics.items()}
-        fabric.log_dict(
+        pl_module.log_dict(
             metrics,
-            # prog_bar=self.prog_bar,
-            # sync_dist=True,
+            prog_bar=self.prog_bar,
+            sync_dist=True,
             # we call it just on the main process for now
-            # reduce_fx="sum",
+            reduce_fx="sum",
         )
 
         if self.verbose:
-            if fabric.global_rank == 0:
+            if trainer.global_rank == 0:
                 logger.info(
-                    f"Recall@{self.k} on {prefix}: \t {metrics[f'{prefix}_recall@{self.k}']}"
-                    # f"Recall@{self.k}: \t {metrics[f'recall@{self.k}']}"
+                    f"Recall@{self.k} on {stage.value}: \t {metrics[f'{stage.value}_recall@{self.k}']}"
                 )
 
         # trainer.strategy.barrier()
