@@ -7,8 +7,8 @@ retriever:
     _target_: goldenretriever.indexers.inmemory.InMemoryDocumentIndex
     documents:
       _target_: goldenretriever.indexers.document.DocumentStore.from_file
-      file_path: "/root/golden-retriever/data/entitylinking/documents.jsonl"
-      # file_path: "/root/golden-retriever/data/entitylinking/documents_only_data.jsonl"
+      # file_path: "data/el/documents.jsonl"
+      file_path: "data/el/documents_only_data.jsonl"
     metadata_fields:
       - "definition"
     separator: " <def> "
@@ -19,7 +19,7 @@ retriever:
 train_dataset:
   _target_: goldenretriever.data.streaming_dataset.GoldenRetrieverStreamingDataset
   name: "train_dataset"
-  local: "/root/golden-retriever/data/entitylinking/aida_32_tokens_topic/train.jsonl"
+  local: "data/el/aida_32_tokens_topic/train.jsonl"
   shuffle: True # force shuffle True for training
   shuffle_seed: 42
   max_question_length: 64
@@ -29,7 +29,7 @@ train_dataset:
 val_dataset:
   - _target_: goldenretriever.data.streaming_dataset.GoldenRetrieverStreamingDataset
     name: "val_dataset"
-    local: "/root/golden-retriever/data/entitylinking/aida_32_tokens_topic/val.jsonl"
+    local: "data/el/aida_32_tokens_topic/val.jsonl"
     shuffle: True # force shuffle True for training
     shuffle_seed: 42
     max_question_length: 64
@@ -54,9 +54,9 @@ num_sanity_val_steps: 0
 micro_batch_size: 16
 precision: 16
 accelerator: "auto"
-devices: 1
-strategy: "auto"
-# strategy: "fsdp"
+devices: 2
+# strategy: "auto"
+strategy: "fsdp"
 # FSDP
 # strategy:
 #   _target_: lightning.pytorch.strategies.FSDPStrategy
@@ -81,9 +81,9 @@ early_stopping_kwargs: null
 # logging section
 log_to_wandb: true
 wandb_entity: null
-wandb_experiment_name: "aida-e5-base-topics-streaming-cli-microbatches"
+wandb_experiment_name: "aida-e5-base-topics-streaming-cli-microbatches-dist"
 wandb_project_name: "golden-retriever-aida"
-wandb_online_mode: true
+wandb_online_mode: false
 wandb_kwargs: null
 
 # checkpointing section

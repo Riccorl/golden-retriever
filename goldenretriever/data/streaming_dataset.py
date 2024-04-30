@@ -538,7 +538,6 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
             is_local=True,
             num_workers=num_workers,
         )
-        logger.debug(f"Tokenizer fn: {tokenizer_fn}")
         if tokenizer_fn is not None:
             dataset = dataset.map(tokenizer_fn, desc="Tokenizing data")
 
