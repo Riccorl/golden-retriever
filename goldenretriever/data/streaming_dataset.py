@@ -5,6 +5,7 @@ import os
 import platform
 from functools import partial
 from pathlib import Path
+import tempfile
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Union, Iterator
 
 import numpy as np
@@ -26,6 +27,7 @@ from goldenretriever.common.utils import (
 from threading import Event, Lock
 from concurrent.futures import ThreadPoolExecutor, wait
 from streaming.base.dataset import _Iterator
+from streaming.base import distributed as dist
 
 logger = get_logger(__name__)
 
@@ -318,15 +320,6 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
             )
         else:
             return sample
-    
-    # def __len__(self) -> int:
-    #     """Get the length as a PyTorch IterableDataset.
-
-    #     Returns:
-    #         int: Dataset length.
-    #     """
-    #     # return self.length
-    #     None
 
     def __iter__(self) -> Iterator[Dict[str, Any]]:
         """Iterate over all the samples in our partition.
@@ -366,37 +359,8 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
         ready_future.add_done_callback(self.on_exception)
 
         yield from map(self.__getitem__, self._each_sample_id(it))
-        wait([prepare_future, ready_future], return_when='FIRST_EXCEPTION')
+        wait([prepare_future, ready_future], return_when="FIRST_EXCEPTION")
         it.exit()
-
-        # batch = []
-        # passages_in_batch = {}
-        # for sample_id in self._each_sample_id(it):
-        #     sample = self.__getitem__(sample_id)
-        #     passages_in_batch.update(
-        #         {tuple(passage["input_ids"]): passage for passage in sample["passage"]}
-        #     )
-        #     if "mined_passages" in sample:
-        #         passages_in_batch.update(
-        #             {
-        #                 tuple(passage["input_ids"]): passage
-        #                 for passage in sample["mined_passages"]
-        #             }
-        #         )
-        #     batch.append(sample)
-        #     # batch.append(self.__getitem__(sample_id))
-        #     if len(passages_in_batch) >= self.max_passage_batch_size:
-        #         yield batch
-        #         batch = []
-        #         passages_in_batch = {}
-        # if len(batch) > 0:
-        #     yield batch
-        #     batch = []
-        #     passages_in_batch = {}
-
-        # # Exit the threads that are pre-downloading and iterating the shards for this epoch.
-        # wait([prepare_future, ready_future], return_when="FIRST_EXCEPTION")
-        # it.exit()
 
     # How to tokenize a text sample to a token sample
     @staticmethod
@@ -560,6 +524,151 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
                 "negatives": "pkl",
                 "hard_negatives": "pkl",
             }
+        with MDSWriter(columns=columns, out=str(cache_path)) as out:
+            for sample in tqdm(dataset, desc=f"Converting {source} to MDS"):
+                out.write(sample)
+
+        return str(cache_path)
+
+
+class TxtStreamingDataset(StreamingDataset):
+    def __init__(
+        self,
+        *,
+        name: str,
+        streams: Optional[Sequence[Stream]] = None,
+        remote: Optional[str] = None,
+        local: Optional[str] = None,
+        split: Optional[str] = None,
+        download_retry: int = 2,
+        download_timeout: float = 60,
+        validate_hash: Optional[str] = None,
+        keep_zip: bool = False,
+        epoch_size: Optional[Union[int, str]] = None,
+        predownload: Optional[int] = None,
+        cache_limit: Optional[Union[int, str]] = None,
+        sampling_method: str = "balanced",
+        sampling_granularity: int = 1,
+        partition_algo: str = "relaxed",
+        num_canonical_nodes: Optional[int] = None,
+        batch_size: Optional[int] = None,
+        shuffle: bool = False,
+        shuffle_algo: str = "py1e",
+        shuffle_seed: int = 9176,
+        shuffle_block_size: Optional[int] = None,
+        batching_method: str = "random",
+        allow_unsafe_types: bool = True,
+        replication: Optional[int] = None,
+        **kwargs: Any,
+    ):
+
+        if len(kwargs) > 0:
+            raise ValueError(
+                f"`TxtStreamingDataset()` got an unexpected keyword argument: {kwargs}"
+            )
+
+        # TODO: discover where yamls are being converted incorrect, but temporary workaround
+        if isinstance(shuffle_block_size, float):
+            shuffle_block_size = int(shuffle_block_size)
+
+        # we initialize subclass specific attributes first
+        # because we need to use them in case of preprocessing
+        self.name = name
+        
+        local = self.preprocess_to_mds(local)
+
+        # Build Dataset
+        super().__init__(
+            streams=streams,
+            remote=remote,
+            local=local,
+            split=split,
+            download_retry=download_retry,
+            download_timeout=download_timeout,
+            validate_hash=validate_hash,
+            keep_zip=keep_zip,
+            epoch_size=epoch_size,
+            predownload=predownload,
+            cache_limit=cache_limit,
+            partition_algo=partition_algo,
+            num_canonical_nodes=num_canonical_nodes,
+            batch_size=batch_size,
+            shuffle=shuffle,
+            shuffle_algo=shuffle_algo,
+            shuffle_seed=shuffle_seed,
+            shuffle_block_size=shuffle_block_size,
+            sampling_method=sampling_method,
+            sampling_granularity=sampling_granularity,
+            batching_method=batching_method,
+            allow_unsafe_types=allow_unsafe_types,
+            replication=replication,
+        )
+
+    def __getitem__(self, idx: int) -> Union[Dict[str, List[int]], torch.Tensor]:
+        sample = super().__getitem__(idx)
+        # check if the sample has been tokenized already
+        return sample
+
+    @staticmethod
+    def preprocess_to_mds(
+        source: str | os.PathLike | List[str],
+        cache_dir: str | os.PathLike | None = None,
+    ) -> str | os.PathLike:
+        """Preprocess the dataset to a markdown file.
+
+        Args:
+            source (str | os.PathLike): The source file or directory to preprocess.
+        """
+        source = Path(source)
+
+        if source.is_dir():
+            basename = get_index_basename()
+            # filename = os.path.join(self.local, self.split, basename)  # pyright: ignore
+            hashed_filename = source / basename
+            if hashed_filename.exists():
+                logger.info(f"Found existing index file {hashed_filename}")
+                return source
+        
+        if cache_dir is None:
+            # use a tmp dir as cache dir
+            cache_dir = GOLDENRETRIEVER_CACHE_DIR
+
+        cache_dir = Path(cache_dir)
+        # check if cache dir exists
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        # get filename from the url
+        hashed_filename = url_to_filename(str(source), None)
+        # get cache path to put the file
+        cache_path = cache_dir / hashed_filename
+
+        # the file is already here, return it
+        if file_exists(cache_path):  # and not force_download:
+            logger.info(
+                f"{source} found in cache."  # , set `force_download=True` to force the download"
+            )
+            return str(cache_path)
+
+        # No index.json file found, so we need to create it
+        logger.info("Converting dataset to MDS format")
+        num_workers = None
+        if num_workers is None:
+            # Multiple workers is only supported on linux machines
+            if "linux" in platform.platform().lower():
+                num_workers = max(1, psutil.cpu_count())
+            else:
+                num_workers = 0
+
+        dataset = build_hf_dataset(
+            dataset_name=str(source),
+            data_subset=None,
+            split="train",
+            shuffle=False,
+            is_local=True,
+            num_workers=num_workers,
+        )
+
+        # get columns from the dataset
+        columns = {"text": "str", "id": "int"}
         with MDSWriter(columns=columns, out=str(cache_path)) as out:
             for sample in tqdm(dataset, desc=f"Converting {source} to MDS"):
                 out.write(sample)

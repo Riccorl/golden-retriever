@@ -2,7 +2,7 @@ import hydra
 import typer
 
 from goldenretriever.cli.utils import resolve_config
-from goldenretriever.common.log import get_logger
+from goldenretriever.common.log import get_logger, print_text_art
 from goldenretriever.trainer.train import Trainer
 from goldenretriever.trainer.fabric import FabricTrainer
 
@@ -21,6 +21,7 @@ def test():
 
 @app.command(context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
 def train():
+    print_text_art()
     config = resolve_config()
     trainer = Trainer(**config)
     trainer.train()

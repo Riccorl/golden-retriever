@@ -17,7 +17,7 @@ from lightning.pytorch.callbacks import (
     ModelSummary,
 )
 from lightning.pytorch.loggers import WandbLogger
-from omegaconf import OmegaConf
+from omegaconf import DictConfig, OmegaConf
 from pprintpp import pformat
 from tqdm import tqdm
 
@@ -50,7 +50,10 @@ from goldenretriever.pytorch_modules.loss import MultiLabelNCELoss
 from goldenretriever.pytorch_modules.model import GoldenRetriever
 from goldenretriever.pytorch_modules.optim import RAdamW
 from goldenretriever.pytorch_modules.scheduler import LinearScheduler
-from goldenretriever.trainer.utils import PRECISION_INPUT_STR_ALIAS_CONVERSION, GoldenRetrieverProgressBar
+from goldenretriever.trainer.utils import (
+    PRECISION_INPUT_STR_ALIAS_CONVERSION,
+    GoldenRetrieverProgressBar,
+)
 
 logger = get_logger(__name__)
 
@@ -340,6 +343,12 @@ class Trainer(FromConfig):
 
         # lazy trainer declaration
         self.trainer: pl.Trainer | None = None
+        # init strategy
+        self.strategy = (
+            hydra.utils.instantiate(self.strategy)
+            if isinstance(self.strategy, DictConfig)
+            else self.strategy
+        )
 
     def configure_lightning_datamodule(self, *args, **kwargs):
 
@@ -698,6 +707,7 @@ class Trainer(FromConfig):
 
         prediction_callback = GoldenRetrieverPredictionCallback(
             batch_size=batch_size,
+            num_workers=self.num_workers,
             precision=precision,
             k=k,
             force_reindex=force_reindex,

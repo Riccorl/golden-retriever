@@ -5,9 +5,11 @@ import lightning as pl
 import torch
 from omegaconf import DictConfig
 
+from goldenretriever.common.log import get_logger
 from goldenretriever.common.model_inputs import ModelInputs
 from goldenretriever.data.utils import HardNegativesManagerThread
 
+logger = get_logger(__name__)
 
 class GoldenRetrieverPLModule(pl.LightningModule):
     def __init__(
@@ -33,6 +35,7 @@ class GoldenRetrieverPLModule(pl.LightningModule):
         self.micro_batch_size = micro_batch_size
 
         self.automatic_optimization = False
+        self.loss = None
 
     def forward(self, **kwargs) -> dict:
         """
@@ -59,20 +62,11 @@ class GoldenRetrieverPLModule(pl.LightningModule):
             forward_output = self.forward(**mb, return_loss=True)
             # scale losses by the number of micro-batches
             loss = forward_output["loss"] / accumulate_micro_batches
-            self.manual_backward(loss)
+            # self.manual_backward(loss)
             # accumulate loss over micro-batches for logging
             cumulative_loss += loss
-
-        # get the optimizer
-        opt = self.optimizers()
-        # clip gradients
-        self.clip_gradients(opt, gradient_clip_val=1.0, gradient_clip_algorithm="norm")
-        # update weights
-        opt.step()
-        opt.zero_grad()
-        # update lr schedulers
-        sch = self.lr_schedulers()
-        sch.step()
+        
+        self.loss = cumulative_loss
 
         # log info
         self.log(
@@ -89,24 +83,22 @@ class GoldenRetrieverPLModule(pl.LightningModule):
             prog_bar=True,
             sync_dist=True,
         )
-        return forward_output["loss"]
+        return cumulative_loss #forward_output["loss"]
 
-    def _training_step(
-        self, batches: List[ModelInputs], batch_idx: int
-    ) -> torch.Tensor:
-        loss = torch.tensor(0.0, device=self.device)
-        for batch in batches:
-            forward_output = self.forward(**batch, return_loss=True)
-            loss += forward_output["loss"]
-            # log the passage batch size
-            self.log(
-                "passage_batch_size",
-                batch["passages"]["input_ids"].size(0),
-                batch_size=batch["questions"]["input_ids"].size(0),
-                prog_bar=True,
-                sync_dist=True,
-            )
-        return loss / len(batches)
+    def on_train_batch_end(self, outputs, batch, batch_idx):
+        # get the optimizer
+        opt = self.optimizers()
+        opt.zero_grad()
+        self.manual_backward(self.loss)
+        # clip gradients
+        self.clip_gradients(opt, gradient_clip_val=1.0, gradient_clip_algorithm="value")
+        # update weights
+        opt.step()
+        # update lr schedulers
+        sch = self.lr_schedulers()
+        sch.step()
+        # reset the loss
+        self.loss = None
 
     def validation_step(self, batch: ModelInputs, batch_idx: int) -> None:
         forward_output = self.forward(**batch, return_loss=True)

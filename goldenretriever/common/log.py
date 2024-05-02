@@ -9,6 +9,8 @@ from art import text2art, tprint
 from colorama import Fore, Style, init
 from rich import get_console
 
+import goldenretriever.common.dist_utils as dist
+
 _lock = threading.Lock()
 _default_handler: Optional[logging.Handler] = None
 
@@ -165,7 +167,7 @@ def get_console_logger():
     return _console
 
 
-def print_relik_text_art(
-    text: str = "golden-retriever", font: str = "larry3d", **kwargs
-):
-    tprint(text, font=font, **kwargs)
+def print_text_art(text: str = "golden-retriever", font: str = "larry3d", **kwargs):
+    # print only in rank 0
+    if dist.get_rank() == 0:
+        tprint(text, font=font, **kwargs)

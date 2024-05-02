@@ -82,14 +82,16 @@ class RecallAtKEvaluationCallback(NLPTemplateCallback):
             for sample in samples:
                 # compute the recall at k
                 # cut the predictions to the first k elements
-                predictions = sample["predictions"][: self.k]
-                hits += len(set(predictions) & set(sample["gold"]))
+                preds = sample["predictions"][: self.k]
+                hits += len(set(preds) & set(sample["gold"]))
                 total += len(set(sample["gold"]))
 
             # compute the mean recall at k
             recall_at_k = hits / total if total > 0 else 0
             metrics[f"recall@{self.k}_{dataloader_idx}"] = recall_at_k
-        metrics[f"recall@{self.k}"] = sum(metrics.values()) / len(metrics)
+        metrics[f"recall@{self.k}"] = (
+            sum(metrics.values()) / len(metrics) if len(metrics) > 0 else 0
+        )
 
         prefix = self.prefix or stage.value
         metrics = {f"{prefix}_{k}": v for k, v in metrics.items()}
@@ -98,7 +100,7 @@ class RecallAtKEvaluationCallback(NLPTemplateCallback):
             prog_bar=self.prog_bar,
             sync_dist=True,
             # we call it just on the main process for now
-            reduce_fx="sum",
+            reduce_fx="mean",
         )
 
         if self.verbose:
@@ -107,7 +109,6 @@ class RecallAtKEvaluationCallback(NLPTemplateCallback):
                     f"Recall@{self.k} on {stage.value}: \t {metrics[f'{stage.value}_recall@{self.k}']}"
                 )
 
-        # trainer.strategy.barrier()
         return metrics
 
 
@@ -213,7 +214,6 @@ class AvgRankingEvaluationCallback(NLPTemplateCallback):
                     f"AVG-Ranking@{self.k} on {prefix}: \t {metrics[f'{prefix}_avg_ranking@{self.k}']}"
                 )
 
-        # trainer.strategy.barrier()
         return metrics
 
 

@@ -3,12 +3,14 @@ retriever:
   _target_: goldenretriever.GoldenRetriever
   # question_encoder: "riccorl/e5-base-v2-blink-1M-32words-windows"
   question_encoder: "intfloat/e5-small-v2"
+  use_hf_model: false
   document_index:
     _target_: goldenretriever.indexers.inmemory.InMemoryDocumentIndex
     documents:
       _target_: goldenretriever.indexers.document.DocumentStore.from_file
       # file_path: "data/el/documents.jsonl"
       file_path: "/leonardo_scratch/large/userexternal/rorland1/golden-retriever/data/el/documents_only_data.jsonl"
+      # file_path: "/leonardo_scratch/large/userexternal/rorland1/golden-retriever/data/el/documents.jsonl"
     metadata_fields:
       - "definition"
     separator: " <def> "
@@ -24,7 +26,7 @@ train_dataset:
   shuffle_seed: 42
   max_question_length: 64
   max_passage_length: 64
-  batch_size: 32
+  batch_size: 64
 
 val_dataset:
   - _target_: goldenretriever.data.streaming_dataset.GoldenRetrieverStreamingDataset
@@ -34,9 +36,9 @@ val_dataset:
     shuffle_seed: 42
     max_question_length: 64
     max_passage_length: 64
-    batch_size: 32
+    batch_size: 64
 
-num_workers: 8
+num_workers: 16
 
 # optimizer section
 optimizer: goldenretriever.pytorch_modules.optim.RAdamW
@@ -48,15 +50,16 @@ max_steps: 25_000
 accumulate_grad_batches: 1
 gradient_clip_val: 1.0
 deterministic: True
-num_sanity_val_steps: 0
+# num_sanity_val_steps: 0
 
 # compute section
-micro_batch_size: 16
-precision: 16
-accelerator: "auto"
-devices: 2
+# micro_batch_size: 16
+precision: "fp32"
+accelerator: "cpu"
+# devices: 2
 # strategy: "auto"
-strategy: "fsdp"
+# strategy: "deepspeed_stage_2"
+# strategy: "fsdp"
 # FSDP
 # strategy:
 #   _target_: lightning.pytorch.strategies.FSDPStrategy
@@ -67,7 +70,7 @@ metric_to_monitor: "validate_recall@{top_k}"
 monitor_mode: "max"
 top_k: 100
 # prediction section
-prediction_batch_size: 128
+prediction_batch_size: 1024
 # hard negatives section
 max_hard_negatives_to_mine: 15
 hard_negatives_threshold: 0.0

@@ -23,9 +23,11 @@ from goldenretriever.data.base.datasets import BaseDataset
 from goldenretriever.data.streaming_dataset import (
     GoldenRetrieverCollator,
     GoldenRetrieverStreamingDataset,
+    GoldenStreamingDataLoader,
 )
 from goldenretriever.data.utils import HardNegativesManager, HardNegativesManagerThread
 from goldenretriever.pytorch_modules.model import GoldenRetriever
+import goldenretriever.common.dist_utils as dist
 
 logger = get_logger(__name__, level=logging.INFO)
 
@@ -187,10 +189,14 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
         #     shuffle_seed=42,
         # )
         # dataset_copy = deepcopy(trainer.datamodule.train_dataset)
+        # dataloader: GoldenStreamingDataLoader = trainer.lightning_module.train_dataloader()
+        # dataloader.load_state_dict(trainer.train_dataloader.state_dict())
         predictions = super().__call__(
             trainer,
             pl_module,
             datasets=dataset,
+            # datasets=dataloader.dataset,
+            # dataloader=dataloader,
             dataloaders=DataLoader(
                 dataset,  # .to_torch_dataset(),
                 shuffle=False,
@@ -205,31 +211,35 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
             *args,
             **kwargs,
         )
-        if trainer.global_rank == 0:
-            logger.info(f"Computing hard negatives for epoch {trainer.current_epoch}")
-            # predictions is a dict with the dataloader index as key and the predictions as value
-            # since we only have one dataloader, we can get the predictions directly
-            predictions = list(predictions.values())[0]
-            # store the predictions in a dictionary for faster access based on the sample index
-            hard_negatives_list = {}
-            for prediction in tqdm(predictions, desc="Collecting hard negatives"):
-                if random.random() < 1 - self.add_with_probability:
-                    continue
-                top_k_passages = prediction["predictions"]
-                gold_passages = prediction["gold"]
-                # get the ids of the max_negatives wrong passages with the highest similarity
-                wrong_passages = [
-                    passage_id
-                    for passage_id in top_k_passages
-                    if passage_id not in gold_passages
-                ][: self.max_negatives]
-                hard_negatives_list[prediction["sample_idx"]] = wrong_passages
+        hn_manager = None
+        # if trainer.global_rank == 0:
+        logger.info(f"Computing hard negatives for epoch {trainer.current_epoch}")
+        # predictions is a dict with the dataloader index as key and the predictions as value
+        # since we only have one dataloader, we can get the predictions directly
+        predictions = list(predictions.values())[0]
+        # store the predictions in a dictionary for faster access based on the sample index
+        hard_negatives_list = {}
+        for prediction in tqdm(predictions, desc="Collecting hard negatives"):
+            if random.random() < 1 - self.add_with_probability:
+                continue
+            top_k_passages = prediction["predictions"]
+            gold_passages = prediction["gold"]
+            # get the ids of the max_negatives wrong passages with the highest similarity
+            wrong_passages = [
+                passage_id
+                for passage_id in top_k_passages
+                if passage_id not in gold_passages
+            ][: self.max_negatives]
+            hard_negatives_list[prediction["sample_idx"]] = wrong_passages
 
-            # hn_manager = HardNegativesManager(
-            #     tokenizer=trainer.datamodule.train_dataset.passage_tokenizer,
-            #     max_length=trainer.datamodule.train_dataset.max_passage_length,
-            #     data=hard_negatives_list,
-            # )
+        # trainer.strategy.barrier()
+        # all gather hard_negatives_list
+        hard_negatives_list = dist.all_gather_object(hard_negatives_list)
+        # merge list of dicts
+        hard_negatives_list = {k: v for d in hard_negatives_list for k, v in d.items()}
+
+        hn_manager: HardNegativesManagerThread | None = None
+        if trainer.global_rank == 0:
             # HardNegativesManager is a singleton, so we need
             # to reset it before adding new hard negatives
             hn_manager = HardNegativesManagerThread(
@@ -239,6 +249,8 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
             hn_manager.reset()
             hn_manager.add(hard_negatives_list.keys(), hard_negatives_list.values())
             hn_manager.tokenize()
+
+        trainer.strategy.broadcast(hn_manager, 0)
 
         # normalize predictions as in the original GoldenRetrieverPredictionCallback
         predictions = {0: predictions}
