@@ -11,6 +11,7 @@ from goldenretriever.data.utils import HardNegativesManagerThread
 
 logger = get_logger(__name__)
 
+
 class GoldenRetrieverPLModule(pl.LightningModule):
     def __init__(
         self,
@@ -65,7 +66,7 @@ class GoldenRetrieverPLModule(pl.LightningModule):
             # self.manual_backward(loss)
             # accumulate loss over micro-batches for logging
             cumulative_loss += loss
-        
+
         self.loss = cumulative_loss
 
         # log info
@@ -83,7 +84,7 @@ class GoldenRetrieverPLModule(pl.LightningModule):
             prog_bar=True,
             sync_dist=True,
         )
-        return cumulative_loss #forward_output["loss"]
+        return cumulative_loss  # forward_output["loss"]
 
     def on_train_batch_end(self, outputs, batch, batch_idx):
         # get the optimizer
@@ -117,6 +118,9 @@ class GoldenRetrieverPLModule(pl.LightningModule):
             batch_size=batch["questions"]["input_ids"].size(0),
             sync_dist=True,
         )
+    
+    def train_dataloader(self) -> Any:
+        return self.li
 
     def configure_model(self):
         if self.model is not None:

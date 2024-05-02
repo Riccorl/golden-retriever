@@ -7,6 +7,7 @@ from transformers import AutoTokenizer, PreTrainedTokenizerBase
 import datasets as hf_datasets
 import streaming.base.distributed as dist
 
+
 def build_tokenizer(
     tokenizer_name: str, tokenizer_kwargs: Dict[str, Any] | None = None
 ) -> PreTrainedTokenizerBase:

@@ -5,6 +5,7 @@ import torch
 import torch.distributed as torch_dist
 from streaming.base.world import World
 from torch._C._distributed_c10d import ProcessGroup
+import composer.utils.dist as composer_dist
 
 TObj = TypeVar("TObj")
 
@@ -27,6 +28,27 @@ def get_rank(group: Optional[ProcessGroup] = None) -> int:
     if torch_dist.is_available() and torch_dist.is_initialized():
         return torch_dist.get_rank(group)
     return 0
+
+
+def get_local_world_size() -> int:
+    """Returns the local world size, which is the number of processes for the current node.
+
+    Returns:
+        int: The local world size.
+    """
+    try:
+        return composer_dist.get_local_world_size()
+    except Exception:
+        return torch.cuda.device_count()
+
+
+def get_world_size() -> int:
+    """Returns the world size, which is the number of processes participating in this training run.
+
+    Returns:
+        int: The world size.
+    """
+    return composer_dist.get_world_size()
 
 
 def all_gather_object(obj: TObj, group=None) -> List[TObj]:

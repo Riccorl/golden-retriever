@@ -19,6 +19,7 @@ from goldenretriever.data.streaming_dataset import (
     GoldenStreamingDataLoader,
 )
 from omegaconf import OmegaConf, open_dict
+import goldenretriever.common.dist_utils as dist
 
 logger = get_logger(__name__)
 
@@ -152,6 +153,15 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
                 )
 
     def setup(self, stage: str | None = None):
+
+        os.environ["WORLD_SIZE"] = str(dist.get_world_size())
+        os.environ["LOCAL_WORLD_SIZE"] = str(dist.get_local_world_size())
+        os.environ["RANK"] = str(dist.get_rank())
+
+        logger.debug(f"World size: {os.environ['WORLD_SIZE']}")
+        logger.debug(f"Local world size: {os.environ['LOCAL_WORLD_SIZE']}")
+        logger.debug(f"Rank: {os.environ['RANK']}")
+
         if stage == "fit" or stage is None:
             # usually there is only one dataset for train
             # if you need more train loader, you can follow
@@ -279,15 +289,12 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
             self.test_datasets_kwargs = _test_dataset_kwargs
 
     def train_dataloader(self, *args, **kwargs) -> DataLoader:
-        # return DataLoader(
         return GoldenStreamingDataLoader(
             self.train_dataset,
             collate_fn=GoldenRetrieverCollator(
                 pad_token_type_id=self.train_dataset.question_tokenizer.pad_token_type_id,
-                # postpone_collate=True,
             ),
             batch_size=self.train_dataset.batch_size,
-            # batch_size=None,
             num_workers=self.num_workers.train,
             pin_memory=True,
             prefetch_factor=(
@@ -303,15 +310,12 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
         dataloaders = []
         for i, dataset in enumerate(self.val_datasets):
             dataloaders.append(
-                # DataLoader(
                 GoldenStreamingDataLoader(
                     dataset,
                     collate_fn=GoldenRetrieverCollator(
                         pad_token_type_id=dataset.question_tokenizer.pad_token_type_id,
-                        # postpone_collate=False,
                     ),
                     batch_size=dataset.batch_size,
-                    # batch_size=None,
                     num_workers=self.num_workers.val,
                     pin_memory=True,
                     prefetch_factor=(
@@ -329,15 +333,12 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
         dataloaders = []
         for i, dataset in enumerate(self.test_datasets):
             dataloaders.append(
-                # DataLoader(
                 GoldenStreamingDataLoader(
                     dataset,
                     collate_fn=GoldenRetrieverCollator(
                         pad_token_type_id=dataset.question_tokenizer.pad_token_type_id,
-                        # postpone_collate=False,
                     ),
                     batch_size=dataset.batch_size,
-                    # batch_size=None,
                     num_workers=self.num_workers.val,
                     pin_memory=True,
                     prefetch_factor=(

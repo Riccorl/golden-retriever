@@ -418,7 +418,9 @@ class LearningRateMonitor:
         log_weight_decay: bool = False,
     ) -> None:
         if logging_interval not in (None, "step", "epoch"):
-            raise MisconfigurationException("logging_interval should be `step` or `epoch` or `None`.")
+            raise MisconfigurationException(
+                "logging_interval should be `step` or `epoch` or `None`."
+            )
 
         self.optimizers = optimizers
         self.lr_scheduler_configs = lr_scheduler_configs
@@ -450,10 +452,13 @@ class LearningRateMonitor:
             def _check_no_key(key: str) -> bool:
                 if self.lr_scheduler_configs:
                     return any(
-                        key not in config.scheduler.optimizer.defaults for config in self.lr_scheduler_configs
+                        key not in config.scheduler.optimizer.defaults
+                        for config in self.lr_scheduler_configs
                     )
 
-                return any(key not in optimizer.defaults for optimizer in self.optimizers)
+                return any(
+                    key not in optimizer.defaults for optimizer in self.optimizers
+                )
 
             if _check_no_key("momentum") and _check_no_key("betas"):
                 rank_zero_warn(
@@ -483,13 +488,17 @@ class LearningRateMonitor:
         names_flatten = list(itertools.chain.from_iterable(names))
         self.lrs = {name: [] for name in names_flatten}
         self.last_momentum_values = {name + "-momentum": None for name in names_flatten}
-        self.last_weight_decay_values = {name + "-weight_decay": None for name in names_flatten}
+        self.last_weight_decay_values = {
+            name + "-weight_decay": None for name in names_flatten
+        }
 
     @override
-    def on_train_batch_start(self, fabric: "pl.Fabric", step: int, *args: Any, **kwargs: Any) -> None:
+    def on_train_batch_start(
+        self, fabric: "pl.Fabric", step: int, *args: Any, **kwargs: Any
+    ) -> None:
         # if not trainer._logger_connector.should_update_logs:
-            # return
-        
+        # return
+
         if self.logging_interval != "epoch":
             interval = "step" if self.logging_interval is None else "any"
             latest_stat = self._extract_stats(fabric, interval)
@@ -499,14 +508,18 @@ class LearningRateMonitor:
                 fabric.log_dict(latest_stat, step=step)
 
     @override
-    def on_train_epoch_start(self, fabric: "pl.Fabric", step: int, *args: Any, **kwargs: Any) -> None:
+    def on_train_epoch_start(
+        self, fabric: "pl.Fabric", step: int, *args: Any, **kwargs: Any
+    ) -> None:
         if self.logging_interval != "step":
             interval = "epoch" if self.logging_interval is None else "any"
             latest_stat = self._extract_stats(fabric, interval)
 
             if latest_stat:
                 # for logger in trainer.loggers:
-                fabric.log_dict(latest_stat, step=step) #, step=trainer.fit_loop.epoch_loop._batches_that_stepped)
+                fabric.log_dict(
+                    latest_stat, step=step
+                )  # , step=trainer.fit_loop.epoch_loop._batches_that_stepped)
 
     def _extract_stats(self, fabric: "pl.Fabric", interval: str) -> Dict[str, float]:
         latest_stat = {}
@@ -524,10 +537,12 @@ class LearningRateMonitor:
                 current_stat = self._get_optimizer_stats(opt, name)
                 latest_stat.update(current_stat)
 
-        optimizer_hparam_keys, optimizers_without_scheduler = self._find_names_from_optimizers(
-            self.optimizers,
-            seen_optimizers=optimizers_with_scheduler,
-            seen_optimizer_types=optimizers_with_scheduler_types,
+        optimizer_hparam_keys, optimizers_without_scheduler = (
+            self._find_names_from_optimizers(
+                self.optimizers,
+                seen_optimizers=optimizers_with_scheduler,
+                seen_optimizer_types=optimizers_with_scheduler_types,
+            )
         )
         self._remap_keys(optimizer_hparam_keys)
 
@@ -541,7 +556,9 @@ class LearningRateMonitor:
 
         return latest_stat
 
-    def _get_optimizer_stats(self, optimizer: Optimizer, names: List[str]) -> Dict[str, float]:
+    def _get_optimizer_stats(
+        self, optimizer: Optimizer, names: List[str]
+    ) -> Dict[str, float]:
         stats = {}
         param_groups = optimizer.param_groups
         use_betas = "betas" in optimizer.defaults
@@ -550,7 +567,9 @@ class LearningRateMonitor:
             lr = self._extract_lr(pg, name)
             stats.update(lr)
             momentum = self._extract_momentum(
-                param_group=pg, name=name.replace(name, f"{name}-momentum"), use_betas=use_betas
+                param_group=pg,
+                name=name.replace(name, f"{name}-momentum"),
+                use_betas=use_betas,
             )
             stats.update(momentum)
             weight_decay = self._extract_weight_decay(pg, f"{name}-weight_decay")
@@ -573,15 +592,21 @@ class LearningRateMonitor:
                 elif new_name not in self.lrs:
                     self.lrs[new_name] = []
 
-    def _extract_momentum(self, param_group: Dict[str, List], name: str, use_betas: bool) -> Dict[str, float]:
+    def _extract_momentum(
+        self, param_group: Dict[str, List], name: str, use_betas: bool
+    ) -> Dict[str, float]:
         if not self.log_momentum:
             return {}
 
-        momentum = param_group["betas"][0] if use_betas else param_group.get("momentum", 0)
+        momentum = (
+            param_group["betas"][0] if use_betas else param_group.get("momentum", 0)
+        )
         self.last_momentum_values[name] = momentum
         return {name: momentum}
 
-    def _extract_weight_decay(self, param_group: Dict[str, Any], name: str) -> Dict[str, Any]:
+    def _extract_weight_decay(
+        self, param_group: Dict[str, Any], name: str
+    ) -> Dict[str, Any]:
         """Extracts the weight decay statistics from a parameter group."""
         if not self.log_weight_decay:
             return {}
@@ -591,18 +616,29 @@ class LearningRateMonitor:
         return {name: weight_decay}
 
     def _add_prefix(
-        self, name: str, optimizer_cls: Type[Optimizer], seen_optimizer_types: DefaultDict[Type[Optimizer], int]
+        self,
+        name: str,
+        optimizer_cls: Type[Optimizer],
+        seen_optimizer_types: DefaultDict[Type[Optimizer], int],
     ) -> str:
         if optimizer_cls not in seen_optimizer_types:
             return name
         count = seen_optimizer_types[optimizer_cls]
         return name + f"-{count - 1}" if count > 1 else name
 
-    def _add_suffix(self, name: str, param_groups: List[Dict], param_group_index: int, use_names: bool = True) -> str:
+    def _add_suffix(
+        self,
+        name: str,
+        param_groups: List[Dict],
+        param_group_index: int,
+        use_names: bool = True,
+    ) -> str:
         if len(param_groups) > 1:
             if not use_names:
                 return f"{name}/pg{param_group_index + 1}"
-            pg_name = param_groups[param_group_index].get("name", f"pg{param_group_index + 1}")
+            pg_name = param_groups[param_group_index].get(
+                "name", f"pg{param_group_index + 1}"
+            )
             return f"{name}/{pg_name}"
         if use_names:
             pg_name = param_groups[param_group_index].get("name")
@@ -627,7 +663,11 @@ class LearningRateMonitor:
         seen_optimizer_types: DefaultDict[Type[Optimizer], int] = defaultdict(int)
         for config in lr_scheduler_configs:
             sch = config.scheduler
-            name = config.name if config.name is not None else "lr-" + sch.optimizer.__class__.__name__
+            name = (
+                config.name
+                if config.name is not None
+                else "lr-" + sch.optimizer.__class__.__name__
+            )
 
             updated_names = self._check_duplicates_and_update_name(
                 sch.optimizer, name, seen_optimizers, seen_optimizer_types, config
@@ -647,7 +687,9 @@ class LearningRateMonitor:
 
         for optimizer in optimizers:
             # Deepspeed optimizer wraps the native optimizer
-            optimizer = optimizer.optimizer if hasattr(optimizer, "optimizer") else optimizer
+            optimizer = (
+                optimizer.optimizer if hasattr(optimizer, "optimizer") else optimizer
+            )
             if optimizer in seen_optimizers:
                 continue
 
@@ -683,4 +725,6 @@ class LearningRateMonitor:
             )
 
         name = self._add_prefix(name, optimizer_cls, seen_optimizer_types)
-        return [self._add_suffix(name, param_groups, i) for i in range(len(param_groups))]
+        return [
+            self._add_suffix(name, param_groups, i) for i in range(len(param_groups))
+        ]

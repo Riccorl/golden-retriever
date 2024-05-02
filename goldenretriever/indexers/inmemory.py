@@ -250,14 +250,19 @@ class InMemoryDocumentIndex(BaseDocumentIndex):
                 if self.device == "cpu":
                     # passage_embeddings.extend([c.detach().cpu() for c in passage_outs])
                     passage_embeddings_dict.update(
-                        {i: c.detach().cpu() for i, c in zip(passages_ids, passage_outs)}
+                        {
+                            i: c.detach().cpu()
+                            for i, c in zip(passages_ids, passage_outs)
+                        }
                     )
                 else:
                     # passage_embeddings.extend([c for c in passage_outs])
                     passage_embeddings_dict.update(
                         {i: c for i, c in zip(passages_ids, passage_outs)}
                     )
-            logger.debug(f"Length of passage embeddings: {len(passage_embeddings_dict)}")
+            logger.debug(
+                f"Length of passage embeddings: {len(passage_embeddings_dict)}"
+            )
 
         # move the passage embeddings to the CPU if not already done
         # the move to cpu and then to gpu is needed to avoid OOM when using mixed precision
@@ -270,7 +275,9 @@ class InMemoryDocumentIndex(BaseDocumentIndex):
         # passage_embeddings = dist.all_gather_object(passage_embeddings)
         # passages_ids = dist.all_gather_object(passages_ids)
         passage_embeddings_dict = dist.all_gather_object(passage_embeddings_dict)
-        logger.debug(f"Length of passage embeddings after all_gather: {len(passage_embeddings_dict)}")
+        logger.debug(
+            f"Length of passage embeddings after all_gather: {len(passage_embeddings_dict)}"
+        )
 
         # merge the passage embeddings from all the devices
         passage_embeddings = {}
@@ -278,14 +285,18 @@ class InMemoryDocumentIndex(BaseDocumentIndex):
         for d in passage_embeddings_dict:
             ids.extend(d.keys())
             passage_embeddings.update(d)
-        
+
         logger.debug(f"Length of ids after merge: {len(ids)}")
         logger.debug(f"Unique ids after merge: {len(set(ids))}")
-        
-        logger.debug(f"Length of passage embeddings after merge: {len(passage_embeddings)}")
-        
+
+        logger.debug(
+            f"Length of passage embeddings after merge: {len(passage_embeddings)}"
+        )
+
         # order the passage embeddings based on the passage ids
-        passage_embeddings = dict(sorted(passage_embeddings.items(), key=lambda x: x[0]))
+        passage_embeddings = dict(
+            sorted(passage_embeddings.items(), key=lambda x: x[0])
+        )
         # extract the embeddings
         passage_embeddings = list(passage_embeddings.values())
 

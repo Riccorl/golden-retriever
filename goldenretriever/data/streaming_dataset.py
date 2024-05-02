@@ -574,7 +574,7 @@ class TxtStreamingDataset(StreamingDataset):
         # we initialize subclass specific attributes first
         # because we need to use them in case of preprocessing
         self.name = name
-        
+
         local = self.preprocess_to_mds(local)
 
         # Build Dataset
@@ -628,7 +628,7 @@ class TxtStreamingDataset(StreamingDataset):
             if hashed_filename.exists():
                 logger.info(f"Found existing index file {hashed_filename}")
                 return source
-        
+
         if cache_dir is None:
             # use a tmp dir as cache dir
             cache_dir = GOLDENRETRIEVER_CACHE_DIR
