@@ -1,8 +1,8 @@
 # model section
 retriever:
   _target_: goldenretriever.GoldenRetriever
-  question_encoder: "riccorl/e5-base-v2-blink-1M-32words-windows"
-  # question_encoder: "intfloat/e5-small-v2"
+  # question_encoder: "riccorl/e5-base-v2-blink-1M-32words-windows"
+  question_encoder: "intfloat/e5-small-v2"
   document_index:
     _target_: goldenretriever.indexers.inmemory.InMemoryDocumentIndex
     documents:
@@ -48,19 +48,19 @@ max_steps: 25_000
 accumulate_grad_batches: 1
 gradient_clip_val: 1.0
 deterministic: True
-num_sanity_val_steps: 0
+# num_sanity_val_steps: 0
 
 # compute section
-micro_batch_size: 16
+micro_batch_size: 8
 precision: 16
 accelerator: "auto"
 devices: 2
 # strategy: "auto"
-strategy: "fsdp"
+# strategy: "fsdp"
 # FSDP
-# strategy:
-#   _target_: lightning.pytorch.strategies.FSDPStrategy
-#   sharding_strategy: "NO_SHARD"
+strategy:
+  _target_: lightning.pytorch.strategies.FSDPStrategy
+  sharding_strategy: "NO_SHARD"
 
 # eval section
 metric_to_monitor: "validate_recall@{top_k}"

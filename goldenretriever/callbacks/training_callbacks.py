@@ -13,7 +13,6 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from goldenretriever.callbacks.prediction_callbacks import (
-    GoldenRetrieverFabricPredictionCallback,
     GoldenRetrieverPredictionCallback,
 )
 from goldenretriever.common.log import get_logger
