@@ -1,5 +1,5 @@
 import os
-from copy import deepcopy
+from copy import copy, deepcopy
 from pathlib import Path
 from typing import List, Literal
 
@@ -217,6 +217,7 @@ class Trainer(FromConfig):
             metrics_to_monitor_for_hard_negatives
         )
         self.mine_hard_negatives_with_probability = mine_hard_negatives_with_probability
+        self.hard_negative_dataset = deepcopy(self.train_dataset)
         # other parameters
         self.seed = seed
         self.float32_matmul_precision = float32_matmul_precision
@@ -628,6 +629,8 @@ class Trainer(FromConfig):
         hard_negatives_callback = NegativeAugmentationCallback(
             k=self.target_top_k,
             batch_size=self.prediction_batch_size,
+            dataset=self.hard_negative_dataset,
+            num_workers=self.num_workers,
             precision=self.precision,
             stages=["validate"],
             metrics_to_monitor=metrics_to_monitor,

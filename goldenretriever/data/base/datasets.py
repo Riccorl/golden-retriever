@@ -7,7 +7,7 @@ from torch.utils.data import Dataset, IterableDataset
 
 from goldenretriever.common.log import get_logger
 
-logger = get_logger()
+logger = get_logger(__name__)
 
 
 class BaseDataset(Dataset):

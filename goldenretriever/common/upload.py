@@ -1,6 +1,5 @@
 import argparse
 import json
-import logging
 import os
 import tempfile
 import zipfile
@@ -13,7 +12,7 @@ import huggingface_hub
 from goldenretriever.common.log import get_logger
 from goldenretriever.common.utils import SAPIENZANLP_DATE_FORMAT, get_md5
 
-logger = get_logger(level=logging.DEBUG)
+logger = get_logger(__name__)
 
 
 def create_info_file(tmpdir: Path):

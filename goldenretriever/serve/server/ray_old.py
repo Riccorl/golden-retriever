@@ -12,7 +12,7 @@ from goldenretriever.serve.tokenizers import SpacyTokenizer, WhitespaceTokenizer
 from goldenretriever.serve.utils import RayParameterManager, ServerParameterManager
 from goldenretriever.serve.window.manager import WindowManager
 
-logger = get_logger(__name__, level=logging.INFO)
+logger = get_logger(__name__)
 
 VERSION = {}  # type: ignore
 with open(Path(__file__).parent.parent.parent / "version.py", "r") as version_file:

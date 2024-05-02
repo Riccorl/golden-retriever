@@ -1,30 +1,22 @@
-import contextlib
 import json
-import logging
 import os
 import tempfile
-from typing import Callable, List, Optional, Tuple, Union
+from typing import Callable, List, Optional, Union
 
 import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from goldenretriever.common.dist_utils import all_gather, broadcast_object_list
+import goldenretriever.common.dist_utils as dist
 from goldenretriever.common.log import get_logger
 from goldenretriever.common.model_inputs import ModelInputs
 from goldenretriever.common.torch_utils import get_autocast_context
-from goldenretriever.data.base.datasets import BaseDataset
-from goldenretriever.data.streaming_dataset import (
-    TxtStreamingDataset,
-    GoldenRetrieverStreamingDataset,
-)
+from goldenretriever.data.streaming_dataset import TxtStreamingDataset
 from goldenretriever.indexers.base import BaseDocumentIndex
 from goldenretriever.indexers.document import Document, DocumentStore
 from goldenretriever.pytorch_modules import PRECISION_MAP, RetrievedSample
-from goldenretriever.pytorch_modules.modules import MatrixMultiplicationModule
-import goldenretriever.common.dist_utils as dist
 
-logger = get_logger(__name__, level=logging.INFO)
+logger = get_logger(__name__)
 
 
 class InMemoryDocumentIndex(BaseDocumentIndex):

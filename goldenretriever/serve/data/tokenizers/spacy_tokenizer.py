@@ -12,7 +12,7 @@ from goldenretriever.serve.data.objects import Word
 from goldenretriever.serve.data.tokenizers import SPACY_LANGUAGE_MAPPER
 from goldenretriever.serve.data.tokenizers.base_tokenizer import BaseTokenizer
 
-logger = get_logger(level=logging.DEBUG)
+logger = get_logger(__name__)
 
 # Spacy and Stanza stuff
 

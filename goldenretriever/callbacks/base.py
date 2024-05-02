@@ -14,7 +14,7 @@ from lightning.pytorch.utilities import rank_zero_only
 
 from goldenretriever.pytorch_modules.model import GoldenRetriever
 
-logger = get_logger()
+logger = get_logger(__name__)
 
 
 STAGES_COMPATIBILITY_MAP = {

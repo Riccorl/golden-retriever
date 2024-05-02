@@ -4,11 +4,12 @@ from copy import deepcopy
 from pathlib import Path
 from typing import List, Optional, Sequence, Union
 
+import hydra
 import lightning as pl
 import torch
 from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.trainer.states import RunningStage
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -188,31 +189,39 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
         # )
         # dataset_copy = deepcopy(trainer.datamodule.train_dataset)
         # dataset = trainer.train_dataloader.dataset
-        dataloader: GoldenStreamingDataLoader = trainer.datamodule.train_dataloader()
-        dataloader.load_state_dict(trainer.train_dataloader.state_dict())
-        dataset = dataloader.dataset
+        if isinstance(self.datasets, DictConfig):
+            OmegaConf.update(self.datasets, "batch_size", self.batch_size)
+            dataset = hydra.utils.instantiate(
+                self.datasets,
+                question_tokenizer=trainer.train_dataloader.dataset.question_tokenizer,
+            )
+
+        dataloader = GoldenStreamingDataLoader(
+            dataset,
+            collate_fn=GoldenRetrieverCollator(
+                pad_token_type_id=dataset.question_tokenizer.pad_token_type_id,
+            ),
+            batch_size=dataset.batch_size,
+            num_workers=self.num_workers,
+            # pin_memory=True,
+            # prefetch_factor=(
+            #     max(1, 8 * dataset.batch_size // self.num_workers)
+            #     if self.num_workers > 0
+            #     else None
+            # ),
+        )
+        # dataloader: GoldenStreamingDataLoader = trainer.datamodule.train_dataloader()
+        # dataloader.load_state_dict(trainer.train_dataloader.state_dict())
+        # dataset = dataloader.dataset
         predictions = super().__call__(
             trainer,
             pl_module,
             datasets=dataset,
             dataloaders=dataloader,
-            # datasets=dataloader.dataset,
-            # dataloader=dataloader,
-            # dataloaders=DataLoader(
-            #     dataset,  # .to_torch_dataset(),
-            #     shuffle=False,
-            #     batch_size=dataset.batch_size,
-            #     num_workers=self.num_workers,
-            #     pin_memory=True,
-            #     # collate_fn=lambda x: x,
-            #     collate_fn=GoldenRetrieverCollator(
-            #         pad_token_type_id=dataset.question_tokenizer.pad_token_type_id,
-            #     ),
-            # ),
             *args,
             **kwargs,
         )
-        hn_manager = None
+        hn_manager: HardNegativesManagerThread | None = None
         # if trainer.global_rank == 0:
         logger.info(f"Computing hard negatives for epoch {trainer.current_epoch}")
         # predictions is a dict with the dataloader index as key and the predictions as value

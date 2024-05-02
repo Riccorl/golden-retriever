@@ -20,7 +20,7 @@ from goldenretriever.serve.server.backend.utils import (
     ServerParameterManager,
 )
 
-logger = get_logger(__name__, level=logging.INFO)
+logger = get_logger(__name__)
 
 VERSION = {}  # type: ignore
 with open(

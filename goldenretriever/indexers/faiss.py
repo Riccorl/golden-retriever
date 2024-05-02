@@ -1,5 +1,4 @@
 import contextlib
-import logging
 import os
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Union
@@ -23,7 +22,7 @@ if is_package_available("faiss"):
     import faiss
     import faiss.contrib.torch_utils
 
-logger = get_logger(__name__, level=logging.INFO)
+logger = get_logger(__name__)
 
 
 @dataclass
