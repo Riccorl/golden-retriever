@@ -54,13 +54,13 @@ deterministic: True
 micro_batch_size: 8
 precision: 16
 accelerator: "auto"
-devices: 2
+# devices: 2
 # strategy: "auto"
 # strategy: "fsdp"
 # FSDP
-strategy:
-  _target_: lightning.pytorch.strategies.FSDPStrategy
-  sharding_strategy: "NO_SHARD"
+# strategy:
+#   _target_: lightning.pytorch.strategies.FSDPStrategy
+#   sharding_strategy: "NO_SHARD"
 
 # eval section
 metric_to_monitor: "validate_recall@{top_k}"

@@ -74,7 +74,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                 f"Stage `{stage}` not supported, only {self.stages} are supported"
             )
 
-        self.datasets, self.dataloaders = self._get_datasets_and_dataloaders(
+        datasets, dataloaders = self._get_datasets_and_dataloaders(
             datasets,
             dataloaders,
             trainer,
@@ -95,8 +95,8 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         # here we will store the samples with predictions for each dataloader
         dataloader_predictions = {}
         # compute the passage embeddings index for each dataloader
-        for dataloader_idx, dataloader in enumerate(self.dataloaders):
-            current_dataset: GoldenRetrieverDataset = self.datasets[dataloader_idx]
+        for dataloader_idx, dataloader in enumerate(dataloaders):
+            current_dataset: GoldenRetrieverDataset = datasets[dataloader_idx]
             if trainer.global_rank == 0:
                 logger.info(
                     f"Computing passage embeddings for dataset {current_dataset.name}"

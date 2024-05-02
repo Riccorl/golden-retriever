@@ -190,6 +190,7 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
         # dataset_copy = deepcopy(trainer.datamodule.train_dataset)
         # dataset = trainer.train_dataloader.dataset
         if isinstance(self.datasets, DictConfig):
+            logger.debug("Instantiating dataset")
             OmegaConf.update(self.datasets, "batch_size", self.batch_size)
             dataset = hydra.utils.instantiate(
                 self.datasets,
