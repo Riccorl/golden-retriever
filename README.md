@@ -14,6 +14,10 @@
 
 </p>
 
+# WIP: distributed-compatible codebase
+
+A distributed-compatible codebase is under development. Check the `distributed` [branch](https://github.com/Riccorl/golden-retriever/tree/distributed) for the latest updates.
+
 # How to use
 
 Install the library from [PyPI](https://pypi.org/project/goldenretriever-core/):
