@@ -75,9 +75,9 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
             )
 
         datasets, dataloaders = self._get_datasets_and_dataloaders(
+            trainer,
             datasets,
             dataloaders,
-            trainer,
             dataloader_kwargs=dict(
                 batch_size=self.batch_size,
                 num_workers=self.num_workers,

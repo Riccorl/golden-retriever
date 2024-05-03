@@ -1,7 +1,7 @@
 import json
 import os
 import tempfile
-from typing import Callable, List, Optional, Union
+from typing import Callable, Dict, List, Optional, Union
 
 import torch
 from torch.utils.data import DataLoader
@@ -202,9 +202,6 @@ class InMemoryDocumentIndex(BaseDocumentIndex):
         # extract the data path from the list
         data_path = data_path[0]
 
-        # logger.debug(f"Rank {dist.get_rank()} data_path: {data_path}")
-
-        # if dist.get_rank() == 0:
         dataloader = DataLoader(
             # BaseDataset(name="passage", data=data),
             TxtStreamingDataset(name="passage", local=data_path, batch_size=batch_size),
@@ -218,18 +215,10 @@ class InMemoryDocumentIndex(BaseDocumentIndex):
             ),
         )
 
-        logger.debug(f"Dataloader length: {len(dataloader)}")
-
         encoder = retriever.passage_encoder
-
-        # Create empty lists to store the passage embeddings and passage index
-        # passage_embeddings: List[torch.Tensor] = []
-        # passages_ids: List[int] = []
-
-        passage_embeddings_dict = {}
-
         encoder_device = "cpu" if compute_on_cpu else encoder.device
 
+        passage_embeddings_dict: Dict[int, torch.Tensor] = {}
         with get_autocast_context(encoder_device, encoder_precision):
             # Iterate through each batch in the dataloader
             for batch in tqdm(dataloader, desc=f"Indexing at rank {dist.get_rank()}"):
@@ -252,38 +241,19 @@ class InMemoryDocumentIndex(BaseDocumentIndex):
                     passage_embeddings_dict.update(
                         {i: c for i, c in zip(passages_ids, passage_outs)}
                     )
-            logger.debug(
-                f"Length of passage embeddings: {len(passage_embeddings_dict)}"
-            )
 
         # move the passage embeddings to the CPU if not already done
         # the move to cpu and then to gpu is needed to avoid OOM when using mixed precision
         if not self.device == "cpu":  # this if is to avoid unnecessary moves
-            # passage_embeddings = [c.detach().cpu() for c in passage_embeddings]
             passage_embeddings_dict = {
                 i: c.detach().cpu() for i, c in passage_embeddings_dict.items()
             }
 
-        # passage_embeddings = dist.all_gather_object(passage_embeddings)
-        # passages_ids = dist.all_gather_object(passages_ids)
         passage_embeddings_dict = dist.all_gather_object(passage_embeddings_dict)
-        logger.debug(
-            f"Length of passage embeddings after all_gather: {len(passage_embeddings_dict)}"
-        )
-
         # merge the passage embeddings from all the devices
         passage_embeddings = {}
-        ids = []
         for d in passage_embeddings_dict:
-            ids.extend(d.keys())
             passage_embeddings.update(d)
-
-        logger.debug(f"Length of ids after merge: {len(ids)}")
-        logger.debug(f"Unique ids after merge: {len(set(ids))}")
-
-        logger.debug(
-            f"Length of passage embeddings after merge: {len(passage_embeddings)}"
-        )
 
         # order the passage embeddings based on the passage ids
         passage_embeddings = dict(
@@ -291,15 +261,6 @@ class InMemoryDocumentIndex(BaseDocumentIndex):
         )
         # extract the embeddings
         passage_embeddings = list(passage_embeddings.values())
-
-        # flat the lists
-        # passage_embeddings = [item for sublist in passage_embeddings for item in sublist]
-        # passages_ids = [item for sublist in passages_ids for item in sublist]
-
-        # order the passage embeddings based on the passage ids
-        # passages_ids, passage_embeddings = zip(
-        #     *sorted(zip(passages_ids, passage_embeddings), key=lambda x: x[0])
-        # )
         # stack it
         passage_embeddings: torch.Tensor = torch.stack(passage_embeddings, dim=0)
         # move the passage embeddings to the gpu if needed
@@ -307,18 +268,6 @@ class InMemoryDocumentIndex(BaseDocumentIndex):
             passage_embeddings = passage_embeddings.to(PRECISION_MAP[self.precision])
             passage_embeddings = passage_embeddings.to(self.device)
 
-        # logger.debug(
-        #     f"Passage embeddings shape for rank {dist.get_rank()}: {passage_embeddings.shape}"
-        # )
-
-        # # broadcast the passage embeddings to all the devices
-        # passage_embeddings = dist.all_gather(passage_embeddings)
-        # # stack the passage embeddings from all the devices
-        # passage_embeddings = torch.cat(passage_embeddings, dim=0)
-        logger.debug(
-            f"Passage embeddings shape after all_gather: {passage_embeddings.shape}"
-        )
-        # dist.barrier()
         self.embeddings = passage_embeddings
         # logger.debug(f"Passage embeddings shape for rank {dist.get_rank()} after broadcast: {passage_embeddings.shape}")
         # update the matrix multiplication module

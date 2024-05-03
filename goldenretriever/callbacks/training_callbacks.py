@@ -191,10 +191,24 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
         # dataset = trainer.train_dataloader.dataset
         if isinstance(self.datasets, DictConfig):
             logger.debug("Instantiating dataset")
-            OmegaConf.update(self.datasets, "batch_size", self.batch_size)
-            dataset = hydra.utils.instantiate(
-                self.datasets,
+            # OmegaConf.update(self.datasets, "batch_size", self.batch_size)
+            # dataset = hydra.utils.instantiate(
+            #     self.datasets,
+            #     question_tokenizer=trainer.train_dataloader.dataset.question_tokenizer,
+            # )
+            # dataset = GoldenRetrieverStreamingDataset(
+            #     **self.datasets,
+            #     question_tokenizer=trainer.train_dataloader.dataset.question_tokenizer,
+            #     passage_tokenizer=trainer.train_dataloader.dataset.passage_tokenizer,
+            # )
+            dataset_kwargs = OmegaConf.to_container(self.datasets, resolve=True)
+            dataset_kwargs.update({"use_cache": False})
+            dataset, _ = trainer.datamodule.dataset_builder(
+                name="train_hn",
+                batch_size=self.batch_size,
                 question_tokenizer=trainer.train_dataloader.dataset.question_tokenizer,
+                passage_tokenizer=trainer.train_dataloader.dataset.passage_tokenizer,
+                dataset_kwargs=dataset_kwargs,
             )
 
         dataloader = GoldenStreamingDataLoader(
@@ -222,8 +236,6 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
             *args,
             **kwargs,
         )
-        hn_manager: HardNegativesManagerThread | None = None
-        # if trainer.global_rank == 0:
         logger.info(f"Computing hard negatives for epoch {trainer.current_epoch}")
         # predictions is a dict with the dataloader index as key and the predictions as value
         # since we only have one dataloader, we can get the predictions directly
@@ -243,13 +255,13 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
             ][: self.max_negatives]
             hard_negatives_list[prediction["sample_idx"]] = wrong_passages
 
-        # trainer.strategy.barrier()
         # all gather hard_negatives_list
         hard_negatives_list = dist.all_gather_object(hard_negatives_list)
         # merge list of dicts
         hard_negatives_list = {k: v for d in hard_negatives_list for k, v in d.items()}
 
         hn_manager: HardNegativesManagerThread | None = None
+        # update on rank 0 and broadcast to other ranks
         if trainer.global_rank == 0:
             # HardNegativesManager is a singleton, so we need
             # to reset it before adding new hard negatives
@@ -260,7 +272,6 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
             hn_manager.reset()
             hn_manager.add(hard_negatives_list.keys(), hard_negatives_list.values())
             hn_manager.tokenize()
-
         trainer.strategy.broadcast(hn_manager, 0)
 
         # normalize predictions as in the original GoldenRetrieverPredictionCallback

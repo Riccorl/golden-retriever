@@ -628,7 +628,7 @@ class Trainer(FromConfig):
         )
         hard_negatives_callback = NegativeAugmentationCallback(
             k=self.target_top_k,
-            batch_size=self.prediction_batch_size,
+            batch_size=256, #self.prediction_batch_size,
             dataset=self.hard_negative_dataset,
             num_workers=self.num_workers,
             precision=self.precision,

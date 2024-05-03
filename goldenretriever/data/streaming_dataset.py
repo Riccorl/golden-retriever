@@ -5,6 +5,7 @@ import os
 import platform
 from functools import partial
 from pathlib import Path
+import random
 import tempfile
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Union, Iterator
 
@@ -217,13 +218,14 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
         max_passage_batch_size: int = 400,
         metadata_fields: Optional[Sequence[str]] = None,
         metadata_separator: str = "\t",
+        use_cache: bool = True,
         **kwargs: Any,
     ):
 
-        if len(kwargs) > 0:
-            raise ValueError(
-                f"`GoldenRetrieverStreamingDataset()` got an unexpected keyword argument: {kwargs}"
-            )
+        # if len(kwargs) > 0:
+        #     raise ValueError(
+        #         f"`GoldenRetrieverStreamingDataset()` got an unexpected keyword argument: {kwargs}"
+        #     )
 
         if local is not None and (remote is None or (local == remote)):
             if os.path.isdir(local):
@@ -272,6 +274,7 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
                 if preprocess
                 else None
             ),
+            use_cache=use_cache,
         )
 
         # Build Dataset
@@ -452,6 +455,7 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
         source: str | os.PathLike,
         tokenizer_fn: callable = None,
         cache_dir: str | os.PathLike | None = None,
+        use_cache: bool = True,
     ) -> str | os.PathLike:
         """Preprocess the dataset to a markdown file.
 
@@ -476,11 +480,13 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
         cache_dir.mkdir(parents=True, exist_ok=True)
         # get filename from the url
         hashed_filename = url_to_filename(str(source), None)
+        if not use_cache:
+            hashed_filename = f"{hashed_filename}.{random.randint(0, 1000000)}"
         # get cache path to put the file
         cache_path = cache_dir / hashed_filename
 
         # the file is already here, return it
-        if file_exists(cache_path):  # and not force_download:
+        if use_cache and file_exists(cache_path):  # and not force_download:
             logger.info(
                 f"{source} found in cache."  # , set `force_download=True` to force the download"
             )

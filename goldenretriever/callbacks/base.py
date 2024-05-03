@@ -99,9 +99,9 @@ class PredictionCallback(pl.Callback):
 
     @staticmethod
     def _get_datasets_and_dataloaders(
-        dataset: Optional[Union[Dataset, DictConfig]],
-        dataloader: Optional[DataLoader],
         trainer: pl.Trainer,
+        dataset: Optional[Union[Dataset, DictConfig]] = None,
+        dataloader: Optional[DataLoader] = None,
         dataloader_kwargs: Optional[Dict[str, Any]] = None,
         collate_fn: Optional[Callable] = None,
         collate_fn_kwargs: Optional[Dict[str, Any]] = None,
