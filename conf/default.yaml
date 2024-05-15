@@ -24,7 +24,7 @@ train_dataset:
   shuffle_seed: 42
   max_question_length: 64
   max_passage_length: 64
-  batch_size: 32
+  batch_size: 8
 
 val_dataset:
   - _target_: goldenretriever.data.streaming_dataset.GoldenRetrieverStreamingDataset
@@ -34,9 +34,9 @@ val_dataset:
     shuffle_seed: 42
     max_question_length: 64
     max_passage_length: 64
-    batch_size: 32
+    batch_size: 64
 
-num_workers: 8
+num_workers: 0
 
 # optimizer section
 optimizer: goldenretriever.pytorch_modules.optim.RAdamW
@@ -48,7 +48,9 @@ max_steps: 25_000
 accumulate_grad_batches: 1
 gradient_clip_val: 1.0
 deterministic: True
-# num_sanity_val_steps: 0
+num_sanity_val_steps: 0
+val_check_interval: 0.01
+check_val_every_n_epoch: None
 
 # compute section
 micro_batch_size: 8

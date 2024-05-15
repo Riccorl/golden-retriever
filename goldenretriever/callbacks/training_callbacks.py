@@ -189,45 +189,45 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
         # )
         # dataset_copy = deepcopy(trainer.datamodule.train_dataset)
         # dataset = trainer.train_dataloader.dataset
-        if isinstance(self.datasets, DictConfig):
-            logger.debug("Instantiating dataset")
-            # OmegaConf.update(self.datasets, "batch_size", self.batch_size)
-            # dataset = hydra.utils.instantiate(
-            #     self.datasets,
-            #     question_tokenizer=trainer.train_dataloader.dataset.question_tokenizer,
-            # )
-            # dataset = GoldenRetrieverStreamingDataset(
-            #     **self.datasets,
-            #     question_tokenizer=trainer.train_dataloader.dataset.question_tokenizer,
-            #     passage_tokenizer=trainer.train_dataloader.dataset.passage_tokenizer,
-            # )
-            dataset_kwargs = OmegaConf.to_container(self.datasets, resolve=True)
-            dataset_kwargs.update({"use_cache": False})
-            dataset, _ = trainer.datamodule.dataset_builder(
-                name="train_hn",
-                batch_size=self.batch_size,
-                question_tokenizer=trainer.train_dataloader.dataset.question_tokenizer,
-                passage_tokenizer=trainer.train_dataloader.dataset.passage_tokenizer,
-                dataset_kwargs=dataset_kwargs,
-            )
+        # if isinstance(self.datasets, DictConfig):
+        #     logger.debug("Instantiating dataset")
+        #     # OmegaConf.update(self.datasets, "batch_size", self.batch_size)
+        #     # dataset = hydra.utils.instantiate(
+        #     #     self.datasets,
+        #     #     question_tokenizer=trainer.train_dataloader.dataset.question_tokenizer,
+        #     # )
+        #     # dataset = GoldenRetrieverStreamingDataset(
+        #     #     **self.datasets,
+        #     #     question_tokenizer=trainer.train_dataloader.dataset.question_tokenizer,
+        #     #     passage_tokenizer=trainer.train_dataloader.dataset.passage_tokenizer,
+        #     # )
+        #     dataset_kwargs = OmegaConf.to_container(self.datasets, resolve=True)
+        #     # dataset_kwargs.update({"use_cache": False})
+        #     dataset, _ = trainer.datamodule.dataset_builder(
+        #         name="train_hn",
+        #         batch_size=self.batch_size,
+        #         question_tokenizer=trainer.train_dataloader.dataset.question_tokenizer,
+        #         passage_tokenizer=trainer.train_dataloader.dataset.passage_tokenizer,
+        #         dataset_kwargs=dataset_kwargs,
+        #     )
 
-        dataloader = GoldenStreamingDataLoader(
-            dataset,
-            collate_fn=GoldenRetrieverCollator(
-                pad_token_type_id=dataset.question_tokenizer.pad_token_type_id,
-            ),
-            batch_size=dataset.batch_size,
-            num_workers=self.num_workers,
-            # pin_memory=True,
-            # prefetch_factor=(
-            #     max(1, 8 * dataset.batch_size // self.num_workers)
-            #     if self.num_workers > 0
-            #     else None
-            # ),
-        )
-        # dataloader: GoldenStreamingDataLoader = trainer.datamodule.train_dataloader()
-        # dataloader.load_state_dict(trainer.train_dataloader.state_dict())
-        # dataset = dataloader.dataset
+        # dataloader = GoldenStreamingDataLoader(
+        #     dataset,
+        #     collate_fn=GoldenRetrieverCollator(
+        #         pad_token_type_id=dataset.question_tokenizer.pad_token_type_id,
+        #     ),
+        #     batch_size=dataset.batch_size,
+        #     num_workers=0, #self.num_workers,
+        #     # pin_memory=True,
+        #     # prefetch_factor=(
+        #     #     max(1, 8 * dataset.batch_size // self.num_workers)
+        #     #     if self.num_workers > 0
+        #     #     else None
+        #     # ),
+        # )
+        dataloader: GoldenStreamingDataLoader = trainer.datamodule.train_dataloader()
+        dataloader.load_state_dict(trainer.train_dataloader.state_dict())
+        dataset = dataloader.dataset
         predictions = super().__call__(
             trainer,
             pl_module,

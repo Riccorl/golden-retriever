@@ -184,11 +184,11 @@ class InMemoryDocumentIndex(BaseDocumentIndex):
                 )
                 tokenized.update({"id": [x["id"] for x in batch]})
                 return ModelInputs(tokenized)
-
+        
+        # here we will process the passages as MDS files to be compatible with the streaming dataset
+        # but we do it only on the rank 0, other ranks will receive the path to the processed data
         data_path = [None]  # this is needed to broadcast the data path
         if dist.get_rank() == 0:
-            logger.debug(f"Rank {dist.get_rank()} is processing the data.")
-            logger.debug(f"Data length: {len(data)}")
             # save data in a temp file
             with tempfile.NamedTemporaryFile(mode="w+t", delete=False) as f:
                 for i, sample in enumerate(data):
@@ -269,7 +269,6 @@ class InMemoryDocumentIndex(BaseDocumentIndex):
             passage_embeddings = passage_embeddings.to(self.device)
 
         self.embeddings = passage_embeddings
-        # logger.debug(f"Passage embeddings shape for rank {dist.get_rank()} after broadcast: {passage_embeddings.shape}")
         # update the matrix multiplication module
         # self.mm = MatrixMultiplicationModule(embeddings=self.embeddings)
 

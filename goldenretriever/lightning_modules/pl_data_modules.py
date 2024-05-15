@@ -158,9 +158,9 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
         os.environ["LOCAL_WORLD_SIZE"] = str(dist.get_local_world_size())
         os.environ["RANK"] = str(dist.get_rank())
 
-        logger.debug(f"World size: {os.environ['WORLD_SIZE']}")
-        logger.debug(f"Local world size: {os.environ['LOCAL_WORLD_SIZE']}")
-        logger.debug(f"Rank: {os.environ['RANK']}")
+        # logger.debug(f"World size: {os.environ['WORLD_SIZE']}")
+        # logger.debug(f"Local world size: {os.environ['LOCAL_WORLD_SIZE']}")
+        # logger.debug(f"Rank: {os.environ['RANK']}")
 
         if stage == "fit" or stage is None:
             # usually there is only one dataset for train
@@ -289,6 +289,7 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
             self.test_datasets_kwargs = _test_dataset_kwargs
 
     def train_dataloader(self, *args, **kwargs) -> DataLoader:
+        logger.debug(f"Building train dataloader for {self.train_dataset.name}")
         return GoldenStreamingDataLoader(
             self.train_dataset,
             collate_fn=GoldenRetrieverCollator(

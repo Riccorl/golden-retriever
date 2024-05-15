@@ -24,7 +24,7 @@ from goldenretriever.indexers.base import BaseDocumentIndex
 from goldenretriever.lightning_modules.pl_modules import GoldenRetrieverPLModule
 from goldenretriever.pytorch_modules.model import GoldenRetriever
 
-logger = get_logger(__name__, level=logging.INFO)
+logger = get_logger(__name__)
 
 os.environ["TOKENIZERS_PARALLELISM"] = os.environ.get("TOKENIZERS_PARALLELISM", "false")
 
@@ -121,7 +121,6 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
             # you never know :)
             retriever.eval()
 
-            logger.debug(f"Rank {trainer.global_rank} computing index")
             retriever.index(
                 batch_size=self.batch_size,
                 num_workers=self.num_workers,

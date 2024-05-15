@@ -628,7 +628,7 @@ class Trainer(FromConfig):
         )
         hard_negatives_callback = NegativeAugmentationCallback(
             k=self.target_top_k,
-            batch_size=256, #self.prediction_batch_size,
+            batch_size=self.prediction_batch_size,
             dataset=self.hard_negative_dataset,
             num_workers=self.num_workers,
             precision=self.precision,
@@ -763,7 +763,7 @@ class Trainer(FromConfig):
                 num_nodes=self.num_nodes,
                 strategy=self.strategy,
                 accumulate_grad_batches=self.accumulate_grad_batches,
-                max_epochs=self.max_epochs,
+                # max_epochs=self.max_epochs,
                 max_steps=self.max_steps,
                 # gradient_clip_val=self.gradient_clip_val,
                 val_check_interval=self.val_check_interval,
