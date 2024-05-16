@@ -139,10 +139,18 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
             start = time.time()
             logger.info("Computing predictions")
             batch_augmented = 0
-            for batch in tqdm(
+
+            progress_bar = tqdm(
                 dataloader,
+                initial=0,
+                total=limit_batches or len(dataloader),
                 desc=f"Computing predictions for dataset {current_dataset.name} on rank {trainer.global_rank}",
-            ):
+            )
+            # for batch in tqdm(
+            #     dataloader,
+            #     desc=f"Computing predictions for dataset {current_dataset.name} on rank {trainer.global_rank}",
+            # ):
+            for batch in progress_bar:
                 batch = batch.to(pl_module.device)
                 # get the top-k indices
                 retriever_output = retriever.retrieve(
@@ -190,6 +198,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                         ],
                     )
                     predictions.append(prediction_output)
+                progress_bar.update(1)
                 batch_augmented += 1
                 if (
                     limit_batches is not None

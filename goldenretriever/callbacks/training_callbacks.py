@@ -29,6 +29,8 @@ from goldenretriever.data.utils import HardNegativesManager, HardNegativesManage
 from goldenretriever.pytorch_modules.model import GoldenRetriever
 import goldenretriever.common.dist_utils as dist
 
+from streaming.base.util import clean_stale_shared_memory
+
 logger = get_logger(__name__, level=logging.INFO)
 
 
@@ -226,8 +228,10 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
         #     # ),
         # )
         predictions = {}
+        clean_stale_shared_memory()
         dataset, _ = trainer.datamodule.dataset_builder(
             dataset=trainer.train_dataloader.dataset.original_local,
+            # dataset="/home/ric/Projects/golden-retriever/data/el/aida_32_tokens_topic/train2.json",
             name="train_dataset_hn",
             batch_size=trainer.train_dataloader.dataset.batch_size,
             question_tokenizer=trainer.train_dataloader.dataset.question_tokenizer,

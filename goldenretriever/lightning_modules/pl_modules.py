@@ -222,6 +222,8 @@ class HardNegativeAlgorithm:
         # if there are no hard negatives, return
         if len(hn_passages) == 0:
             return batch
+        
+        logger.debug(f"{i} samples have hard negatives out of {len(sample_idxs)} samples.")
 
         # get dataloader collator
         collator = collator or pl_module.trainer.train_dataloader.collate_fn

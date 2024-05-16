@@ -8,8 +8,8 @@ retriever:
     documents:
       _target_: goldenretriever.indexers.document.DocumentStore.from_file
       # file_path: "data/el/documents.jsonl"
-      # file_path: "data/el/documents_only_data.jsonl"
-      file_path: "/root/golden-retriever/data/entitylinking/documents_only_data.jsonl"
+      file_path: "data/el/documents_only_data.jsonl"
+      # file_path: "/root/golden-retriever/data/entitylinking/documents_only_data.jsonl"
     metadata_fields:
       - "definition"
     separator: " <def> "
@@ -20,8 +20,8 @@ retriever:
 train_dataset:
   _target_: goldenretriever.data.streaming_dataset.GoldenRetrieverStreamingDataset
   name: "train_dataset"
-  # local: "data/el/aida_32_tokens_topic/train.jsonl"
-  local: "/root/golden-retriever/data/entitylinking/aida_32_tokens_topic/train.jsonl"
+  local: "data/el/aida_32_tokens_topic/train.jsonl"
+  # local: "/root/golden-retriever/data/entitylinking/aida_32_tokens_topic/train.jsonl"
   shuffle: True # force shuffle True for training
   shuffle_seed: 42
   max_question_length: 64
@@ -31,15 +31,15 @@ train_dataset:
 val_dataset:
   - _target_: goldenretriever.data.streaming_dataset.GoldenRetrieverStreamingDataset
     name: "val_dataset"
-    # local: "data/el/aida_32_tokens_topic/val.jsonl"
-    local: "/root/golden-retriever/data/entitylinking/aida_32_tokens_topic/val.jsonl"
+    local: "data/el/aida_32_tokens_topic/val.jsonl"
+    # local: "/root/golden-retriever/data/entitylinking/aida_32_tokens_topic/val.jsonl"
     shuffle: True # force shuffle True for training
     shuffle_seed: 42
     max_question_length: 64
     max_passage_length: 64
     batch_size: 64
 
-num_workers: 0
+num_workers: 8
 
 # optimizer section
 optimizer: goldenretriever.pytorch_modules.optim.RAdamW
@@ -59,13 +59,13 @@ check_val_every_n_epoch: 1
 micro_batch_size: 8
 precision: 16
 accelerator: "auto"
-# devices: 2
+devices: 2
 # strategy: "auto"
 # strategy: "fsdp"
 # FSDP
-# strategy:
-#   _target_: lightning.pytorch.strategies.FSDPStrategy
-#   sharding_strategy: "NO_SHARD"
+strategy:
+  _target_: lightning.pytorch.strategies.FSDPStrategy
+  sharding_strategy: "NO_SHARD"
 
 # eval section
 metric_to_monitor: "validate_recall@{top_k}"
