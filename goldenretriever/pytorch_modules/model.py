@@ -58,6 +58,7 @@ class GoldenRetriever(torch.nn.Module):
         model_class = GoldenRetrieverModel if not use_hf_model else tr.AutoModel
 
         self.passage_encoder_is_question_encoder = False
+        kwargs.update({"trust_remote_code": True})
         # question encoder model
         if isinstance(question_encoder, str):
             question_encoder = model_class.from_pretrained(question_encoder, **kwargs)
