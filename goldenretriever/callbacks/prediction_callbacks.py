@@ -63,6 +63,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
             DictConfig | BaseDataset | List[DictConfig] | List[BaseDataset] | None
         ) = None,
         dataloaders: DataLoader | List[DataLoader] | None = None,
+        limit_batches: int | None = None,
         *args,
         **kwargs,
     ) -> dict:
@@ -137,6 +138,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
             predictions = []
             start = time.time()
             logger.info("Computing predictions")
+            batch_augmented = 0
             for batch in tqdm(
                 dataloader,
                 desc=f"Computing predictions for dataset {current_dataset.name} on rank {trainer.global_rank}",
@@ -188,6 +190,16 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                         ],
                     )
                     predictions.append(prediction_output)
+                batch_augmented += 1
+                if (
+                    limit_batches is not None
+                    and batch_augmented >= limit_batches
+                ):
+                    logger.info(
+                        f"Augmented next iteration batches ({batch_augmented}). "
+                        "Stopping the hard negative mining."
+                    )
+                    break
             end = time.time()
             logger.info(f"Time to retrieve: {str(end - start)}")
             trainer.strategy.barrier()

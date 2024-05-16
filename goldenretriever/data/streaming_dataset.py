@@ -253,6 +253,7 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
         self.max_passage_batch_size = max_passage_batch_size
         self.metadata_fields = metadata_fields
         self.metadata_separator = metadata_separator
+        self.original_local = local
 
         # get data to MDS format
         local = self.preprocess_to_mds(
@@ -976,19 +977,6 @@ class GoldenStreamingDataLoader(StreamingDataLoader):
         if isinstance(batch, Sequence):
             return len(batch)
         return batch["questions"]["input_ids"].shape[0]
-
-    def __iter__(self) -> Iterator[Any]:
-        """Iterate over this DataLoader, yielding batches.
-
-        Also tracks the number of samples seen this rank.
-
-        Returns:
-            Iterator[Any]: Each batch.
-        """
-        self.num_samples_yielded = 0
-        for batch in super().__iter__():
-            self.num_samples_yielded += self._get_batch_size(batch)
-            yield batch
 
     def state_dict(self) -> Optional[Dict[str, Any]]:
         """Get a dict containing training state (called from non-worker process).

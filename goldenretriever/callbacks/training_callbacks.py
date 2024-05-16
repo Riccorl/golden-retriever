@@ -225,14 +225,28 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
         #     #     else None
         #     # ),
         # )
-        dataloader: GoldenStreamingDataLoader = trainer.datamodule.train_dataloader()
+        predictions = {}
+        dataset, _ = trainer.datamodule.dataset_builder(
+            dataset=trainer.train_dataloader.dataset.original_local,
+            name="train_dataset_hn",
+            batch_size=trainer.train_dataloader.dataset.batch_size,
+            question_tokenizer=trainer.train_dataloader.dataset.question_tokenizer,
+            passage_tokenizer=trainer.train_dataloader.dataset.passage_tokenizer,
+            shuffle=True,  # force shuffle True for training
+            shuffle_seed=trainer.datamodule.seed,
+            dataset_kwargs=trainer.datamodule.train_dataset_kwargs,
+        )
+        dataloader: GoldenStreamingDataLoader = trainer.datamodule.train_dataloader(dataset)
         dataloader.load_state_dict(trainer.train_dataloader.state_dict())
-        dataset = dataloader.dataset
+        # dataset = dataloader.dataset
+        # for b in dataloader:
+        #     break
         predictions = super().__call__(
             trainer,
             pl_module,
             datasets=dataset,
             dataloaders=dataloader,
+            limit_batches=trainer.val_check_interval, # TODO check if val_check_interval is a float and convert to a int
             *args,
             **kwargs,
         )

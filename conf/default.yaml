@@ -8,7 +8,8 @@ retriever:
     documents:
       _target_: goldenretriever.indexers.document.DocumentStore.from_file
       # file_path: "data/el/documents.jsonl"
-      file_path: "data/el/documents_only_data.jsonl"
+      # file_path: "data/el/documents_only_data.jsonl"
+      file_path: "/root/golden-retriever/data/entitylinking/documents_only_data.jsonl"
     metadata_fields:
       - "definition"
     separator: " <def> "
@@ -19,7 +20,8 @@ retriever:
 train_dataset:
   _target_: goldenretriever.data.streaming_dataset.GoldenRetrieverStreamingDataset
   name: "train_dataset"
-  local: "data/el/aida_32_tokens_topic/train.jsonl"
+  # local: "data/el/aida_32_tokens_topic/train.jsonl"
+  local: "/root/golden-retriever/data/entitylinking/aida_32_tokens_topic/train.jsonl"
   shuffle: True # force shuffle True for training
   shuffle_seed: 42
   max_question_length: 64
@@ -29,7 +31,8 @@ train_dataset:
 val_dataset:
   - _target_: goldenretriever.data.streaming_dataset.GoldenRetrieverStreamingDataset
     name: "val_dataset"
-    local: "data/el/aida_32_tokens_topic/val.jsonl"
+    # local: "data/el/aida_32_tokens_topic/val.jsonl"
+    local: "/root/golden-retriever/data/entitylinking/aida_32_tokens_topic/val.jsonl"
     shuffle: True # force shuffle True for training
     shuffle_seed: 42
     max_question_length: 64
@@ -49,8 +52,8 @@ accumulate_grad_batches: 1
 gradient_clip_val: 1.0
 deterministic: True
 num_sanity_val_steps: 0
-val_check_interval: 0.01
-check_val_every_n_epoch: None
+val_check_interval: 10
+check_val_every_n_epoch: 1
 
 # compute section
 micro_batch_size: 8
@@ -71,7 +74,7 @@ top_k: 100
 # prediction section
 prediction_batch_size: 128
 # hard negatives section
-max_hard_negatives_to_mine: 15
+max_hard_negatives_to_mine: 5
 hard_negatives_threshold: 0.0
 mine_hard_negatives_with_probability: 1.0
 

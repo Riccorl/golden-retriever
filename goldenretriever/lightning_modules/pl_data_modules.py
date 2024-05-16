@@ -288,22 +288,23 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
             # update val_dataset_kwargs with the new kwargs
             self.test_datasets_kwargs = _test_dataset_kwargs
 
-    def train_dataloader(self, *args, **kwargs) -> DataLoader:
+    def train_dataloader(self, train_dataset=None, *args, **kwargs) -> DataLoader:
+        train_dataset = train_dataset or self.train_dataset
         logger.debug(f"Building train dataloader for {self.train_dataset.name}")
         return GoldenStreamingDataLoader(
-            self.train_dataset,
+            train_dataset,
             collate_fn=GoldenRetrieverCollator(
-                pad_token_type_id=self.train_dataset.question_tokenizer.pad_token_type_id,
+                pad_token_type_id=train_dataset.question_tokenizer.pad_token_type_id,
             ),
-            batch_size=self.train_dataset.batch_size,
+            batch_size=train_dataset.batch_size,
             num_workers=self.num_workers.train,
             pin_memory=True,
             prefetch_factor=(
-                max(1, 8 * self.train_dataset.batch_size // self.num_workers.train)
+                max(1, 8 * train_dataset.batch_size // self.num_workers.train)
                 if self.num_workers.train > 0
                 else None
             ),
-            persistent_workers=True if self.num_workers.train > 0 else False,
+            # persistent_workers=True if self.num_workers.train > 0 else False,
             timeout=0,
         )
 
@@ -324,7 +325,7 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
                         if self.num_workers.val > 0
                         else None
                     ),
-                    persistent_workers=True if self.num_workers.val > 0 else False,
+                    # persistent_workers=True if self.num_workers.val > 0 else False,
                     timeout=0,
                 )
             )
@@ -401,19 +402,19 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
             if shuffle_seed is None and "shuffle_seed" not in dataset_kwargs:
                 raise ValueError("The shuffle_seed parameter is required.")
 
-            if "name" not in dataset_kwargs:
+            if name:
                 dataset_kwargs["name"] = name
             if "local" not in dataset_kwargs:
                 dataset_kwargs["local"] = dataset
-            if "question_tokenizer" not in dataset_kwargs:
+            if question_tokenizer:
                 dataset_kwargs["question_tokenizer"] = question_tokenizer
-            if "passage_tokenizer" not in dataset_kwargs:
+            if passage_tokenizer:
                 dataset_kwargs["passage_tokenizer"] = passage_tokenizer
-            if "batch_size" not in dataset_kwargs:
+            if batch_size:
                 dataset_kwargs["batch_size"] = batch_size
-            if "shuffle" not in dataset_kwargs:
+            if shuffle:
                 dataset_kwargs["shuffle"] = shuffle
-            if "shuffle_seed" not in dataset_kwargs:
+            if shuffle_seed:
                 dataset_kwargs["shuffle_seed"] = shuffle_seed
             dataset = GoldenRetrieverStreamingDataset(**dataset_kwargs)
 
