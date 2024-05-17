@@ -10,14 +10,15 @@ from lightning.pytorch.utilities.types import EVAL_DATALOADERS
 from omegaconf import DictConfig
 from torch.utils.data import DataLoader
 
+from goldenretriever.common.data_utils import preprocess_to_mds
 from goldenretriever.common.log import get_logger
-from goldenretriever.data.datasets import GoldenRetrieverDataset
 
-from goldenretriever.data.streaming_dataset import (
+from goldenretriever.data.datasets import (
     GoldenRetrieverCollator,
     GoldenRetrieverStreamingDataset,
     GoldenStreamingDataLoader,
 )
+
 from omegaconf import OmegaConf, open_dict
 import goldenretriever.common.dist_utils as dist
 
@@ -27,11 +28,11 @@ logger = get_logger(__name__)
 class GoldenRetrieverPLDataModule(pl.LightningDataModule):
     def __init__(
         self,
-        train_dataset: Optional[GoldenRetrieverDataset] = None,
+        train_dataset: Optional[GoldenRetrieverStreamingDataset] = None,
         train_dataset_kwargs: dict = None,
-        val_datasets: Optional[Sequence[GoldenRetrieverDataset]] = None,
+        val_datasets: Optional[Sequence[GoldenRetrieverStreamingDataset]] = None,
         val_datasets_kwargs: List[dict] = None,
-        test_datasets: Optional[Sequence[GoldenRetrieverDataset]] = None,
+        test_datasets: Optional[Sequence[GoldenRetrieverStreamingDataset]] = None,
         test_datasets_kwargs: List[dict] = None,
         num_workers: Optional[Union[DictConfig, int]] = None,
         datasets: Optional[DictConfig] = None,
@@ -102,9 +103,7 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
                     **kwargs,
                 },
             )
-            GoldenRetrieverStreamingDataset.preprocess_to_mds(
-                data_path, preprocessing_fn if self.preprocess else None
-            )
+            preprocess_to_mds(data_path, preprocessing_fn if self.preprocess else None)
 
         if self.val_datasets is not None:
             for i, dataset in enumerate(self.val_datasets):
@@ -126,7 +125,7 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
                         **kwargs,
                     },
                 )
-                GoldenRetrieverStreamingDataset.preprocess_to_mds(
+                preprocess_to_mds(
                     data_path, preprocessing_fn if self.preprocess else None
                 )
 
@@ -148,7 +147,7 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
                         **self.test_datasets_kwargs[i],
                     },
                 )
-                GoldenRetrieverStreamingDataset.preprocess_to_mds(
+                preprocess_to_mds(
                     data_path, preprocessing_fn if self.preprocess else None
                 )
 

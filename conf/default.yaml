@@ -18,7 +18,7 @@ retriever:
 
 # data section
 train_dataset:
-  _target_: goldenretriever.data.streaming_dataset.GoldenRetrieverStreamingDataset
+  _target_: goldenretriever.data.datasets.GoldenRetrieverStreamingDataset
   name: "train_dataset"
   local: "data/el/aida_32_tokens_topic/train.jsonl"
   # local: "/root/golden-retriever/data/entitylinking/aida_32_tokens_topic/train.jsonl"
@@ -29,7 +29,7 @@ train_dataset:
   batch_size: 8
 
 val_dataset:
-  - _target_: goldenretriever.data.streaming_dataset.GoldenRetrieverStreamingDataset
+  - _target_: goldenretriever.data.datasets.GoldenRetrieverStreamingDataset
     name: "val_dataset"
     local: "data/el/aida_32_tokens_topic/val.jsonl"
     # local: "/root/golden-retriever/data/entitylinking/aida_32_tokens_topic/val.jsonl"

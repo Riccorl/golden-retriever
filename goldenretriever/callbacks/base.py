@@ -129,7 +129,9 @@ class PredictionCallback(pl.Callback):
         # if a dataset is provided, use it
         if dataloader is not None:
             if dataset is None:
-                raise ValueError("If `dataloader` is provided, `dataset` must be provided")
+                raise ValueError(
+                    "If `dataloader` is provided, `dataset` must be provided"
+                )
             return [dataset], [dataloader]
         if dataset is not None:
             dataloader_kwargs = dataloader_kwargs or {}

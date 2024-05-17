@@ -19,7 +19,7 @@ from goldenretriever.callbacks.base import (
 )
 from goldenretriever.common.log import get_logger
 from goldenretriever.data.base.datasets import BaseDataset
-from goldenretriever.data.datasets import GoldenRetrieverDataset
+from goldenretriever.data.datasets import GoldenRetrieverStreamingDataset
 from goldenretriever.indexers.base import BaseDocumentIndex
 from goldenretriever.lightning_modules.pl_modules import GoldenRetrieverPLModule
 from goldenretriever.pytorch_modules.model import GoldenRetriever
@@ -97,7 +97,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         dataloader_predictions = {}
         # compute the passage embeddings index for each dataloader
         for dataloader_idx, dataloader in enumerate(dataloaders):
-            current_dataset: GoldenRetrieverDataset = datasets[dataloader_idx]
+            current_dataset: GoldenRetrieverStreamingDataset = datasets[dataloader_idx]
             if trainer.global_rank == 0:
                 logger.info(
                     f"Computing passage embeddings for dataset {current_dataset.name}"
@@ -200,10 +200,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                     predictions.append(prediction_output)
                 progress_bar.update(1)
                 batch_augmented += 1
-                if (
-                    limit_batches is not None
-                    and batch_augmented >= limit_batches
-                ):
+                if limit_batches is not None and batch_augmented >= limit_batches:
                     logger.info(
                         f"Augmented next iteration batches ({batch_augmented}). "
                         "Stopping the hard negative mining."

@@ -10,7 +10,10 @@ PRECISION_INPUT_STR_ALIAS_CONVERSION = {
     "32": "32-true",
     "16": "16-mixed",
     16: "16-mixed",
+    32: "32-true",
     "bf16": "bf16-mixed",
+    "fp32": "32-true",
+    "fp16": "16-mixed",
 }
 
 

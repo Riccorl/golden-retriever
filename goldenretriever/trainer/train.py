@@ -37,9 +37,8 @@ from goldenretriever.callbacks.utils_callbacks import (
 from goldenretriever.common.from_config import FromConfig
 from goldenretriever.common.log import get_logger
 from goldenretriever.common.utils import get_callable_from_string, to_config
-from goldenretriever.data.datasets import GoldenRetrieverDataset
 
-from goldenretriever.data.streaming_dataset import GoldenRetrieverStreamingDataset
+from goldenretriever.data.datasets import GoldenRetrieverStreamingDataset
 from goldenretriever.indexers.base import BaseDocumentIndex
 from goldenretriever.lightning_modules.pl_data_modules import (
     GoldenRetrieverPLDataModule,
@@ -73,8 +72,8 @@ class Trainer(FromConfig):
         test_dataset: (
             str
             | List[str]
-            | GoldenRetrieverDataset
-            | list[GoldenRetrieverDataset]
+            | GoldenRetrieverStreamingDataset
+            | list[GoldenRetrieverStreamingDataset]
             | None
         ) = None,
         test_batch_size: int = 32,
@@ -354,7 +353,7 @@ class Trainer(FromConfig):
         # lightning data module declaration
         if self.val_dataset is not None and isinstance(
             self.val_dataset,
-            (GoldenRetrieverDataset, GoldenRetrieverStreamingDataset, str),
+            (GoldenRetrieverStreamingDataset, GoldenRetrieverStreamingDataset, str),
         ):
             self.val_dataset = [self.val_dataset]
             self.val_dataset_kwargs["batch_size"] = self.val_batch_size
@@ -362,7 +361,7 @@ class Trainer(FromConfig):
             self.val_dataset_kwargs = [self.val_dataset_kwargs]
         if self.test_dataset is not None and isinstance(
             self.test_dataset,
-            (GoldenRetrieverDataset, GoldenRetrieverStreamingDataset, str),
+            (GoldenRetrieverStreamingDataset, GoldenRetrieverStreamingDataset, str),
         ):
             self.test_dataset = [self.test_dataset]
             self.test_dataset_kwargs["batch_size"] = self.test_batch_size
@@ -931,13 +930,13 @@ def train(conf: omegaconf.DictConfig) -> None:
     )
 
     logger.info("Instantiating datasets")
-    train_dataset: GoldenRetrieverDataset = hydra.utils.instantiate(
+    train_dataset: GoldenRetrieverStreamingDataset = hydra.utils.instantiate(
         conf.data.train_dataset, _recursive_=False
     )
-    val_dataset: GoldenRetrieverDataset = hydra.utils.instantiate(
+    val_dataset: GoldenRetrieverStreamingDataset = hydra.utils.instantiate(
         conf.data.val_dataset, _recursive_=False
     )
-    test_dataset: GoldenRetrieverDataset = hydra.utils.instantiate(
+    test_dataset: GoldenRetrieverStreamingDataset = hydra.utils.instantiate(
         conf.data.test_dataset, _recursive_=False
     )
 

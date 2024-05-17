@@ -118,7 +118,7 @@ class GoldenRetrieverPLModule(pl.LightningModule):
             batch_size=batch["questions"]["input_ids"].size(0),
             sync_dist=True,
         )
-    
+
     def train_dataloader(self) -> Any:
         return self.li
 
@@ -222,8 +222,10 @@ class HardNegativeAlgorithm:
         # if there are no hard negatives, return
         if len(hn_passages) == 0:
             return batch
-        
-        logger.debug(f"{i} samples have hard negatives out of {len(sample_idxs)} samples.")
+
+        logger.debug(
+            f"{i} samples have hard negatives out of {len(sample_idxs)} samples."
+        )
 
         # get dataloader collator
         collator = collator or pl_module.trainer.train_dataloader.collate_fn

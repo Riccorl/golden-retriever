@@ -19,7 +19,7 @@ retriever:
 
 # data section
 train_dataset:
-  _target_: goldenretriever.data.streaming_dataset.GoldenRetrieverStreamingDataset
+  _target_: goldenretriever.data.datasets.GoldenRetrieverStreamingDataset
   name: "train_dataset"
   local: "/leonardo_scratch/large/userexternal/rorland1/golden-retriever/data/el/aida_32_tokens_topic/train.jsonl"
   shuffle: True # force shuffle True for training
@@ -29,7 +29,7 @@ train_dataset:
   batch_size: 128
 
 val_dataset:
-  - _target_: goldenretriever.data.streaming_dataset.GoldenRetrieverStreamingDataset
+  - _target_: goldenretriever.data.datasets.GoldenRetrieverStreamingDataset
     name: "val_dataset"
     local: "/leonardo_scratch/large/userexternal/rorland1/golden-retriever/data/el/aida_32_tokens_topic/val.jsonl"
     shuffle: True # force shuffle True for training
@@ -57,6 +57,7 @@ check_val_every_n_epoch: 1
 # compute section
 # micro_batch_size: 8
 precision: "bf16"
+# precision: "fp32"
 accelerator: "auto"
 devices: 2
 # strategy: "auto"
@@ -71,7 +72,7 @@ metric_to_monitor: "validate_recall@{top_k}"
 monitor_mode: "max"
 top_k: 100
 # prediction section
-prediction_batch_size: 128
+prediction_batch_size: 1024
 # hard negatives section
 max_hard_negatives_to_mine: 15
 hard_negatives_threshold: 0.0
@@ -85,6 +86,7 @@ early_stopping_kwargs: null
 # logging section
 log_to_wandb: true
 wandb_entity: null
+wandb_save_dir:  "/leonardo_scratch/large/userexternal/rorland1/golden-retriever/wandb"
 wandb_experiment_name: "aida-e5-base-topics-streaming-cli-microbatches-dist"
 wandb_project_name: "golden-retriever-aida"
 wandb_online_mode: false
@@ -92,7 +94,7 @@ wandb_kwargs: null
 
 # checkpointing section
 model_checkpointing: true
-checkpoint_dir: "checkpoints"
+checkpoint_dir: "/leonardo_scratch/large/userexternal/rorland1/golden-retriever/checkpoints"
 save_top_k: 1
 checkpoint_kwargs: null
 resume_from_checkpoint_path: null

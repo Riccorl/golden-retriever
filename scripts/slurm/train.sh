@@ -20,6 +20,6 @@ export WANDB_MODE=offline
 # get Huggingface token from python
 export HF_TOKEN=$(python -c "import huggingface_hub; print(huggingface_hub.HfFolder.get_token() or '')")
 
-source ~/llmfoundry-cuda-flash-attn2-env/bin/activate
+source /leonardo_scratch/large/userexternal/rorland1/python-envs/golden-dist-venv/bin/activate
 
 composer scripts/train/train.py scripts/train/yamls/pretrain/minestral-1B-100B_it-100B_en-cx-04032024.yaml

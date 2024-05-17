@@ -7,11 +7,12 @@ import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+from goldenretriever.common.data_utils import preprocess_to_mds
 import goldenretriever.common.dist_utils as dist
 from goldenretriever.common.log import get_logger
 from goldenretriever.common.model_inputs import ModelInputs
 from goldenretriever.common.torch_utils import get_autocast_context
-from goldenretriever.data.streaming_dataset import TxtStreamingDataset
+from goldenretriever.data.datasets import TxtStreamingDataset
 from goldenretriever.indexers.base import BaseDocumentIndex
 from goldenretriever.indexers.document import Document, DocumentStore
 from goldenretriever.pytorch_modules import PRECISION_MAP, RetrievedSample
@@ -120,6 +121,7 @@ class InMemoryDocumentIndex(BaseDocumentIndex):
         compute_on_cpu: bool = False,
         force_reindex: bool = False,
         dataloader: DataLoader | None = None,
+        low_gpu_memory: bool = False,
     ) -> "InMemoryDocumentIndex":
         """
         Index the documents using the encoder.
@@ -143,6 +145,10 @@ class InMemoryDocumentIndex(BaseDocumentIndex):
                 Whether to compute the embeddings on CPU.
             force_reindex (:obj:`bool`, `optional`, defaults to False):
                 Whether to force reindexing.
+            dataloader (:obj:`DataLoader`, `optional`, defaults to None):
+                The dataloader to be used for indexing.
+            low_gpu_memory (:obj:`bool`, `optional`, defaults to False):
+                Whether if there is a low GPU memory environment.
 
         Returns:
             :obj:`InMemoryIndexer`: The indexer object.
@@ -184,7 +190,7 @@ class InMemoryDocumentIndex(BaseDocumentIndex):
                 )
                 tokenized.update({"id": [x["id"] for x in batch]})
                 return ModelInputs(tokenized)
-        
+
         # here we will process the passages as MDS files to be compatible with the streaming dataset
         # but we do it only on the rank 0, other ranks will receive the path to the processed data
         data_path = [None]  # this is needed to broadcast the data path
@@ -194,7 +200,7 @@ class InMemoryDocumentIndex(BaseDocumentIndex):
                 for i, sample in enumerate(data):
                     f.write(json.dumps({"text": sample, "id": i}) + "\n")
                 f.close()
-                data_path = TxtStreamingDataset.preprocess_to_mds(f.name)
+                data_path = preprocess_to_mds(f.name)
             # wrap the data path in a list to broadcast it
             data_path = [data_path]
 
@@ -229,7 +235,6 @@ class InMemoryDocumentIndex(BaseDocumentIndex):
                 passage_outs = encoder(**batch).pooler_output
                 # Append the passage embeddings to the list
                 if self.device == "cpu":
-                    # passage_embeddings.extend([c.detach().cpu() for c in passage_outs])
                     passage_embeddings_dict.update(
                         {
                             i: c.detach().cpu()
@@ -244,11 +249,12 @@ class InMemoryDocumentIndex(BaseDocumentIndex):
 
         # move the passage embeddings to the CPU if not already done
         # the move to cpu and then to gpu is needed to avoid OOM when using mixed precision
-        if not self.device == "cpu":  # this if is to avoid unnecessary moves
+        # check if the GPU memory is low
+        if not self.device == "cpu"  and low_gpu_memory:
             passage_embeddings_dict = {
                 i: c.detach().cpu() for i, c in passage_embeddings_dict.items()
             }
-
+        logger.debug(f"All gather at rank {dist.get_rank()}")
         passage_embeddings_dict = dist.all_gather_object(passage_embeddings_dict)
         # merge the passage embeddings from all the devices
         passage_embeddings = {}
@@ -262,11 +268,13 @@ class InMemoryDocumentIndex(BaseDocumentIndex):
         # extract the embeddings
         passage_embeddings = list(passage_embeddings.values())
         # stack it
+        logger.debug(f"Stacking embeddings at rank {dist.get_rank()}")
         passage_embeddings: torch.Tensor = torch.stack(passage_embeddings, dim=0)
         # move the passage embeddings to the gpu if needed
         if not self.device == "cpu":
             passage_embeddings = passage_embeddings.to(PRECISION_MAP[self.precision])
-            passage_embeddings = passage_embeddings.to(self.device)
+            if self.device != passage_embeddings.device:
+                passage_embeddings = passage_embeddings.to(self.device)
 
         self.embeddings = passage_embeddings
         # update the matrix multiplication module

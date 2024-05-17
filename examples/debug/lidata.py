@@ -2,7 +2,7 @@ from goldenretriever.data.lit_dataset import GoldenLoader, GoldenStreamingDatase
 import transformers as tr
 from torch.utils.data import DataLoader
 
-from goldenretriever.data.streaming_dataset import GoldenRetrieverCollator
+from goldenretriever.data.datasets import GoldenRetrieverCollator
 
 
 if __name__ == "__main__":

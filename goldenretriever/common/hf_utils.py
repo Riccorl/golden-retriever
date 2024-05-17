@@ -7,6 +7,10 @@ from transformers import AutoTokenizer, PreTrainedTokenizerBase
 import datasets as hf_datasets
 import streaming.base.distributed as dist
 
+from goldenretriever.common.log import get_logger
+
+logger = get_logger(__name__)
+
 
 def build_tokenizer(
     tokenizer_name: str, tokenizer_kwargs: Dict[str, Any] | None = None
@@ -56,7 +60,6 @@ def build_hf_dataset(
     streaming: bool = False,
     shuffle: bool = False,
     seed: int = 42,
-    is_local: bool = False,
     num_workers: int | None = None,
 ) -> Iterable:
     """Build an IterableDataset over the HF C4 or pile source data.
@@ -72,7 +75,10 @@ def build_hf_dataset(
     Returns:
         An IterableDataset.
     """
+    # check if the dataset is local or remote
+    is_local = os.path.exists(dataset_name)
     if is_local:
+        logger.info(f"Loading local dataset from {dataset_name}")
         if os.path.isdir(dataset_name):
             # only jsonl for now
             data_files = glob(f"{dataset_name}/*")
@@ -86,8 +92,13 @@ def build_hf_dataset(
             num_proc=num_workers if not streaming else None,
         )
     else:
+        logger.info(f"Loading remote dataset from {dataset_name}")
         dataset = hf_datasets.load_dataset(
-            path=dataset_name, name=data_subset, split=split, streaming=streaming
+            path=dataset_name,
+            name=data_subset,
+            split=split,
+            streaming=streaming,
+            num_proc=num_workers if not streaming else None,
         )
     if shuffle:
         print("Shuffling dataset")

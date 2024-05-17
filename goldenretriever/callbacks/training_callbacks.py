@@ -10,26 +10,23 @@ import torch
 from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.trainer.states import RunningStage
 from omegaconf import DictConfig, OmegaConf
+from streaming.base.util import clean_stale_shared_memory
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+import goldenretriever.common.dist_utils as dist
 from goldenretriever.callbacks.prediction_callbacks import (
     GoldenRetrieverPredictionCallback,
 )
 from goldenretriever.common.log import get_logger
 from goldenretriever.data.base.datasets import BaseDataset
-
-# from goldenretriever.data.streaming_dataset import GoldenRetrieverCollator
-from goldenretriever.data.streaming_dataset import (
+from goldenretriever.data.datasets import (
     GoldenRetrieverCollator,
     GoldenRetrieverStreamingDataset,
     GoldenStreamingDataLoader,
 )
 from goldenretriever.data.utils import HardNegativesManager, HardNegativesManagerThread
 from goldenretriever.pytorch_modules.model import GoldenRetriever
-import goldenretriever.common.dist_utils as dist
-
-from streaming.base.util import clean_stale_shared_memory
 
 logger = get_logger(__name__, level=logging.INFO)
 
@@ -240,7 +237,9 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
             shuffle_seed=trainer.datamodule.seed,
             dataset_kwargs=trainer.datamodule.train_dataset_kwargs,
         )
-        dataloader: GoldenStreamingDataLoader = trainer.datamodule.train_dataloader(dataset)
+        dataloader: GoldenStreamingDataLoader = trainer.datamodule.train_dataloader(
+            dataset
+        )
         dataloader.load_state_dict(trainer.train_dataloader.state_dict())
         # dataset = dataloader.dataset
         # for b in dataloader:
@@ -250,7 +249,7 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
             pl_module,
             datasets=dataset,
             dataloaders=dataloader,
-            limit_batches=trainer.val_check_interval, # TODO check if val_check_interval is a float and convert to a int
+            limit_batches=trainer.val_check_interval,  # TODO check if val_check_interval is a float and convert to a int
             *args,
             **kwargs,
         )

@@ -1,6 +1,5 @@
 from tqdm import tqdm
 from goldenretriever.common.log import get_logger
-# from goldenretriever.data.streaming_dataset import StreamingGoldenRetrieverDataset
 from goldenretriever.indexers.document import DocumentStore
 from goldenretriever.trainer import Trainer
 from goldenretriever import GoldenRetriever
