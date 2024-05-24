@@ -121,7 +121,7 @@ class Trainer(FromConfig):
         mine_hard_negatives_with_probability: float = 1.0,
         # other parameters
         seed: int = 42,
-        float32_matmul_precision: str = "medium",
+        float32_matmul_precision: str = "high",
         **kwargs,
     ):
         # put all the parameters in the class
@@ -281,6 +281,7 @@ class Trainer(FromConfig):
             last_checkpoint_kwargs["filename"] = "last-{epoch}-{step}"
             last_checkpoint_kwargs["monitor"] = "step"
             last_checkpoint_kwargs["mode"] = "max"
+            last_checkpoint_kwargs["save_retriever"] = False
             self.last_checkpoint_kwargs = last_checkpoint_kwargs
 
         # early stopping callback
@@ -333,17 +334,20 @@ class Trainer(FromConfig):
             logger.info("Document Index is empty. Adding documents from the datasets.")
             documents = self.retriever.document_index.documents
             for sample in tqdm(self.train_dataset, desc="Adding documents from train"):
-                [documents.add_document(s) for s in sample["positives"]]
-                [documents.add_document(s) for s in sample["negatives"]]
-                [documents.add_document(s) for s in sample["hard_negatives"]]
+                if sample["positives"]:
+                    [documents.add_document(s) for s in sample["positives"]]
+                if sample["negatives"]:
+                    [documents.add_document(s) for s in sample["negatives"]]
+                if sample["hard_negatives"]:
+                    [documents.add_document(s) for s in sample["hard_negatives"]]
 
             if self.val_dataset is not None:
                 val_passages = []
                 for ds in self.val_dataset:
                     for sample in ds:
-                        val_passages.extend(sample["positives"])
-                        val_passages.extend(sample["negatives"])
-                        val_passages.extend(sample["hard_negatives"])
+                        val_passages.extend(sample["positives"] if sample["positives"] else [])
+                        val_passages.extend(sample["negatives"] if sample["negatives"] else [])
+                        val_passages.extend(sample["hard_negatives"] if sample["hard_negatives"] else [])
                 for sample in tqdm(val_passages, desc="Adding documents from val"):
                     documents.add_document(sample)
 
@@ -351,9 +355,9 @@ class Trainer(FromConfig):
                 test_passages = []
                 for ds in self.test_dataset:
                     for sample in ds:
-                        test_passages.extend(sample["positives"])
-                        test_passages.extend(sample["negatives"])
-                        test_passages.extend(sample["hard_negatives"])
+                        test_passages.extend(sample["positives"] if sample["positives"] else [])
+                        test_passages.extend(sample["negatives"] if sample["negatives"] else [])
+                        test_passages.extend(sample["hard_negatives"] if sample["hard_negatives"] else [])
                 for sample in tqdm(test_passages, desc="Adding documents from test"):
                     documents.add_document(sample)
 
@@ -512,6 +516,7 @@ class Trainer(FromConfig):
         filename: str | os.PathLike | None = None,
         dirpath: str | os.PathLike | None = None,
         auto_insert_metric_name: bool = False,
+        save_retriever: bool = True,
         *args,
         **kwargs,
     ) -> ModelCheckpoint:
@@ -520,6 +525,8 @@ class Trainer(FromConfig):
             dirpath = (
                 self.experiment_path / "checkpoints" if self.experiment_path else None
             )
+        else:
+            dirpath = Path(dirpath) / self.wandb_project_name
         if filename is None:
             filename = (
                 "checkpoint-" + monitor + "_{" + monitor + ":.4f}-epoch_{epoch:02d}"
@@ -553,6 +560,10 @@ class Trainer(FromConfig):
         # )
         # modelcheckpoint_kwargs.update(kwargs)
         self.model_checkpoint_callback = ModelCheckpoint(**kwargs)
+        self.callbacks_store.append(self.model_checkpoint_callback)
+
+        if save_retriever:
+            self.callbacks_store.append(SaveRetrieverCallback(saving_dir=dirpath / "retriever"))
         return self.model_checkpoint_callback
 
     def configure_hard_negatives_callback(self):
@@ -577,14 +588,14 @@ class Trainer(FromConfig):
             self.model_checkpoint_callback = self.configure_model_checkpoint(
                 **self.checkpoint_kwargs
             )
-            self.callbacks_store.append(self.model_checkpoint_callback)
+            # self.callbacks_store.append(self.model_checkpoint_callback)
             if self.save_last:
                 self.latest_model_checkpoint_callback = self.configure_model_checkpoint(
                     **self.last_checkpoint_kwargs
                 )
-                self.callbacks_store.append(self.latest_model_checkpoint_callback)
+                # self.callbacks_store.append(self.latest_model_checkpoint_callback)
 
-            self.callbacks_store.append(SaveRetrieverCallback())
+            # self.callbacks_store.append(SaveRetrieverCallback(saving_dir=))
         if self.early_stopping:
             self.early_stopping_callback = self.configure_early_stopping(
                 **self.early_stopping_kwargs

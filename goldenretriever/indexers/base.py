@@ -230,7 +230,7 @@ class BaseDocumentIndex:
         Returns:
             `str`: The document.
         """
-        return self.documents.get_document_from_id(index)
+        return self.documents.get_document_from_index(index)
 
     def get_passage_from_index(self, index: int) -> str:
         """

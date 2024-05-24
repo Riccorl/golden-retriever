@@ -135,6 +135,21 @@ class DocumentStore:
         if text not in self._documents_reverse_index:
             logger.warning(f"Document with text `{text}` does not exist, skipping")
         return self._documents_reverse_index.get(text, None)
+    
+    def get_document_from_index(self, index: int) -> Document | None:
+        """
+        Retrieve the document by its index.
+
+        Args:
+            index (`int`):
+                The index of the document to retrieve.
+
+        Returns:
+            Optional[Document]: The document with the given index, or None if it does not exist.
+        """
+        if index >= len(self._documents):
+            logger.warning(f"Document with index `{index}` does not exist, skipping")
+        return self._documents[index]
 
     def add_documents(self, documents: List[Document] | List[str] | List[Dict]) -> List[Document]:
         """
@@ -175,13 +190,17 @@ class DocumentStore:
             Document: The document just added.
         """
         if isinstance(text, str):
+            # check if the document already exists
+            if text in self:
+                logger.warning(f"Document `{text}` already exists, skipping")
+                return self._documents_reverse_index[text]
             if id is None:
                 # get the len of the documents and add 1
                 id = len(self._documents)  # + 1
             text = Document(text, id, metadata)
 
         if text in self:
-            logger.warning(f"Document {text} already exists, skipping")
+            logger.warning(f"Document `{text}` already exists, skipping")
             return self._documents_index[text.id]
 
         self._documents.append(text)

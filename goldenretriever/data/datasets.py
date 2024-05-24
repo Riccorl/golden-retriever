@@ -39,8 +39,8 @@ class GoldenRetrieverDataset:
         passage_batch_size: int = 32,
         question_batch_size: int = 32,
         max_positives: int = -1,
-        max_negatives: int = 0,
-        max_hard_negatives: int = 0,
+        max_negatives: int = -1,
+        max_hard_negatives: int = -1,
         max_question_length: int = 256,
         max_passage_length: int = 64,
         shuffle: bool = False,
@@ -520,8 +520,17 @@ class InBatchNegativesDataset(GoldenRetrieverDataset):
             passage=passage,
             positive_pssgs=passage[: len(positives)],
             positives=positives,
-            negatives=negatives,
-            hard_negatives=hard_negatives,
+            negatives=(
+                negatives
+                if len(negatives) > 0
+                else None
+            ),
+            hard_negatives=(
+                hard_negatives
+                if len(hard_negatives) > 0
+                # else datasets.Sequence(datasets.Value("string"))
+                else None
+            ),
         )
         return output
 

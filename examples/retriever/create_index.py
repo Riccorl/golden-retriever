@@ -25,54 +25,26 @@ def build_index(
     indexer_class: str = "goldenretriever.indexers.inmemory.InMemoryDocumentIndex",
     batch_size: int = 512,
     num_workers: int = 4,
-    passage_max_length: int = 64,
+    passage_max_length: int = 512,
     device: str = "cuda",
     index_device: str = "cpu",
     precision: str = "fp32",
 ):
     logger.info("Loading documents")
-    train_dataset = InBatchNegativesDataset(
-        name="raco_train",
-        path="/root/golden-retriever/data/commonsense/raco/CommonsenseTraining/train.json",
-        tokenizer=question_encoder_name_or_path,
-        question_batch_size=64,
-        passage_batch_size=400,
-        max_passage_length=64,
-        shuffle=True,
-    )
-    val_dataset = InBatchNegativesDataset(
-        name="raco_val",
-        path="/root/golden-retriever/data/commonsense/raco/CommonsenseTraining/dev.json",
-        tokenizer=question_encoder_name_or_path,
-        question_batch_size=64,
-        passage_batch_size=400,
-        max_passage_length=64,
-    )
-    # if document_file_type == "jsonl":
-    #     documents = DocumentStore.from_jsonl(document_path)
-    # elif document_file_type == "csv":
-    #     documents = DocumentStore.from_tsv(
-    #         document_path, delimiter=",", quoting=csv.QUOTE_NONE, ingore_case=True
-    #     )
-    # elif document_file_type == "tsv":
-    #     documents = DocumentStore.from_tsv(
-    #         document_path, delimiter="\t", quoting=csv.QUOTE_NONE, ingore_case=True
-    #     )
-    # else:
-    #     raise ValueError(
-    #         f"Unknown document file type: {document_file_type}, must be one of jsonl, csv, tsv"
-    #     )
-    documents = DocumentStore()
-    logger.info("Adding documents to document store")
-    for sample in tqdm(train_dataset):
-        [documents.add_document(s) for s in sample["positives"] if s is not None]
-        [documents.add_document(s) for s in sample["negatives"] if s is not None]
-        [documents.add_document(s) for s in sample["hard_negatives"] if s is not None]
-
-    for sample in tqdm(val_dataset):
-        [documents.add_document(s) for s in sample["positives"] if s is not None]
-        [documents.add_document(s) for s in sample["negatives"] if s is not None]
-        [documents.add_document(s) for s in sample["hard_negatives"] if s is not None]
+    if document_file_type == "jsonl":
+        documents = DocumentStore.from_file(document_path)
+    elif document_file_type == "csv":
+        documents = DocumentStore.from_tsv(
+            document_path, delimiter=",", quoting=csv.QUOTE_NONE, ingore_case=True
+        )
+    elif document_file_type == "tsv":
+        documents = DocumentStore.from_tsv(
+            document_path, delimiter="\t", quoting=csv.QUOTE_NONE, ingore_case=True
+        )
+    else:
+        raise ValueError(
+            f"Unknown document file type: {document_file_type}, must be one of jsonl, csv, tsv"
+        )
 
     logger.info("Loading document index")
     # document_index = InMemoryDocumentIndex(
@@ -123,7 +95,7 @@ if __name__ == "__main__":
     arg_parser.add_argument("--document_file_type", type=str, default="jsonl")
     arg_parser.add_argument("--output_folder", type=str, required=True)
     arg_parser.add_argument("--batch_size", type=int, default=128)
-    arg_parser.add_argument("--passage_max_length", type=int, default=64)
+    arg_parser.add_argument("--passage_max_length", type=int, default=256)
     arg_parser.add_argument("--device", type=str, default="cuda")
     arg_parser.add_argument("--index_device", type=str, default="cpu")
     arg_parser.add_argument("--precision", type=str, default="fp32")
