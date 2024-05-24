@@ -14,6 +14,10 @@
 
 </p>
 
+# WIP: distributed-compatible codebase
+
+A distributed-compatible codebase is under development. Check the `distributed` [branch](https://github.com/Riccorl/golden-retriever/tree/distributed) for the latest updates.
+
 # How to use
 
 Install the library from [PyPI](https://pypi.org/project/goldenretriever-core/):
@@ -37,7 +41,7 @@ pip install -e .
 ### Training
 
 Here a simple example on how to train a DPR-like Retriever on the NQ dataset.
-First download the dataset from (DPR)[]. The run the following code:
+First download the dataset from [DPR](https://github.com/facebookresearch/DPR?tab=readme-ov-file#retriever-input-data-format). The run the following code:
 
 ```python
 from goldenretriever.trainer import Trainer
