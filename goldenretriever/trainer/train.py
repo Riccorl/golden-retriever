@@ -57,6 +57,7 @@ class Trainer(FromConfig):
     def __init__(
         self,
         retriever: GoldenRetriever,
+        document_index: BaseDocumentIndex | None = None,
         train_dataset: str | GoldenRetrieverStreamingDataset | None = None,
         train_batch_size: int = 32,
         train_dataset_kwargs: dict | None = None,
@@ -144,6 +145,7 @@ class Trainer(FromConfig):
     ):
         # put all the parameters in the class
         self.retriever = retriever
+        self.document_index = document_index
         # datasets
         self.train_dataset = train_dataset
         self.train_batch_size = train_batch_size
@@ -250,8 +252,8 @@ class Trainer(FromConfig):
                 len(self.lightning_datamodule.train_dataloader()) * self.max_epochs
             )
 
-        if self.add_documents_from_dataset:
-            self.add_documents_from_dataset()
+        # if self.add_documents_from_dataset:
+        #     self._add_documents_from_dataset()
 
         # optimizer declaration
         self.optimizer, self.lr_scheduler = self.configure_optimizers()
@@ -394,7 +396,7 @@ class Trainer(FromConfig):
 
         return self.retriever
 
-    def add_documents_from_dataset(self, add_test: bool = False):
+    def _add_documents_from_dataset(self, add_test: bool = False):
         # # check if Index is empty
         # if len(self.retriever.document_index) == 0 or force:
         logger.info("Adding documents from the datasets to the Index")
@@ -710,6 +712,7 @@ class Trainer(FromConfig):
             k=k,
             force_reindex=force_reindex,
             other_callbacks=metrics_callbacks,
+            document_index=self.document_index,
             *args,
             **kwargs,
         )
@@ -740,7 +743,8 @@ class Trainer(FromConfig):
                 logger.info(f"Failed to get the experiment path: {e}")
 
         # set-up training specific callbacks
-        self.callbacks_store = self.training_callbacks()
+        # self.callbacks_store = self.training_callbacks()
+        self.training_callbacks()
         # add the evaluation callbacks
         self.callbacks_store.append(
             self.configure_prediction_callbacks(
@@ -918,256 +922,3 @@ class Trainer(FromConfig):
             "reload_dataloaders_every_n_epochs": cls.reload_dataloaders_every_n_epochs,
             "trainer_kwargs": to_config(cls.trainer_kwargs),
         }
-
-
-def train(conf: omegaconf.DictConfig) -> None:
-    logger.info("Starting training with config:")
-    logger.info(pformat(OmegaConf.to_container(conf)))
-
-    logger.info("Instantiating the Retriever")
-    retriever: GoldenRetriever = hydra.utils.instantiate(
-        conf.retriever, _recursive_=False
-    )
-
-    logger.info("Instantiating datasets")
-    train_dataset: GoldenRetrieverStreamingDataset = hydra.utils.instantiate(
-        conf.data.train_dataset, _recursive_=False
-    )
-    val_dataset: GoldenRetrieverStreamingDataset = hydra.utils.instantiate(
-        conf.data.val_dataset, _recursive_=False
-    )
-    test_dataset: GoldenRetrieverStreamingDataset = hydra.utils.instantiate(
-        conf.data.test_dataset, _recursive_=False
-    )
-
-    logger.info("Loading the document index")
-    document_index: BaseDocumentIndex = hydra.utils.instantiate(
-        conf.data.document_index, _recursive_=False
-    )
-    retriever.document_index = document_index
-
-    logger.info("Instantiating the Trainer")
-    trainer: Trainer = hydra.utils.instantiate(
-        conf.train,
-        retriever=retriever,
-        train_dataset=train_dataset,
-        val_dataset=val_dataset,
-        test_dataset=test_dataset,
-        _recursive_=False,
-    )
-
-    logger.info("Starting training")
-    trainer.train()
-
-    logger.info("Starting testing")
-    trainer.test()
-
-    logger.info("Training and testing completed")
-
-
-@hydra.main(config_path="../../conf", config_name="default", version_base="1.3")
-def main(conf: omegaconf.DictConfig):
-    train(conf)
-
-
-def train_hydra(conf: omegaconf.DictConfig) -> None:
-    # reproducibility
-    pl.seed_everything(conf.train.seed)
-    torch.set_float32_matmul_precision(conf.train.float32_matmul_precision)
-
-    logger.info(f"Starting training for [bold cyan]{conf.model_name}[/bold cyan] model")
-    if conf.train.pl_trainer.fast_dev_run:
-        logger.info(
-            f"Debug mode {conf.train.pl_trainer.fast_dev_run}. Forcing debugger configuration"
-        )
-        # Debuggers don't like GPUs nor multiprocessing
-        # conf.train.pl_trainer.accelerator = "cpu"
-        conf.train.pl_trainer.devices = 1
-        conf.train.pl_trainer.strategy = "auto"
-        conf.train.pl_trainer.precision = 32
-        if "num_workers" in conf.data.datamodule:
-            conf.data.datamodule.num_workers = {
-                k: 0 for k in conf.data.datamodule.num_workers
-            }
-        # Switch wandb to offline mode to prevent online logging
-        conf.logging.log = None
-        # remove model checkpoint callback
-        conf.train.model_checkpoint_callback = None
-
-    if "print_config" in conf and conf.print_config:
-        # pprint(OmegaConf.to_container(conf), console=logger, expand_all=True)
-        logger.info(pformat(OmegaConf.to_container(conf)))
-
-    # data module declaration
-    logger.info("Instantiating the Data Module")
-    pl_data_module: GoldenRetrieverPLDataModule = hydra.utils.instantiate(
-        conf.data.datamodule, _recursive_=False
-    )
-    # force setup to get labels initialized for the model
-    pl_data_module.prepare_data()
-    # main module declaration
-    pl_module: GoldenRetrieverPLModule | None = None
-
-    if not conf.train.only_test:
-        pl_data_module.setup("fit")
-
-        # count the number of training steps
-        if (
-            "max_epochs" in conf.train.pl_trainer
-            and conf.train.pl_trainer.max_epochs > 0
-        ):
-            num_training_steps = (
-                len(pl_data_module.train_dataloader())
-                * conf.train.pl_trainer.max_epochs
-            )
-            if "max_steps" in conf.train.pl_trainer:
-                logger.info(
-                    "Both `max_epochs` and `max_steps` are specified in the trainer configuration. "
-                    "Will use `max_epochs` for the number of training steps"
-                )
-                conf.train.pl_trainer.max_steps = None
-        elif (
-            "max_steps" in conf.train.pl_trainer and conf.train.pl_trainer.max_steps > 0
-        ):
-            num_training_steps = conf.train.pl_trainer.max_steps
-            conf.train.pl_trainer.max_epochs = None
-        else:
-            raise ValueError(
-                "Either `max_epochs` or `max_steps` should be specified in the trainer configuration"
-            )
-        logger.info(f"Expected number of training steps: {num_training_steps}")
-
-        if "lr_scheduler" in conf.model.pl_module and conf.model.pl_module.lr_scheduler:
-            # set the number of warmup steps as x% of the total number of training steps
-            if conf.model.pl_module.lr_scheduler.num_warmup_steps is None:
-                if (
-                    "warmup_steps_ratio" in conf.model.pl_module
-                    and conf.model.pl_module.warmup_steps_ratio is not None
-                ):
-                    conf.model.pl_module.lr_scheduler.num_warmup_steps = int(
-                        conf.model.pl_module.lr_scheduler.num_training_steps
-                        * conf.model.pl_module.warmup_steps_ratio
-                    )
-                else:
-                    conf.model.pl_module.lr_scheduler.num_warmup_steps = 0
-            logger.info(
-                f"Number of warmup steps: {conf.model.pl_module.lr_scheduler.num_warmup_steps}"
-            )
-
-        logger.info("Instantiating the Model")
-        pl_module: GoldenRetrieverPLModule = hydra.utils.instantiate(
-            conf.model.pl_module, _recursive_=False
-        )
-        if (
-            "pretrain_ckpt_path" in conf.train
-            and conf.train.pretrain_ckpt_path is not None
-        ):
-            logger.info(
-                f"Loading pretrained checkpoint from {conf.train.pretrain_ckpt_path}"
-            )
-            pl_module.load_state_dict(
-                torch.load(conf.train.pretrain_ckpt_path)["state_dict"], strict=False
-            )
-
-        if "compile" in conf.model.pl_module and conf.model.pl_module.compile:
-            try:
-                pl_module = torch.compile(pl_module, backend="inductor")
-            except Exception:
-                logger.info(
-                    "Failed to compile the model, you may need to install PyTorch 2.0"
-                )
-
-    # callbacks declaration
-    callbacks_store = [ModelSummary(max_depth=2)]
-
-    experiment_logger: WandbLogger | None = None
-    experiment_path: Path | None = None
-    if conf.logging.log:
-        logger.info("Instantiating Wandb Logger")
-        experiment_logger = hydra.utils.instantiate(conf.logging.wandb_arg)
-        if pl_module is not None:
-            # it may happen that the model is not instantiated if we are only testing
-            # in that case, we don't need to watch the model
-            experiment_logger.watch(pl_module, **conf.logging.watch)
-        experiment_path = Path(experiment_logger.experiment.dir)
-        # Store the YaML config separately into the wandb dir
-        yaml_conf: str = OmegaConf.to_yaml(cfg=conf)
-        (experiment_path / "hparams.yaml").write_text(yaml_conf)
-        # Add a Learning Rate Monitor callback to log the learning rate
-        callbacks_store.append(LearningRateMonitor(logging_interval="step"))
-
-    early_stopping_callback: EarlyStopping | None = None
-    if conf.train.early_stopping_callback is not None:
-        early_stopping_callback = hydra.utils.instantiate(
-            conf.train.early_stopping_callback
-        )
-        callbacks_store.append(early_stopping_callback)
-
-    model_checkpoint_callback: ModelCheckpoint | None = None
-    if conf.train.model_checkpoint_callback is not None:
-        model_checkpoint_callback = hydra.utils.instantiate(
-            conf.train.model_checkpoint_callback,
-            dirpath=experiment_path / "checkpoints" if experiment_path else None,
-        )
-        callbacks_store.append(model_checkpoint_callback)
-
-    if "callbacks" in conf.train and conf.train.callbacks is not None:
-        for _, callback in conf.train.callbacks.items():
-            # callback can be a list of callbacks or a single callback
-            if isinstance(callback, omegaconf.listconfig.ListConfig):
-                for cb in callback:
-                    if cb is not None:
-                        callbacks_store.append(
-                            hydra.utils.instantiate(cb, _recursive_=False)
-                        )
-            else:
-                if callback is not None:
-                    callbacks_store.append(hydra.utils.instantiate(callback))
-
-    # trainer
-    logger.info("Instantiating the Trainer")
-    trainer: Trainer = hydra.utils.instantiate(
-        conf.train.pl_trainer, callbacks=callbacks_store, logger=experiment_logger
-    )
-
-    if not conf.train.only_test:
-        # module fit
-        trainer.fit(pl_module, datamodule=pl_data_module)
-
-    if conf.train.pl_trainer.fast_dev_run:
-        best_pl_module = pl_module
-    else:
-        # load best model for testing
-        if conf.train.checkpoint_path:
-            best_model_path = conf.evaluation.checkpoint_path
-        elif model_checkpoint_callback:
-            best_model_path = model_checkpoint_callback.best_model_path
-        else:
-            raise ValueError(
-                "Either `checkpoint_path` or `model_checkpoint_callback` should "
-                "be specified in the evaluation configuration"
-            )
-        logger.info(f"Loading best model from {best_model_path}")
-
-        try:
-            best_pl_module = GoldenRetrieverPLModule.load_from_checkpoint(
-                best_model_path
-            )
-        except Exception as e:
-            logger.info(f"Failed to load the model from checkpoint: {e}")
-            logger.info("Using last model instead")
-            best_pl_module = pl_module
-        if "compile" in conf.model.pl_module and conf.model.pl_module.compile:
-            try:
-                best_pl_module = torch.compile(best_pl_module, backend="inductor")
-            except Exception:
-                logger.info(
-                    "Failed to compile the model, you may need to install PyTorch 2.0"
-                )
-
-    # module test
-    trainer.test(best_pl_module, datamodule=pl_data_module)
-
-
-if __name__ == "__main__":
-    main()

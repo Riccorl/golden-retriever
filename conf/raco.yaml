@@ -1,0 +1,110 @@
+# model section
+retriever:
+  _target_: goldenretriever.GoldenRetriever
+  # question_encoder: "riccorl/e5-base-v2-blink-1M-32words-windows"
+  # question_encoder: "intfloat/e5-small-v2"
+  question_encoder: "intfloat/e5-base-v2"
+  # question_encoder: "facebook/contriever"
+  document_index:
+    _target_: goldenretriever.indexers.inmemory.InMemoryDocumentIndex
+    documents:
+      _target_: goldenretriever.indexers.document.DocumentStore.from_file
+      file_path: "/media/data/commonsense/RACo/data/train.dev.index.jsonl"
+    # metadata_fields:
+      # - "definition"
+    # separator: " <def> "
+    device: "cuda"
+    precision: "16"
+
+# add_documents_from_dataset: true
+
+# data section
+train_dataset:
+  _target_: goldenretriever.data.datasets.GoldenRetrieverStreamingDataset
+  name: "train_dataset"
+  local: "/media/data/commonsense/RACo/data/train.json"
+  shuffle: True # force shuffle True for training
+  shuffle_seed: 42
+  max_question_length: 64
+  max_passage_length: 64
+  batch_size: 4
+
+val_dataset:
+  - _target_: goldenretriever.data.datasets.GoldenRetrieverStreamingDataset
+    name: "val_dataset"
+    local: "/media/data/commonsense/RACo/data/dev.json"
+    shuffle: False # force shuffle True for training
+    shuffle_seed: 42
+    max_question_length: 64
+    max_passage_length: 64
+    batch_size: 64
+
+num_workers: 16
+
+# optimizer section
+optimizer: goldenretriever.pytorch_modules.optim.RAdamW
+lr: 1e-5
+weight_decay: 0.01
+lr_scheduler: goldenretriever.pytorch_modules.scheduler.LinearScheduler
+max_steps: 150_000
+# max_epochs: 3
+accumulate_grad_batches: 1
+gradient_clip_val: 1.0
+deterministic: True
+# num_sanity_val_steps: 0
+val_check_interval: 1.0
+check_val_every_n_epoch: 1
+
+# compute section
+# micro_batch_size: 4
+precision: 16
+accelerator: "auto"
+devices: 1
+# strategy: "auto"
+# strategy: "fsdp"
+# FSDP
+# strategy:
+#   _target_: lightning.pytorch.strategies.FSDPStrategy
+#   sharding_strategy: "NO_SHARD"
+
+# eval section
+metric_to_monitor: "validate_recall@{top_k}"
+monitor_mode: "max"
+top_k: 100
+# prediction section
+prediction_batch_size: 128
+# hard negatives section
+max_hard_negatives_to_mine: 0
+hard_negatives_threshold: 0.0
+mine_hard_negatives_with_probability: 1.0
+
+# early section
+early_stopping: true
+early_stopping_patience: 10
+early_stopping_kwargs: null
+
+# logging section
+log_to_wandb: true
+wandb_entity: null
+wandb_experiment_name: "contriever-raco-self-index"
+wandb_project_name: "golden-retriever-raco"
+wandb_online_mode: true
+wandb_kwargs: null
+wandb_save_dir: "/media/data/commonsense/RACo"
+
+# checkpointing section
+model_checkpointing: true
+checkpoint_dir: "/media/data/commonsense/RACo/checkpoints"
+save_top_k: 1
+checkpoint_kwargs: null
+resume_from_checkpoint_path: null
+
+# additional kwargs to pass to the Lightning Trainer
+lightning_trainer_kwargs: null
+
+# other parameters
+seed: 42
+float32_matmul_precision: "high"
+
+# to use for Trainer.test()
+test_kwargs: null

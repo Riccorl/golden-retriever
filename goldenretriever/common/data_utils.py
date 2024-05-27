@@ -200,6 +200,7 @@ def preprocess_to_mds(
     tokenizer_fn: callable = None,
     cache_dir: str | os.PathLike | None = None,
     use_cache: bool = True,
+    num_workers: int | None = None,
 ) -> str | os.PathLike:
     """Preprocess the dataset to a markdown file.
 
@@ -243,7 +244,6 @@ def preprocess_to_mds(
     #     source = source
 
     logger.info("Converting dataset to MDS format")
-    num_workers = None
     if num_workers is None:
         # Multiple workers is only supported on linux machines
         if "linux" in platform.platform().lower():

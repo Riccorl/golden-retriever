@@ -5,6 +5,7 @@ import time
 from pathlib import Path
 from typing import List, Optional, Set
 
+import hydra
 import lightning as pl
 import torch
 from lightning.pytorch.trainer.states import RunningStage
@@ -23,6 +24,7 @@ from goldenretriever.data.datasets import GoldenRetrieverStreamingDataset
 from goldenretriever.indexers.base import BaseDocumentIndex
 from goldenretriever.lightning_modules.pl_modules import GoldenRetrieverPLModule
 from goldenretriever.pytorch_modules.model import GoldenRetriever
+from streaming.base.util import clean_stale_shared_memory
 
 logger = get_logger(__name__)
 
@@ -35,7 +37,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         k: int | None = None,
         batch_size: int = 32,
         num_workers: int = 8,
-        document_index: BaseDocumentIndex | None = None,
+        document_index: BaseDocumentIndex | DictConfig | None = None,
         precision: str | int = 32,
         force_reindex: bool = True,
         retriever_dir: Optional[Path] = None,
@@ -43,6 +45,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         other_callbacks: List[DictConfig] | List["NLPTemplateCallback"] | None = None,
         dataset: DictConfig | BaseDataset | None = None,
         dataloader: DataLoader | None = None,
+        # index: Optional[DictConfig] = None,
         *args,
         **kwargs,
     ):
@@ -53,6 +56,18 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         self.precision = precision
         self.force_reindex = force_reindex
         self.retriever_dir = retriever_dir
+
+        if self.document_index is not None:
+            if isinstance(self.document_index, str):
+                self.document_index = BaseDocumentIndex.from_pretrained(
+                    document_index  # , device=index_device, precision=index_precision, **kwargs
+                )
+            elif isinstance(self.document_index, DictConfig):
+                self.document_index = hydra.utils.instantiate(document_index)
+            elif not isinstance(self.document_index, BaseDocumentIndex):
+                raise ValueError(
+                    f"document_index must be either a string, a DictConfig or a BaseDocumentIndex, got {type(document_index)}"
+                )
 
     @torch.no_grad()
     def __call__(
@@ -122,6 +137,26 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
             # you never know :)
             retriever.eval()
 
+            # if self.document_index is not None:
+            #     if len(self.document_index) == 0:
+            #         for sample in tqdm(
+            #             current_dataset,
+            #             desc=f"Adding documents from {current_dataset.name}",
+            #         ):
+            #             [
+            #                 self.document_index.documents.add_document(s)
+            #                 for s in sample["positives"]
+            #             ]
+            #             [
+            #                 self.document_index.documents.add_document(s)
+            #                 for s in sample["negatives"]
+            #             ]
+            #             [
+            #                 self.document_index.documents.add_document(s)
+            #                 for s in sample["hard_negatives"]
+            #             ]
+            #         clean_stale_shared_memory()
+
             retriever.index(
                 batch_size=self.batch_size,
                 num_workers=self.num_workers,
@@ -129,6 +164,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                 precision=self.precision,
                 compute_on_cpu=False,
                 force_reindex=force_reindex,
+                document_index=self.document_index,
             )
 
             # sync the processes
@@ -154,7 +190,10 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                 batch = batch.to(pl_module.device)
                 # get the top-k indices
                 retriever_output = retriever.retrieve(
-                    **batch.questions, k=self.k, precision=self.precision
+                    **batch.questions,
+                    k=self.k,
+                    precision=self.precision,
+                    document_index=self.document_index,
                 )
                 # compute recall at k
                 for batch_idx, retrieved_samples in enumerate(retriever_output):

@@ -578,6 +578,9 @@ class GoldenRetrieverCollator:
         if microbatch_size is None:
             return [batch]
 
+        if microbatch_size == len(batch["questions"]["input_ids"]):
+            return [batch]
+
         def split_fn(x):
 
             if isinstance(x, list):
@@ -624,9 +627,6 @@ class GoldenRetrieverCollator:
                 )
             )
         return batches
-
-    # def merge_batches(self, batches: List[Dict[str, torch.Tensor]]) -> Dict[str, torch.Tensor]:
-    #     pass
 
     def convert_to_batch(
         self, samples: Any, *args, **kwargs

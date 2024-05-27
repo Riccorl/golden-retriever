@@ -131,16 +131,16 @@ class FreeUpIndexerVRAMCallback(pl.Callback):
 
         # remove the index from the GPU memory
         # remove the embeddings from the GPU memory first
-        if pl_module.model.document_index is not None:
-            if pl_module.model.document_index.embeddings is not None:
-                try:
-                    pl_module.model.document_index.embeddings.cpu()
-                except Exception:
-                    logger.warning(
-                        "Could not move embeddings to CPU. Skipping freeing up VRAM."
-                    )
-                    pass
-            pl_module.model.document_index.embeddings = None
+        # if pl_module.model.document_index is not None:
+        #     if pl_module.model.document_index.embeddings is not None:
+        #         try:
+        #             pl_module.model.document_index.embeddings.cpu()
+        #         except Exception:
+        #             logger.warning(
+        #                 "Could not move embeddings to CPU. Skipping freeing up VRAM."
+        #             )
+        #             pass
+        #     pl_module.model.document_index.embeddings = None
 
         import gc
 

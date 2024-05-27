@@ -103,5 +103,15 @@ def build_hf_dataset(
     if shuffle:
         print("Shuffling dataset")
         dataset = dataset.shuffle(seed=seed)
+
+    # we should add an id to the dataset if it doesn't have one
+    if "id" not in dataset.column_names:
+        # add id if not present
+        if isinstance(dataset, hf_datasets.Dataset):
+            dataset = dataset.add_column("id", range(len(dataset)))
+        else:
+            dataset = dataset.map(
+                lambda x, idx: x.update({"id": idx}), with_indices=True
+            )
     # dataset = IterableBaseDataset(name="hf_data", data=hf_dataset)
     return dataset

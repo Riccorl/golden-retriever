@@ -227,7 +227,20 @@ class BaseDocumentIndex:
         Returns:
             `str`: The document.
         """
-        return self.documents.get_document_from_id(index)
+        return self.documents.get_document_from_index(index)
+    
+    def get_document_from_id(self, id: Any) -> Document | None:
+        """
+        Get the document from its id.
+
+        Args:
+            index (`Any`):
+                The id of the document.
+
+        Returns:
+            `str`: The document.
+        """
+        return self.documents.get_document_from_id(id)
 
     def get_passage_from_index(self, index: int) -> str:
         """
@@ -241,13 +254,33 @@ class BaseDocumentIndex:
             `str`: The document.
         """
         document = self.get_document_from_index(index)
-        # build the passage using the metadata fields
-        passage = document.text
-        for field in self.metadata_fields:
-            passage += f"{self.separator}{document.metadata[field]}"
-        return passage
+        return self.get_passage_from_document(document)
+    
+    def get_passage_from_id(self, id: Any) -> str:
+        """
+        Get the document from its id.
+
+        Args:
+            index (`Any`):
+                The index of the document.
+
+        Returns:
+            `str`: The document.
+        """
+        document = self.get_document_from_id(id)
+        return self.get_passage_from_document(document)
 
     def get_passage_from_document(self, document: Document) -> str:
+        """
+        Get the passage from the document.
+
+        Args:
+            document (`Document`):
+                The document to get the passage for.
+
+        Returns:
+            `str`: The passage.
+        """
         passage = document.text
         for field in self.metadata_fields:
             passage += f"{self.separator}{document.metadata[field]}"
