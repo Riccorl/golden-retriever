@@ -66,7 +66,7 @@ class FaissDocumentIndex(BaseDocumentIndex):
                     f"Got {len(documents)} documents and {embeddings.shape[0]} embeddings."
                 )
 
-        faiss.omp_set_num_threads(psutil.cpu_count(logical=False))
+        # faiss.omp_set_num_threads(psutil.cpu_count(logical=True))
 
         # params
         self.index_type = index_type
@@ -75,11 +75,15 @@ class FaissDocumentIndex(BaseDocumentIndex):
 
         if index is not None:
             self.embeddings = index
-            if self.device == "cuda":
+            if "cuda" in self.device:
                 # use a single GPU
+                # infer the device number if present
+                device_number = (
+                    int(self.device.split(":")[-1]) if ":" in self.device else 0
+                )
                 faiss_resource = faiss.StandardGpuResources()
                 self.embeddings = faiss.index_cpu_to_gpu(
-                    faiss_resource, 0, self.embeddings
+                    faiss_resource, device_number, self.embeddings
                 )
         else:
             if embeddings is not None:
@@ -112,8 +116,15 @@ class FaissDocumentIndex(BaseDocumentIndex):
             )
         if device_or_precision == "cuda" and self.device == "cpu":
             # use a single GPU
+            device_number = (
+                int(device_or_precision.split(":")[-1])
+                if ":" in device_or_precision
+                else 0
+            )
             faiss_resource = faiss.StandardGpuResources()
-            self.embeddings = faiss.index_cpu_to_gpu(faiss_resource, 0, self.embeddings)
+            self.embeddings = faiss.index_cpu_to_gpu(
+                faiss_resource, device_number, self.embeddings
+            )
         elif device_or_precision == "cpu" and self.device == "cuda":
             # move faiss index to CPU
             self.embeddings = faiss.index_gpu_to_cpu(self.embeddings)
@@ -158,12 +169,11 @@ class FaissDocumentIndex(BaseDocumentIndex):
         self.embeddings = faiss.index_factory(faiss_vector_size, index_type, metric)
 
         # convert to GPU
-        if self.device == "cuda":
-            # use a single GPU
-            faiss_resource = faiss.StandardGpuResources()
-            self.embeddings = faiss.index_cpu_to_gpu(faiss_resource, 0, self.embeddings)
+        if "cuda" in self.device:
+            # move the index to the GPU
+            self.to(self.device)
         else:
-            # move to CPU if embeddings is a torch.Tensor
+            # move the tensors to the CPU
             embeddings = (
                 embeddings.cpu() if isinstance(embeddings, torch.Tensor) else embeddings
             )
@@ -172,13 +182,13 @@ class FaissDocumentIndex(BaseDocumentIndex):
         if isinstance(embeddings, torch.Tensor) and embeddings.dtype == torch.float16:
             embeddings = embeddings.float()
 
-        logger.info("Training the index.")
-        self.embeddings.train(embeddings)
+        # logger.info("Training the index.")
+        # self.embeddings.train(embeddings)
 
         logger.info("Adding the embeddings to the index.")
         self.embeddings.add(embeddings)
 
-        self.embeddings.nprobe = nprobe
+        # self.embeddings.nprobe = nprobe
 
         # save parameters for saving/loading
         self.index_type = index_type
@@ -345,7 +355,7 @@ class FaissDocumentIndex(BaseDocumentIndex):
         batch_scores: List[List[float]] = retriever_out[0].detach().cpu().tolist()
         # Retrieve the passages corresponding to the indices
         batch_docs = [
-            [self.documents.get_document_from_id(i) for i in indices if i != -1]
+            [self.get_document_from_index(i) for i in indices if i != -1]
             for indices in batch_top_k
         ]
         # build the output object

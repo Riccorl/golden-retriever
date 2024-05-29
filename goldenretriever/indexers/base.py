@@ -49,9 +49,12 @@ class BaseDocumentIndex:
 
     def __init__(
         self,
-        documents: (
-            str | List[str] | os.PathLike | List[os.PathLike] | DocumentStore | None
-        ) = None,
+        documents: str
+        | List[str]
+        | os.PathLike
+        | List[os.PathLike]
+        | DocumentStore
+        | None = None,
         embeddings: torch.Tensor | None = None,
         metadata_fields: List[str] | None = None,
         separator: str | None = None,
@@ -231,7 +234,7 @@ class BaseDocumentIndex:
     
     def get_document_from_id(self, id: Any) -> Document | None:
         """
-        Get the document from its id.
+        Get the document from the id.
 
         Args:
             index (`Any`):
@@ -241,6 +244,24 @@ class BaseDocumentIndex:
             `str`: The document.
         """
         return self.documents.get_document_from_id(id)
+    
+    def get_passage_from_id(self, id: Any) -> str:
+        """
+        Get the passage from the id.
+
+        Args:
+            index (`Any`):
+                The id of the document.
+
+        Returns:
+            `str`: The document.
+        """
+        document = self.get_document_from_id(id)
+        # build the passage using the metadata fields
+        passage = document.text
+        for field in self.metadata_fields:
+            passage += f"{self.separator}{document.metadata[field]}"
+        return passage
 
     def get_passage_from_index(self, index: int) -> str:
         """
@@ -254,33 +275,13 @@ class BaseDocumentIndex:
             `str`: The document.
         """
         document = self.get_document_from_index(index)
-        return self.get_passage_from_document(document)
-    
-    def get_passage_from_id(self, id: Any) -> str:
-        """
-        Get the document from its id.
-
-        Args:
-            index (`Any`):
-                The index of the document.
-
-        Returns:
-            `str`: The document.
-        """
-        document = self.get_document_from_id(id)
-        return self.get_passage_from_document(document)
+        # build the passage using the metadata fields
+        passage = document.text
+        for field in self.metadata_fields:
+            passage += f"{self.separator}{document.metadata[field]}"
+        return passage
 
     def get_passage_from_document(self, document: Document) -> str:
-        """
-        Get the passage from the document.
-
-        Args:
-            document (`Document`):
-                The document to get the passage for.
-
-        Returns:
-            `str`: The passage.
-        """
         passage = document.text
         for field in self.metadata_fields:
             passage += f"{self.separator}{document.metadata[field]}"

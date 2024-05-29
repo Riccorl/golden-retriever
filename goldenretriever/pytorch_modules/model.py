@@ -3,7 +3,7 @@ import platform
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
 import torch
 import torch.nn.functional as F
@@ -472,6 +472,23 @@ class GoldenRetriever(torch.nn.Module):
                 "The passages must be indexed before they can be retrieved."
             )
         return self.document_index.get_passage_from_index(index)
+    
+    def get_passage_from_id(self, id: Any) -> str:
+        """
+        Get the passage from the id.
+
+        Args:
+            index (`Any`):
+                The id of the passage.
+
+        Returns:
+            `str`: The passage.
+        """
+        if self.document_index is None:
+            raise ValueError(
+                "The passages must be indexed before they can be retrieved."
+            )
+        return self.document_index.get_passage_from_id(id)
 
     def get_vector_from_index(self, index: int) -> torch.Tensor:
         """

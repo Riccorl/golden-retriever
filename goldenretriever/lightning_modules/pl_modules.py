@@ -119,9 +119,6 @@ class GoldenRetrieverPLModule(pl.LightningModule):
             sync_dist=True,
         )
 
-    def train_dataloader(self) -> Any:
-        return self.li
-
     def configure_model(self):
         if self.model is not None:
             return

@@ -203,7 +203,6 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
         max_passages: int = -1,
         max_question_length: int = 256,
         max_passage_length: int = 64,
-        max_passage_batch_size: int = 400,
         metadata_fields: Optional[Sequence[str]] = None,
         metadata_separator: str = "\t",
         use_cache: bool = True,
@@ -233,31 +232,31 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
         self.max_passages = max_passages
         self.max_question_length = max_question_length
         self.max_passage_length = max_passage_length
-        self.max_passage_batch_size = max_passage_batch_size
         self.metadata_fields = metadata_fields
         self.metadata_separator = metadata_separator
         self.original_local = local
 
         # get data to MDS format
+        tokenizer_fn = (
+            partial(
+                self.tokenize,
+                question_tokenizer=self.question_tokenizer,
+                passage_tokenizer=self.passage_tokenizer,
+                max_positives=max_positives,
+                max_negatives=max_negatives,
+                max_hard_negatives=max_hard_negatives,
+                max_passages=max_passages,
+                max_question_length=max_question_length,
+                max_passage_length=max_passage_length,
+                metadata_fields=metadata_fields,
+                metadata_separator=metadata_separator,
+            )
+            if preprocess
+            else None
+        )
         local = preprocess_to_mds(
             local,
-            (
-                partial(
-                    self.tokenize,
-                    question_tokenizer=self.question_tokenizer,
-                    passage_tokenizer=self.passage_tokenizer,
-                    max_positives=max_positives,
-                    max_negatives=max_negatives,
-                    max_hard_negatives=max_hard_negatives,
-                    max_passages=max_passages,
-                    max_question_length=max_question_length,
-                    max_passage_length=max_passage_length,
-                    metadata_fields=metadata_fields,
-                    metadata_separator=metadata_separator,
-                )
-                if preprocess
-                else None
-            ),
+            tokenizer_fn=tokenizer_fn,
             use_cache=use_cache,
         )
 

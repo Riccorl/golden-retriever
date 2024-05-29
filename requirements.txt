@@ -1,16 +1,16 @@
 #------- Core dependencies -------
-torch>=2.1,<2.4
+torch>=2.3,<2.4
 
-transformers>=4.40,<4.41
-datasets>=2.18,<2.19
+transformers>=4.41,<4.42
+datasets>=2.18,<2.20
 rich>=13.0.0,<14.0.0
 scikit-learn>=1.3,<1.5
 typer>=0.12,<0.13
-mosaicml
+mosaicml>=0.22,<0.23
 
 # train
-lightning>=2.2,<2.3
-mosaicml-streaming==0.7.5
+lightning>=2.2,<2.4
+mosaicml-streaming>=0.7.5,<0.8
 hydra-core>=1.3,<1.4
 hydra_colorlog
 wandb>=0.16,<0.17

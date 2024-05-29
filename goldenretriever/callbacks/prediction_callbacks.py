@@ -216,7 +216,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                             pass
                     retrieved_indices = [r.document.id for r in retrieved_samples if r]
                     retrieved_passages = [
-                        retriever.get_passage_from_index(i) for i in retrieved_indices
+                        retriever.get_passage_from_id(i) for i in retrieved_indices
                     ]
                     retrieved_scores = [r.score for r in retrieved_samples]
                     # correct predictions are the passages that are in the top-k and are gold
@@ -230,10 +230,10 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                         predictions=retrieved_passages,
                         scores=retrieved_scores,
                         correct=[
-                            retriever.get_passage_from_index(i) for i in correct_indices
+                            retriever.get_passage_from_id(i) for i in correct_indices
                         ],
                         wrong=[
-                            retriever.get_passage_from_index(i) for i in wrong_indices
+                            retriever.get_passage_from_id(i) for i in wrong_indices
                         ],
                     )
                     predictions.append(prediction_output)

@@ -1,0 +1,108 @@
+# model section
+retriever:
+  _target_: goldenretriever.GoldenRetriever
+  question_encoder: "intfloat/e5-small-v2"
+  attn_implementation: "sdpa"
+  use_hf_model: false
+  document_index:
+    _target_: goldenretriever.indexers.inmemory.InMemoryDocumentIndex
+    documents:
+      _target_: goldenretriever.indexers.document.DocumentStore.from_file
+      file_path: "/leonardo_scratch/large/userexternal/rorland1/entity-rag/index/golden-index-sim-minilm-filtered.jsonl"
+    device: "cuda"
+    precision: "bf16"
+
+# data section
+train_dataset:
+  _target_: goldenretriever.data.datasets.GoldenRetrieverStreamingDataset
+  name: "train_dataset"
+  local: "/leonardo_scratch/large/userexternal/rorland1/entity-rag/data/aida-train-kilt-Wikipedia.DM.v2.dpr.jsonl"
+  shuffle: True # force shuffle True for training
+  shuffle_seed: 42
+  max_question_length: 256
+  max_passage_length: 256
+  # max_positives: 10
+  batch_size: 64
+  preprocess: True
+
+val_dataset:
+  - _target_: goldenretriever.data.datasets.GoldenRetrieverStreamingDataset
+    name: "val_dataset"
+    local: "/leonardo_scratch/large/userexternal/rorland1/entity-rag/data/aida-dev-kilt-Wikipedia.DM.v2.dpr.jsonl"
+    shuffle: False # force shuffle True for training
+    shuffle_seed: 42
+    max_question_length: 256
+    max_passage_length: 256
+    # max_positives: 10
+    batch_size: 64
+    preprocess: True
+
+num_workers: 8  # 4 * num gpus
+
+# optimizer section
+optimizer: goldenretriever.pytorch_modules.optim.RAdamW
+lr: 1e-5
+weight_decay: 0.01
+lr_scheduler: goldenretriever.pytorch_modules.scheduler.LinearScheduler
+max_steps: 25_000
+# max_epochs: 1
+accumulate_grad_batches: 1
+gradient_clip_val: 1.0
+deterministic: True
+num_sanity_val_steps: 0
+val_check_interval: 1.0
+check_val_every_n_epoch: 1
+
+# compute section
+# micro_batch_size: 8
+precision: "bf16"
+accelerator: "auto"
+devices: 1
+# strategy: "auto"
+# strategy: "fsdp"
+# FSDP
+# strategy:
+#   _target_: lightning.pytorch.strategies.FSDPStrategy
+#   sharding_strategy: "NO_SHARD"
+
+# eval section
+metric_to_monitor: "validate_recall@{top_k}"
+monitor_mode: "max"
+top_k: 100
+# prediction section
+prediction_batch_size: 1024
+# hard negatives section
+max_hard_negatives_to_mine: 0
+hard_negatives_threshold: 0.0
+mine_hard_negatives_with_probability: 1.0
+
+# early section
+early_stopping: true
+early_stopping_patience: 10
+early_stopping_kwargs: null
+
+# logging section
+log_to_wandb: true
+wandb_entity: null
+wandb_save_dir:  "/leonardo_scratch/large/userexternal/rorland1/entity-rag/experiments/"
+wandb_experiment_name: "aida-e5-small-v2"
+wandb_project_name: "golden-retriever-entity-rag"
+wandb_online_mode: false
+wandb_kwargs: null
+
+# checkpointing section
+model_checkpointing: true
+checkpoint_dir: "/leonardo_scratch/large/userexternal/rorland1/entity-rag/experiments/checkpoints"
+save_top_k: 1
+checkpoint_kwargs: null
+resume_from_checkpoint_path: null
+
+# additional kwargs to pass to the Lightning Trainer
+lightning_trainer_kwargs: null
+
+# other parameters
+seed: 42
+float32_matmul_precision: "high"
+
+# to use for Trainer.test()
+test_kwargs: null

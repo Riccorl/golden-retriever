@@ -544,9 +544,15 @@ class Trainer(FromConfig):
             `lightning.loggers.WandbLogger`:
                 The wandb logger
         """
+        actual_save_dir = None
+        if save_dir is not None:
+            actual_save_dir = Path(save_dir)
+            if project is not None:
+                actual_save_dir = actual_save_dir / project
+            actual_save_dir.mkdir(parents=True, exist_ok=True)
         wandb_logger = WandbLogger(
             name=name,
-            save_dir=save_dir,
+            save_dir=str(actual_save_dir) ,
             offline=offline,
             project=project,
             log_model=log_model and not offline,
@@ -589,6 +595,7 @@ class Trainer(FromConfig):
         filename: str | os.PathLike | None = None,
         dirpath: str | os.PathLike | None = None,
         auto_insert_metric_name: bool = False,
+        save_retriever: bool = True,
         *args,
         **kwargs,
     ) -> ModelCheckpoint:
@@ -620,7 +627,22 @@ class Trainer(FromConfig):
             **kwargs,
         )
 
+        # update the kwargs
+        # TODO: this is bad
+        # kwargs.update(
+        #     dirpath=self.checkpoint_dir,
+        #     filename=self.checkpoint_filename,
+        # )
+        # modelcheckpoint_kwargs = dict(
+        #     dirpath=self.checkpoint_dir,
+        #     filename=self.checkpoint_filename,
+        # )
+        # modelcheckpoint_kwargs.update(kwargs)
         self.model_checkpoint_callback = ModelCheckpoint(**kwargs)
+        self.callbacks_store.append(self.model_checkpoint_callback)
+
+        if save_retriever:
+            self.callbacks_store.append(SaveRetrieverCallback(saving_dir=dirpath / "retriever"))
         return self.model_checkpoint_callback
 
     def configure_hard_negatives_callback(self):
@@ -647,14 +669,14 @@ class Trainer(FromConfig):
             self.model_checkpoint_callback = self.configure_model_checkpoint(
                 **self.checkpoint_kwargs
             )
-            self.callbacks_store.append(self.model_checkpoint_callback)
+            # self.callbacks_store.append(self.model_checkpoint_callback)
             if self.save_last:
                 self.latest_model_checkpoint_callback = self.configure_model_checkpoint(
                     **self.last_checkpoint_kwargs
                 )
-                self.callbacks_store.append(self.latest_model_checkpoint_callback)
+                # self.callbacks_store.append(self.latest_model_checkpoint_callback)
 
-            self.callbacks_store.append(SaveRetrieverCallback())
+            # self.callbacks_store.append(SaveRetrieverCallback(saving_dir=))
         if self.early_stopping:
             self.early_stopping_callback = self.configure_early_stopping(
                 **self.early_stopping_kwargs
@@ -757,6 +779,8 @@ class Trainer(FromConfig):
             self.callbacks_store.append(self.configure_hard_negatives_callback())
 
         self.callbacks_store.append(FreeUpIndexerVRAMCallback())
+
+        print(self.callbacks_store)
 
         if self.trainer is None:
             logger.info("Instantiating the Trainer")
