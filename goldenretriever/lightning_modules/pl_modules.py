@@ -35,7 +35,7 @@ class GoldenRetrieverPLModule(pl.LightningModule):
         self.lr_scheduler_config = lr_scheduler
         self.micro_batch_size = micro_batch_size
 
-        self.automatic_optimization = False
+        # self.automatic_optimization = False
         self.loss = None
 
     def forward(self, **kwargs) -> dict:
@@ -54,20 +54,23 @@ class GoldenRetrieverPLModule(pl.LightningModule):
         # apply hard negative algorithm
         batch = self.hn_algo(batch, self)
         # split the batch into micro-batches
-        micro_batches = self.trainer.train_dataloader.collate_fn.split_batch(
-            batch, self.micro_batch_size
-        )
-        accumulate_micro_batches = len(micro_batches)
-        cumulative_loss = torch.tensor(0.0, device=self.device)
-        for mb in micro_batches:
-            forward_output = self.forward(**mb, return_loss=True)
-            # scale losses by the number of micro-batches
-            loss = forward_output["loss"] / accumulate_micro_batches
-            # self.manual_backward(loss)
-            # accumulate loss over micro-batches for logging
-            cumulative_loss += loss
+        # micro_batches = self.trainer.train_dataloader.collate_fn.split_batch(
+        #     batch, self.micro_batch_size
+        # )
+        # accumulate_micro_batches = len(micro_batches)
+        # cumulative_loss = torch.tensor(0.0, device=self.device)
+        # for mb in micro_batches:
+        #     forward_output = self.forward(**mb, return_loss=True)
+        #     # scale losses by the number of micro-batches
+        #     loss = forward_output["loss"] / accumulate_micro_batches
+        #     # self.manual_backward(loss)
+        #     # accumulate loss over micro-batches for logging
+        #     cumulative_loss += loss
 
-        self.loss = cumulative_loss
+        # self.loss = cumulative_loss
+
+        forward_output = self.forward(**batch, return_loss=True)
+        cumulative_loss = forward_output["loss"]
 
         # log info
         self.log(
@@ -86,20 +89,20 @@ class GoldenRetrieverPLModule(pl.LightningModule):
         )
         return cumulative_loss  # forward_output["loss"]
 
-    def on_train_batch_end(self, outputs, batch, batch_idx):
-        # get the optimizer
-        opt = self.optimizers()
-        opt.zero_grad()
-        self.manual_backward(self.loss)
-        # clip gradients
-        self.clip_gradients(opt, gradient_clip_val=1.0, gradient_clip_algorithm="value")
-        # update weights
-        opt.step()
-        # update lr schedulers
-        sch = self.lr_schedulers()
-        sch.step()
-        # reset the loss
-        self.loss = None
+    # def on_train_batch_end(self, outputs, batch, batch_idx):
+    #     # get the optimizer
+    #     opt = self.optimizers()
+    #     opt.zero_grad()
+    #     self.manual_backward(self.loss)
+    #     # clip gradients
+    #     self.clip_gradients(opt, gradient_clip_val=1.0, gradient_clip_algorithm="value")
+    #     # update weights
+    #     opt.step()
+    #     # update lr schedulers
+    #     sch = self.lr_schedulers()
+    #     sch.step()
+    #     # reset the loss
+    #     self.loss = None
 
     def validation_step(self, batch: ModelInputs, batch_idx: int) -> None:
         forward_output = self.forward(**batch, return_loss=True)

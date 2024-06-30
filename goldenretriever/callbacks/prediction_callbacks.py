@@ -52,19 +52,22 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         super().__init__(batch_size, stages, other_callbacks, dataset, dataloader)
         self.k = k
         self.num_workers = num_workers
-        self.document_index = document_index
         self.precision = precision
         self.force_reindex = force_reindex
         self.retriever_dir = retriever_dir
 
-        if self.document_index is not None:
-            if isinstance(self.document_index, str):
+        self.document_index = None
+
+        if document_index is not None:
+            if isinstance(document_index, str):
                 self.document_index = BaseDocumentIndex.from_pretrained(
                     document_index  # , device=index_device, precision=index_precision, **kwargs
                 )
-            elif isinstance(self.document_index, DictConfig):
+            elif isinstance(document_index, DictConfig):
                 self.document_index = hydra.utils.instantiate(document_index)
-            elif not isinstance(self.document_index, BaseDocumentIndex):
+            elif isinstance(document_index, BaseDocumentIndex):
+                self.document_index = document_index
+            else:
                 raise ValueError(
                     f"document_index must be either a string, a DictConfig or a BaseDocumentIndex, got {type(document_index)}"
                 )
@@ -157,7 +160,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
             #             ]
             #         clean_stale_shared_memory()
 
-            retriever.index(
+            document_index = retriever.index(
                 batch_size=self.batch_size,
                 num_workers=self.num_workers,
                 max_length=current_dataset.max_passage_length,
@@ -193,7 +196,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                     **batch.questions,
                     k=self.k,
                     precision=self.precision,
-                    document_index=self.document_index,
+                    document_index=document_index,
                 )
                 # compute recall at k
                 for batch_idx, retrieved_samples in enumerate(retriever_output):
@@ -204,7 +207,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                     for passage in gold_passages:
                         try:
                             gold_passage_indices.append(
-                                retriever.get_index_from_passage(passage)
+                                document_index.get_index_from_passage(passage)
                             )
                         except ValueError:
                             if trainer.global_rank == 0:
@@ -216,7 +219,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                             pass
                     retrieved_indices = [r.document.id for r in retrieved_samples if r]
                     retrieved_passages = [
-                        retriever.get_passage_from_id(i) for i in retrieved_indices
+                        document_index.get_passage_from_id(i) for i in retrieved_indices
                     ]
                     retrieved_scores = [r.score for r in retrieved_samples]
                     # correct predictions are the passages that are in the top-k and are gold
@@ -230,11 +233,9 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                         predictions=retrieved_passages,
                         scores=retrieved_scores,
                         correct=[
-                            retriever.get_passage_from_id(i) for i in correct_indices
+                            document_index.get_passage_from_id(i) for i in correct_indices
                         ],
-                        wrong=[
-                            retriever.get_passage_from_id(i) for i in wrong_indices
-                        ],
+                        wrong=[document_index.get_passage_from_id(i) for i in wrong_indices],
                     )
                     predictions.append(prediction_output)
                 progress_bar.update(1)

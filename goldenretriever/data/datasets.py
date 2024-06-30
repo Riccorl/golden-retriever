@@ -205,6 +205,7 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
         max_passage_length: int = 64,
         metadata_fields: Optional[Sequence[str]] = None,
         metadata_separator: str = "\t",
+        shuffle_passages: bool = False,
         use_cache: bool = True,
         **kwargs: Any,
     ):
@@ -234,6 +235,7 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
         self.max_passage_length = max_passage_length
         self.metadata_fields = metadata_fields
         self.metadata_separator = metadata_separator
+        self.shuffle_passages = shuffle_passages
         self.original_local = local
 
         # get data to MDS format
@@ -303,6 +305,7 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
                 max_passage_length=self.max_passage_length,
                 metadata_fields=self.metadata_fields,
                 metadata_separator=self.metadata_separator,
+                shuffle_passages=self.shuffle_passages,
             )
         else:
             return sample
@@ -321,6 +324,7 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
         max_passage_length: int = 40,
         metadata_fields: Optional[Sequence[str]] = None,
         metadata_separator: str = "\t",
+        shuffle_passages: bool = False,
         **kwargs: Any,
     ) -> Dict[str, List[int]]:
 
@@ -347,18 +351,24 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
         positives = _get_passages(
             sample["positive_ctxs"], metadata_fields, metadata_separator
         )
+        if shuffle_passages:
+            random.shuffle(positives)
         if max_positives != -1:
             positives = positives[:max_positives]
 
         negatives = _get_passages(
             sample["negative_ctxs"], metadata_fields, metadata_separator
         )
+        if shuffle_passages:
+            random.shuffle(negatives)
         if max_negatives != -1:
             negatives = negatives[:max_negatives]
 
         hard_negatives = _get_passages(
             sample["hard_negative_ctxs"], metadata_fields, metadata_separator
         )
+        if shuffle_passages:
+            random.shuffle(hard_negatives)
         if max_hard_negatives != -1:
             hard_negatives = hard_negatives[:max_hard_negatives]
 

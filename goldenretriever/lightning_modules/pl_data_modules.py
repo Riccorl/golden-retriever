@@ -95,15 +95,19 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
                 kwargs = self.train_dataset
             else:
                 logger.debug("No data path found, skipping preprocessing")
-            preprocessing_fn = partial(
-                GoldenRetrieverStreamingDataset.tokenize,
-                **{
-                    "question_tokenizer": self.question_tokenizer,
-                    "passage_tokenizer": self.passage_tokenizer,
-                    **kwargs,
-                },
-            )
-            preprocess_to_mds(data_path, preprocessing_fn if self.preprocess else None)
+            dataset_class = kwargs.get("_target_", GoldenRetrieverStreamingDataset)
+
+            preprocessing_fn = None
+            if kwargs.get("preprocess", False):
+                preprocessing_fn = partial(
+                    dataset_class.tokenize,
+                    **{
+                        "question_tokenizer": self.question_tokenizer,
+                        "passage_tokenizer": self.passage_tokenizer,
+                        **kwargs,
+                    },
+                )
+            preprocess_to_mds(data_path, preprocessing_fn)
 
         if self.val_datasets is not None:
             for i, dataset in enumerate(self.val_datasets):
@@ -117,39 +121,45 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
                     kwargs = dataset
                 else:
                     logger.debug("No data path found, skipping preprocessing")
-                preprocessing_fn = partial(
-                    GoldenRetrieverStreamingDataset.tokenize,
-                    **{
-                        "question_tokenizer": self.question_tokenizer,
-                        "passage_tokenizer": self.passage_tokenizer,
-                        **kwargs,
-                    },
-                )
-                preprocess_to_mds(
-                    data_path, preprocessing_fn if self.preprocess else None
-                )
+                dataset_class = kwargs.get("_target_", GoldenRetrieverStreamingDataset)
+
+                preprocessing_fn = None
+                if kwargs.get("preprocess", False):
+                    preprocessing_fn = partial(
+                        dataset_class.tokenize,
+                        **{
+                            "question_tokenizer": self.question_tokenizer,
+                            "passage_tokenizer": self.passage_tokenizer,
+                            **kwargs,
+                        },
+                    )
+                preprocess_to_mds(data_path, preprocessing_fn)
 
         if self.test_datasets is not None:
             for dataset in self.test_datasets:
                 data_path = None
                 if isinstance(dataset, (str, os.PathLike)):
                     data_path = dataset
+                    kwargs = self.test_datasets[i]
                 elif isinstance(dataset, DictConfig):
                     # TODO
                     data_path = dataset["local"]
+                    kwargs = dataset
                 else:
                     logger.debug("No data path found, skipping preprocessing")
-                preprocessing_fn = partial(
-                    GoldenRetrieverStreamingDataset.tokenize,
-                    **{
-                        "question_tokenizer": self.question_tokenizer,
-                        "passage_tokenizer": self.passage_tokenizer,
-                        **self.test_datasets_kwargs[i],
-                    },
-                )
-                preprocess_to_mds(
-                    data_path, preprocessing_fn if self.preprocess else None
-                )
+                dataset_class = kwargs.get("_target_", GoldenRetrieverStreamingDataset)
+
+                preprocessing_fn = None
+                if kwargs.get("preprocess", False):
+                    preprocessing_fn = partial(
+                        dataset_class.tokenize,
+                        **{
+                            "question_tokenizer": self.question_tokenizer,
+                            "passage_tokenizer": self.passage_tokenizer,
+                            **self.test_datasets_kwargs[i],
+                        },
+                    )
+                preprocess_to_mds(data_path, preprocessing_fn)
 
     def setup(self, stage: str | None = None):
 

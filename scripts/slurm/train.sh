@@ -92,7 +92,7 @@ if [ -z "$CONFIG_PATH" ]; then
 fi
 
 if [ -z "$PYTHON_ENV" ]; then
-    PYTHON_ENV=/leonardo_scratch/large/userexternal/rorland1/python-envs/golden-dist-venv/bin/activate
+    PYTHON_ENV=/leonardo_work/IscrC_DELEE/python-envs/golden-retriever-dist/bin/activate
 fi
 
 if [ -z "$NODES" ]; then
@@ -108,7 +108,7 @@ if [ -z "$TIME" ]; then
 fi
 
 if [ -z "$ACCOUNT" ]; then
-    ACCOUNT=IscrB_medit
+    ACCOUNT=IscrC_DELEE
 fi
 
 if [ -z "$PARTITION" ]; then
@@ -128,7 +128,7 @@ fi
 
 if [ -z "$LOGS_PATH" ]; then
     # default logs path is in SCRATCH folder
-    LOGS_PATH="$SCRATCH/golden-retriever-dist/training_logs"
+    LOGS_PATH="/leonardo_work/IscrC_DELEE/golden-retriever-dist/training_logs"
     # if logs path does not exist, create it
     if [ ! -d "$LOGS_PATH/$JOB_NAME" ]; then
         mkdir -p "$LOGS_PATH/$JOB_NAME"
@@ -173,8 +173,8 @@ cd $CURRENT_DIR
 if [[ ${CONFIG_PATH:0:1} == '/' ]]; then
     CONFIG_PATH=$CONFIG_PATH
 else
-    # provide error
-
+    # they shoudl be in the parent directory
+    CONFIG_PATH="$CURRENT_DIR/../../$CONFIG_PATH"
 fi
 
 # if NODES is 1, then we don't need all this shit'
@@ -188,18 +188,18 @@ export GPU_PER_NODE
 # fi
 
 # check if $SCRATCH/hf_cache exists
-if [ ! -d "$SCRATCH/hf_cache" ]; then
-    mkdir -p "$SCRATCH/hf_cache"
+if [ ! -d "/leonardo_work/IscrC_DELEE/hf_cache" ]; then
+    mkdir -p "/leonardo_work/IscrC_DELEE/hf_cache"
 fi
 
-export HF_DATASETS_CACHE=$SCRATCH/hf_cache
-export HUGGINGFACE_HUB_CACHE=$SCRATCH/hf_cache
+export HF_HOME=/leonardo_work/IscrC_DELEE/hf_cache
+export HF_DATASETS_CACHE=/leonardo_work/IscrC_DELEE/hf_cache
+export HUGGINGFACE_HUB_CACHE=/leonardo_work/IscrC_DELEE/hf_cache
 export WANDB_MODE=offline
 # get Huggingface token from python
 export HF_TOKEN=$(python -c "import huggingface_hub; print(huggingface_hub.HfFolder.get_token() or '')")
 
 # training params
-export TRAINING_SCRIPT
 export CONFIG_PATH
 
 # export params
@@ -209,7 +209,7 @@ export INTERACTIVE
 # debug nvidia
 # force crashing on nccl issues like hanging broadcast
 # export NCCL_ASYNC_ERROR_HANDLING=1
-# export TORCH_NCCL_USE_COMM_NONBLOCKING=1
+export TORCH_NCCL_USE_COMM_NONBLOCKING=1
 
 # singolo nodo, 4 gpu, con e senza
 export NCCL_IB_SL=1
@@ -221,11 +221,10 @@ export NVSHMEM_DISABLE_NCCL=1
 echo "CURRENT_DIR: $CURRENT_DIR"
 echo "CONFIG_PATH: $CONFIG_PATH"
 echo "PYTHON_ENV: $PYTHON_ENV"
-echo "TRAINING_SCRIPT: $TRAINING_SCRIPT"
 
 if [ "$INTERACTIVE" = "TRUE" ]; then
     echo "Running job interactively"
-    bash ./helpers/train.slurm
+    bash ./train.slurm
 else
     echo "NODES: $NODES"
     echo "GPU_PER_NODE: $GPU_PER_NODE"
@@ -251,7 +250,7 @@ else
             --job-name=$JOB_NAME \
             --output="$STD_OUT.0" \
             --error="$STD_ERR.0" \
-            --ntasks-per-node=1 \
+            --ntasks-per-node=$GPU_PER_NODE \
             --cpus-per-task=8 \
             --gres=gpu:$GPU_PER_NODE \
             $EXCLUSIVE \
@@ -268,12 +267,12 @@ else
                 --job-name=$JOB_NAME \
                 --output="$STD_OUT.$i" \
                 --error="$STD_ERR.$i" \
-                --ntasks-per-node=1 \
+                --ntasks-per-node=$GPU_PER_NODE \
                 --cpus-per-task=8 \
                 --gres=gpu:$GPU_PER_NODE \
                 $EXCLUSIVE \
                 --dependency=afterany:$JOB_ID \
-                ./helpers/train.slurm | grep "Submitted batch job" | awk '{print $4}')
+                ./train.slurm | grep "Submitted batch job" | awk '{print $4}')
             echo "Chaining job $JOB_ID_AFTER after $JOB_ID"
             JOB_ID=$JOB_ID_AFTER
         done
@@ -286,10 +285,10 @@ else
             --job-name=$JOB_NAME \
             --output=$STD_OUT \
             --error=$STD_ERR \
-            --ntasks-per-node=1 \
+            --ntasks-per-node=$GPU_PER_NODE \
             --cpus-per-task=8 \
             --gres=gpu:$GPU_PER_NODE \
             $EXCLUSIVE \
-            ./helpers/train.slurm
+            ./train.slurm
     fi
 fi

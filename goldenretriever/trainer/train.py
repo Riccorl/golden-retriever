@@ -20,6 +20,8 @@ from omegaconf import DictConfig, OmegaConf
 from pprintpp import pformat
 from tqdm import tqdm
 
+import goldenretriever.common.dist_utils as dist
+
 from goldenretriever.callbacks.base import NLPTemplateCallback
 from goldenretriever.callbacks.evaluation_callbacks import (
     AvgRankingEvaluationCallback,
@@ -49,6 +51,9 @@ from goldenretriever.pytorch_modules.model import GoldenRetriever
 from goldenretriever.pytorch_modules.optim import RAdamW
 from goldenretriever.pytorch_modules.scheduler import LinearScheduler
 from goldenretriever.trainer.utils import PRECISION_INPUT_STR_ALIAS_CONVERSION
+
+
+from pytorch_lightning.utilities import rank_zero_only
 
 logger = get_logger(__name__)
 
@@ -143,6 +148,7 @@ class Trainer(FromConfig):
         float32_matmul_precision: str = "medium",
         **kwargs,
     ):
+        # dist.initialize_dist(dist.get_device(None))
         # put all the parameters in the class
         self.retriever = retriever
         self.document_index = document_index
@@ -549,10 +555,12 @@ class Trainer(FromConfig):
             actual_save_dir = Path(save_dir)
             if project is not None:
                 actual_save_dir = actual_save_dir / project
-            actual_save_dir.mkdir(parents=True, exist_ok=True)
-        wandb_logger = WandbLogger(
+            if rank_zero_only.rank == 0:
+                actual_save_dir.mkdir(parents=True, exist_ok=True)
+
+        wandb_kwargs = dict(
             name=name,
-            save_dir=str(actual_save_dir) ,
+            save_dir=str(actual_save_dir),
             offline=offline,
             project=project,
             log_model=log_model and not offline,
@@ -560,11 +568,16 @@ class Trainer(FromConfig):
             *args,
             **kwargs,
         )
+        wandb_logger = WandbLogger(**wandb_kwargs)
         if watch is not None and lightning_module is not None:
             watch_kwargs = dict(model=lightning_module)
             if watch is not None:
                 watch_kwargs["log"] = watch
             wandb_logger.watch(**watch_kwargs)
+
+        # update the config in wandb for all the ranks
+        # if rank_zero_only.rank == 0:
+        # wandb_logger.experiment.config.update(wandb_kwargs)
         return wandb_logger
 
     @staticmethod
@@ -605,11 +618,19 @@ class Trainer(FromConfig):
                 self.experiment_path / "checkpoints" if self.experiment_path else None
             )
         else:
-            dirpath = Path(dirpath) / self.wandb_project_name
+            dirpath = (
+                Path(dirpath) / self.wandb_project_name
+                if self.wandb_project_name
+                else Path(dirpath)
+            )
+            # also add the run id to the dirpath
+            if self.wandb_logger is not None:
+                dirpath = dirpath / self.wandb_logger.experiment.id
         if filename is None:
             filename = (
                 "checkpoint-" + monitor + "_{" + monitor + ":.4f}-epoch_{epoch:02d}"
             )
+        dirpath.mkdir(parents=True, exist_ok=True)
         self.checkpoint_path = dirpath / filename if dirpath is not None else None
         logger.info(f"Checkpoint directory: {dirpath}")
         logger.info(f"Checkpoint filename: {filename}")
@@ -642,7 +663,9 @@ class Trainer(FromConfig):
         self.callbacks_store.append(self.model_checkpoint_callback)
 
         if save_retriever:
-            self.callbacks_store.append(SaveRetrieverCallback(saving_dir=dirpath / "retriever"))
+            self.callbacks_store.append(
+                SaveRetrieverCallback(saving_dir=dirpath / "retriever")
+            )
         return self.model_checkpoint_callback
 
     def configure_hard_negatives_callback(self):
@@ -666,17 +689,14 @@ class Trainer(FromConfig):
 
     def training_callbacks(self):
         if self.model_checkpointing:
-            self.model_checkpoint_callback = self.configure_model_checkpoint(
-                **self.checkpoint_kwargs
-            )
-            # self.callbacks_store.append(self.model_checkpoint_callback)
-            if self.save_last:
-                self.latest_model_checkpoint_callback = self.configure_model_checkpoint(
-                    **self.last_checkpoint_kwargs
+            if rank_zero_only.rank == 0:
+                self.model_checkpoint_callback = self.configure_model_checkpoint(
+                    **self.checkpoint_kwargs
                 )
-                # self.callbacks_store.append(self.latest_model_checkpoint_callback)
-
-            # self.callbacks_store.append(SaveRetrieverCallback(saving_dir=))
+                if self.save_last:
+                    self.latest_model_checkpoint_callback = self.configure_model_checkpoint(
+                        **self.last_checkpoint_kwargs
+                    )
         if self.early_stopping:
             self.early_stopping_callback = self.configure_early_stopping(
                 **self.early_stopping_kwargs
@@ -757,6 +777,7 @@ class Trainer(FromConfig):
             logger.info("Instantiating Wandb Logger")
             # log the args to wandb
             # logger.info(pformat(self.wandb_kwargs))
+
             self.wandb_logger = self.configure_logger(**self.wandb_kwargs)
             self.experiment_path = None
             try:
@@ -765,7 +786,6 @@ class Trainer(FromConfig):
                 logger.info(f"Failed to get the experiment path: {e}")
 
         # set-up training specific callbacks
-        # self.callbacks_store = self.training_callbacks()
         self.training_callbacks()
         # add the evaluation callbacks
         self.callbacks_store.append(
@@ -780,7 +800,7 @@ class Trainer(FromConfig):
 
         self.callbacks_store.append(FreeUpIndexerVRAMCallback())
 
-        print(self.callbacks_store)
+        # from lightning.pytorch.plugins import TorchElasticEnvironment
 
         if self.trainer is None:
             logger.info("Instantiating the Trainer")
@@ -803,6 +823,8 @@ class Trainer(FromConfig):
                 ),
                 callbacks=self.callbacks_store,
                 logger=self.wandb_logger,
+                # plugins=TorchElasticEnvironment(),
+                # limit_train_batches=10,
                 **self.trainer_kwargs,
             )
 
@@ -904,45 +926,3 @@ class Trainer(FromConfig):
 
     def convert_to_yaml(self):
         return OmegaConf.to_yaml(cfg=to_config(self))
-
-    @classmethod
-    def to_config(cls):
-        config = {
-            "_target_": f"{cls.__class__.__module__}.{cls.__class__.__name__}",
-            "retriever": to_config(cls.retriever),
-            "train_dataset": (
-                to_config(cls.train_dataset) if cls.train_dataset is not None else None
-            ),
-            "val_dataset": (
-                to_config(cls.val_dataset) if cls.val_dataset is not None else None
-            ),
-            "test_dataset": (
-                to_config(cls.test_dataset) if cls.test_dataset is not None else None
-            ),
-            "num_workers": cls.num_workers,
-            # trainer parameters
-            "optimizer": to_config(cls.optimizer),
-            "lr": cls.lr,
-            "weight_decay": cls.weight_decay,
-            "lr_scheduler": to_config(cls.lr_scheduler),
-            "num_warmup_steps": cls.num_warmup_steps,
-            "loss": to_config(cls.loss),
-            "callbacks": (
-                to_config(cls.callbacks) if cls.callbacks is not None else None
-            ),
-            "accelerator": cls.accelerator,
-            "devices": cls.devices,
-            "num_nodes": cls.num_nodes,
-            "strategy": cls.strategy,
-            "accumulate_grad_batches": cls.accumulate_grad_batches,
-            "gradient_clip_val": cls.gradient_clip_val,
-            "val_check_interval": cls.val_check_interval,
-            "check_val_every_n_epoch": cls.check_val_every_n_epoch,
-            "max_steps": cls.max_steps,
-            "max_epochs": cls.max_epochs,
-            "deterministic": cls.deterministic,
-            "fast_dev_run": cls.fast_dev_run,
-            "precision": cls.precision,
-            "reload_dataloaders_every_n_epochs": cls.reload_dataloaders_every_n_epochs,
-            "trainer_kwargs": to_config(cls.trainer_kwargs),
-        }

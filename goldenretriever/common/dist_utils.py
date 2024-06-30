@@ -1,3 +1,4 @@
+import os
 from typing import Any, List, Optional, Sequence, TypeVar, cast
 
 import streaming.base.distributed as streaming_dist
@@ -6,6 +7,12 @@ import torch.distributed as torch_dist
 from streaming.base.world import World
 from torch._C._distributed_c10d import ProcessGroup
 import composer.utils.dist as composer_dist
+from composer.utils.device import get_device as composer_get_device
+from composer.devices import Device
+
+from goldenretriever.common.log import get_logger
+
+logger = get_logger(__name__)
 
 TObj = TypeVar("TObj")
 
@@ -15,6 +22,28 @@ def barrier() -> None:
     if torch_dist.is_available() and torch_dist.is_initialized():
         streaming_dist.barrier()
     return
+
+
+def get_device(device: str | Device | None) -> Device:
+    """Get the device to initialize distributed environment on.
+
+    Args:
+        device (Union[str, Device]): The device to initialize distributed environment on.
+
+    Returns:
+        Device: The device to initialize distributed environment on.
+    """
+    return composer_get_device(device)
+
+
+def initialize_dist(device: str | Device, timeout: float = 300.0):
+    """Initialize distributed environment.
+
+    Args:
+        device (Union[str, Device]): The device to initialize distributed environment on.
+        timeout (float, optional): Timeout for initializing distributed environment.
+    """
+    composer_dist.initialize_dist(device, timeout=timeout)
 
 
 def get_rank(group: Optional[ProcessGroup] = None) -> int:
@@ -27,7 +56,7 @@ def get_rank(group: Optional[ProcessGroup] = None) -> int:
     """
     if torch_dist.is_available() and torch_dist.is_initialized():
         return torch_dist.get_rank(group)
-    return 0
+    return int(os.getenv("LOCAL_RANK", "0"))
 
 
 def get_local_world_size() -> int:

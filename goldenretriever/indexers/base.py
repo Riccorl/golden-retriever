@@ -400,15 +400,15 @@ class BaseDocumentIndex:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        logger.info(f"Saving retriever to {output_dir}")
-        logger.info(f"Saving config to {output_dir / config_file_name}")
+        logger.info(f"Saving Index to {output_dir}")
+        logger.info(f"Saving index config to {output_dir / config_file_name}")
         # pretty print the config
         OmegaConf.save(config, output_dir / config_file_name)
         logger.info(pformat(config))
 
         # save the current state of the retriever
         embedding_path = output_dir / embedding_file_name
-        logger.info(f"Saving retriever state to {output_dir / embedding_path}")
+        logger.info(f"Saving passage vectors to {output_dir / embedding_path}")
         torch.save(self.embeddings, embedding_path)
 
         # save the passage index

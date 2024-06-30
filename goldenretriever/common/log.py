@@ -9,8 +9,6 @@ from art import text2art, tprint
 from colorama import Fore, Style, init
 from rich import get_console
 
-import goldenretriever.common.dist_utils as dist
-
 _lock = threading.Lock()
 _default_handler: Optional[logging.Handler] = None
 
@@ -169,5 +167,7 @@ def get_console_logger():
 
 def print_text_art(text: str = "golden-retriever", font: str = "larry3d", **kwargs):
     # print only in rank 0
+    import goldenretriever.common.dist_utils as dist
+
     if dist.get_rank() == 0:
         tprint(text, font=font, **kwargs)
