@@ -150,7 +150,8 @@ def broadcast(tensor: torch.Tensor, src: int) -> None:
             used to save received data otherwise.
         src (int): Source rank.
     """
-    streaming_dist.broadcast(tensor, src)
+    if torch_dist.is_available() and torch_dist.is_initialized():
+        torch_dist.broadcast(tensor, src)
 
 
 def broadcast_object_list(object_list: List[Any], src: int = 0, group=None) -> None:

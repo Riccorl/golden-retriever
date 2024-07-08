@@ -208,8 +208,8 @@ export INTERACTIVE
 
 # debug nvidia
 # force crashing on nccl issues like hanging broadcast
-# export NCCL_ASYNC_ERROR_HANDLING=1
-export TORCH_NCCL_USE_COMM_NONBLOCKING=1
+export NCCL_ASYNC_ERROR_HANDLING=1
+# export TORCH_NCCL_USE_COMM_NONBLOCKING=1
 
 # singolo nodo, 4 gpu, con e senza
 export NCCL_IB_SL=1

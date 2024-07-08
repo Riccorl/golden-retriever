@@ -63,13 +63,23 @@ check_val_every_n_epoch: 1
 # micro_batch_size: 8
 precision: "bf16"
 accelerator: "auto"
-devices: 1
+devices: 2
 # strategy: "auto"
+strategy: "ddp_find_unused_parameters_true"
 # strategy: "fsdp"
+# strategy: "deepspeed_stage_2"
 # FSDP
 # strategy:
-#   _target_: lightning.pytorch.strategies.FSDPStrategy
-#   sharding_strategy: "NO_SHARD"
+  # _target_: lightning.pytorch.strategies.FSDPStrategy
+  # sharding_strategy: "NO_SHARD"
+# DeepSpeed
+# strategy:
+#   _target_: lightning.pytorch.strategies.DeepSpeedStrategy
+#   zero_optimization: True
+#   stage: 2
+#   config:
+#     bf16:
+#       enabled: True
 
 # eval section
 metric_to_monitor: "validate_recall@{top_k}"

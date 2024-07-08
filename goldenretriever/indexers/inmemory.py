@@ -196,32 +196,32 @@ class InMemoryDocumentIndex(BaseDocumentIndex):
                 return ModelInputs(tokenized)
 
         # dataset_class = TxtStreamingDataset if self.multi_gpu_indexing else BaseDataset
-        if self.multi_gpu_indexing:
-            # here we will process the passages as MDS files to be compatible with the streaming dataset
-            # but we do it only on the rank 0, other ranks will receive the path to the processed data
-            data_path = [None]  # this is needed to broadcast the data path
-            if dist.get_rank() == 0:
-                # save data in a temp file
-                with tempfile.NamedTemporaryFile(mode="w+t", delete=False) as f:
-                    for i, sample in enumerate(data):
-                        f.write(json.dumps({"text": sample, "id": i}) + "\n")
-                    f.close()
-                    data_path = preprocess_to_mds(f.name)
-                # delete the temporary file
-                os.remove(f.name)
-                # wrap the data path in a list to broadcast it
-                data_path = [data_path]
+        # if self.multi_gpu_indexing:
+        #     # here we will process the passages as MDS files to be compatible with the streaming dataset
+        #     # but we do it only on the rank 0, other ranks will receive the path to the processed data
+        #     data_path = [None]  # this is needed to broadcast the data path
+        #     if dist.get_rank() == 0:
+        #         # save data in a temp file
+        #         with tempfile.NamedTemporaryFile(mode="w+t", delete=False) as f:
+        #             for i, sample in enumerate(data):
+        #                 f.write(json.dumps({"text": sample, "id": i}) + "\n")
+        #             f.close()
+        #             data_path = preprocess_to_mds(f.name)
+        #         # delete the temporary file
+        #         os.remove(f.name)
+        #         # wrap the data path in a list to broadcast it
+        #         data_path = [data_path]
 
-            dist.broadcast_object_list(data_path, src=0)
-            # extract the data path from the list
-            data_path = data_path[0]
-            dataset = TxtStreamingDataset(
-                name="passage", local=data_path, batch_size=batch_size
-            )
-        else:
-            dataset = BaseDataset(
-                name="passage", data=[{"text": x, "id": i} for i, x in enumerate(data)]
-            )
+        #     dist.broadcast_object_list(data_path, src=0)
+        #     # extract the data path from the list
+        #     data_path = data_path[0]
+        #     dataset = TxtStreamingDataset(
+        #         name="passage", local=data_path, batch_size=batch_size
+        #     )
+        # else:
+        dataset = BaseDataset(
+            name="passage", data=[{"text": x, "id": i} for i, x in enumerate(data)]
+        )
 
         dataloader = DataLoader(
             # BaseDataset(name="passage", data=data),
@@ -242,30 +242,30 @@ class InMemoryDocumentIndex(BaseDocumentIndex):
 
         passage_embeddings_dict: Dict[int, torch.Tensor] = {}
 
-        if self.multi_gpu_indexing or dist.get_rank() == 0:
-            with get_autocast_context(encoder_device, encoder_precision):
-                # Iterate through each batch in the dataloader
-                for batch in tqdm(
-                    dataloader, desc=f"Indexing at rank {dist.get_rank()}"
-                ):
-                    # Move the batch to the device
-                    passages_ids = batch.pop("id")
-                    batch: ModelInputs = batch.to(encoder_device)
-                    # Compute the passage embeddings
-                    passage_outs = encoder(**batch).pooler_output
-                    # Append the passage embeddings to the list
-                    if self.device == "cpu":
-                        passage_embeddings_dict.update(
-                            {
-                                i: c.detach().cpu()
-                                for i, c in zip(passages_ids, passage_outs)
-                            }
-                        )
-                    else:
-                        # passage_embeddings.extend([c for c in passage_outs])
-                        passage_embeddings_dict.update(
-                            {i: c for i, c in zip(passages_ids, passage_outs)}
-                        )
+        # if self.multi_gpu_indexing or dist.get_rank() == 0:
+        with get_autocast_context(encoder_device, encoder_precision):
+            # Iterate through each batch in the dataloader
+            for batch in tqdm(
+                dataloader, desc=f"Indexing at rank {dist.get_rank()}"
+            ):
+                # Move the batch to the device
+                passages_ids = batch.pop("id")
+                batch: ModelInputs = batch.to(encoder_device)
+                # Compute the passage embeddings
+                passage_outs = encoder(**batch).pooler_output
+                # Append the passage embeddings to the list
+                if self.device == "cpu":
+                    passage_embeddings_dict.update(
+                        {
+                            i: c.detach().cpu()
+                            for i, c in zip(passages_ids, passage_outs)
+                        }
+                    )
+                else:
+                    # passage_embeddings.extend([c for c in passage_outs])
+                    passage_embeddings_dict.update(
+                        {i: c for i, c in zip(passages_ids, passage_outs)}
+                    )
 
         # move the passage embeddings to the CPU if not already done
         # the move to cpu and then to gpu is needed to avoid OOM when using mixed precision
@@ -276,44 +276,48 @@ class InMemoryDocumentIndex(BaseDocumentIndex):
             }
         # synchronize the processes
         dist.barrier()
-        if dist.get_rank() == 0:
-            if self.multi_gpu_indexing:
-                logger.debug(f"All-gathering embeddings at rank {dist.get_rank()}")
-                passage_embeddings_dict = dist.all_gather_object(
-                    passage_embeddings_dict
-                )
-                logger.debug(f"Received embeddings at rank {dist.get_rank()}")
+        # if dist.get_rank() == 0:
+        #     if self.multi_gpu_indexing:
+        #         logger.debug(f"All-gathering embeddings at rank {dist.get_rank()}")
+        #         passage_embeddings_dict = dist.all_gather_object(
+        #             passage_embeddings_dict
+        #         )
+        #         logger.debug(f"Received embeddings at rank {dist.get_rank()}")
 
-                # merge the passage embeddings from all the devices
-                passage_embeddings = {}
-                for d in passage_embeddings_dict:
-                    passage_embeddings.update(d)
+        #         # merge the passage embeddings from all the devices
+        #         passage_embeddings = {}
+        #         for d in passage_embeddings_dict:
+        #             passage_embeddings.update(d)
 
-                # order the passage embeddings based on the passage ids
-                passage_embeddings = dict(
-                    sorted(passage_embeddings.items(), key=lambda x: x[0])
-                )
-            else:
-                passage_embeddings = passage_embeddings_dict
+        #         # order the passage embeddings based on the passage ids
+        #         passage_embeddings = dict(
+        #             sorted(passage_embeddings.items(), key=lambda x: x[0])
+        #         )
+        #     else:
+        passage_embeddings = passage_embeddings_dict
 
-            # extract the embeddings
-            passage_embeddings = list(passage_embeddings.values())
-            # stack it
-            logger.debug(f"Stacking embeddings at rank {dist.get_rank()}")
-            passage_embeddings: torch.Tensor = torch.stack(passage_embeddings, dim=0)
+        # extract the embeddings
+        passage_embeddings = list(passage_embeddings.values())
+        # stack it
+        logger.debug(f"Stacking embeddings at rank {dist.get_rank()}")
+        passage_embeddings: torch.Tensor = torch.stack(passage_embeddings, dim=0)
 
-            # move the passage embeddings to the gpu if needed
-            if not self.device == "cpu":
-                passage_embeddings = passage_embeddings.to(
-                    PRECISION_MAP[self.precision]
-                )
-                if self.device != passage_embeddings.device:
-                    passage_embeddings = passage_embeddings.to(self.device)
+        # move the passage embeddings to the gpu if needed
+        if not self.device == "cpu":
+            passage_embeddings = passage_embeddings.to(
+                PRECISION_MAP[self.precision]
+            )
+            if self.device != passage_embeddings.device:
+                passage_embeddings = passage_embeddings.to(self.device)
 
-            self.embeddings = passage_embeddings
-            del passage_embeddings
-            logger.debug(f"Broadcasting embeddings at rank {dist.get_rank()}")
-            dist.broadcast_object_list([self.embeddings], src=0)
+            # logger.debug(f"Broadcasting embeddings at rank {dist.get_rank()}")
+            # dist.broadcast(passage_embeddings, src=0)
+        
+        # dist.barrier()
+        self.embeddings = passage_embeddings
+        del passage_embeddings
+        # logger.debug(f"Broadcasting embeddings at rank {dist.get_rank()}")
+        # dist.broadcast(self.embeddings, src=0)
 
         return self
 

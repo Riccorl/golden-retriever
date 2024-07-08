@@ -351,6 +351,9 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
         positives = _get_passages(
             sample["positive_ctxs"], metadata_fields, metadata_separator
         )
+        all_positives = _get_passages(
+            sample["positive_ctxs"], metadata_fields, metadata_separator
+        )
         if shuffle_passages:
             random.shuffle(positives)
         if max_positives != -1:
@@ -387,9 +390,13 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
         passage = passage_tokenizer(
             passage, max_length=max_passage_length, truncation=True
         )
+        all_positives = passage_tokenizer(
+            all_positives, max_length=max_passage_length, truncation=True
+        )
 
         # invert the passage data structure from a dict of lists to a list of dicts
         passage = [dict(zip(passage, t)) for t in zip(*passage.values())]
+        all_positives = [dict(zip(all_positives, t)) for t in zip(*all_positives.values())]
 
         output = dict(
             id=sample["id"],
@@ -399,6 +406,7 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
             positives=positives,
             negatives=negatives,
             hard_negatives=hard_negatives,
+            all_positives=all_positives,
         )
         return output
 
@@ -685,6 +693,8 @@ class GoldenRetrieverCollator:
                     }
                 )
 
+        all_positives = [s["all_positives"] for s in batch]
+
         batch = ModelInputs(
             dict(
                 sample_idx=[s["id"] for s in batch],
@@ -709,11 +719,14 @@ class GoldenRetrieverCollator:
         )
         # iterate over the questions and set the labels to 1 if the passage is positive
         for sample_idx in range(len(questions["input_ids"])):
-            for pssg in batch["positives_pssgs"][sample_idx]:
+            # for pssg in all_positives[sample_idx]:
+            # for pssg in batch["positives_pssgs"][sample_idx]:
+            for pssg in all_positives[sample_idx]:
                 # get the index of the positive passage
-                index = passage_index[tuple(pssg["input_ids"])]
-                # set the label to 1
-                labels[sample_idx, index] = 1
+                index = passage_index.get(tuple(pssg["input_ids"]), None)
+                if index is not None:
+                    # set the label to 1
+                    labels[sample_idx, index] = 1
 
         model_inputs = ModelInputs(
             {
