@@ -30,6 +30,35 @@ cd golden-retriever
 pip install -e .
 ```
 
+### FAISS
+
+Install with optional dependencies for [FAISS](https://github.com/facebookresearch/faiss)
+
+FAISS pypi package is only available for CPU. If you want to use GPU, you need to install it from source or use the conda package.
+
+For CPU:
+
+```bash
+pip install goldenretriever-core[faiss]
+```
+
+For GPU:
+
+```bash
+conda create -n goldenretriever python=3.11
+conda activate goldenretriever
+
+# install pytorch
+conda install -y pytorch=2.3.1 pytorch-cuda=12.1 -c pytorch -c nvidia
+
+# GPU
+conda install -y -c pytorch -c nvidia faiss-gpu=1.8.0
+# or GPU with NVIDIA RAFT
+conda install -y -c pytorch -c nvidia -c rapidsai -c conda-forge faiss-gpu-raft=1.8.0
+
+pip install goldenretriever-core
+```
+
 # Usage
 
 Golden Retriever is built on top of PyTorch Lightning and Hydra. To run an experiment, you need to create a configuration file and pass 
