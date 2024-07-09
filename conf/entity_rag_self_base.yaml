@@ -1,0 +1,119 @@
+# model section
+retriever:
+  _target_: goldenretriever.GoldenRetriever
+  # question_encoder: "intfloat/e5-base-v2"
+  question_encoder: "/leonardo_work/IscrC_DELEE/entity-rag/hf_models/e5-base-v2"
+  # question_encoder: "/leonardo_work/IscrC_DELEE/models/riccorl/e5-base-v2-blink-1M-32words-windows"
+  attn_implementation: "sdpa"
+  use_hf_model: False
+
+document_index:
+  _target_: goldenretriever.indexers.inmemory.InMemoryDocumentIndex
+  documents:
+    _target_: goldenretriever.indexers.document.DocumentStore
+    # file_path: "/leonardo_scratch/fast/IscrC_DELEE/data/retriever/aida-context-21june-top30/aida+ood_contexts_en.similarity.goldenindex.21-june.top-30.fix.onlyaida.jsonl"
+  device: "cuda"
+  precision: "bf16"
+  multi_gpu_indexing: False
+
+# data section
+train_dataset:
+  _target_: goldenretriever.data.datasets.GoldenRetrieverStreamingDataset
+  name: "train_dataset"
+  local: "/leonardo_work/IscrC_DELEE/entity-rag/data/aida+ood+zelda_contexts_en.similarity.goldenindex.06-july.top-10.dpr.jsonl"
+  shuffle: True # force shuffle True for training
+  shuffle_seed: 42
+  predownload: 2048 # (64*32)
+  max_question_length: 256
+  max_passage_length: 256
+  # max_positives: 15
+  # max_negatives: 15
+  batch_size: 32
+  shuffle_passages: True
+  preprocess: False
+
+val_dataset:
+  - _target_: goldenretriever.data.datasets.GoldenRetrieverStreamingDataset
+    name: "val_dataset"
+    local: "/leonardo_scratch/fast/IscrC_DELEE/data/retriever/aida-context-21june-top30/dpr-format/aida-dev-kilt-Wikipedia.DM.v4.jsonl"
+    shuffle: False # force shuffle True for training
+    shuffle_seed: 42
+    predownload: 2048 # (64*32)
+    max_question_length: 256
+    max_passage_length: 256
+    # max_positives: 15
+    # max_negatives: 15
+    batch_size: 32
+    shuffle_passages: True
+    preprocess: False
+
+num_workers: 8  # 4 * num gpus
+
+# optimizer section
+optimizer: goldenretriever.pytorch_modules.optim.RAdamW
+lr: 2e-5
+weight_decay: 0.01
+lr_scheduler: goldenretriever.pytorch_modules.scheduler.LinearScheduler
+max_steps: 1_000_000
+# max_epochs: 1
+accumulate_grad_batches: 1
+gradient_clip_val: 1.0
+deterministic: False
+num_sanity_val_steps: 0
+val_check_interval: 1.0
+check_val_every_n_epoch: 1
+
+# compute section
+# micro_batch_size: 8
+precision: "bf16"
+accelerator: "auto"
+devices: 4
+# strategy: "auto"
+# strategy: "ddp_find_unused_parameters_true"
+# strategy: "fsdp"
+# FSDP
+strategy:
+  _target_: lightning.pytorch.strategies.FSDPStrategy
+  sharding_strategy: "NO_SHARD"
+
+# eval section
+metric_to_monitor: "validate_recall@{top_k}"
+monitor_mode: "max"
+top_k: 100
+# prediction section
+prediction_batch_size: 1024
+# hard negatives section
+max_hard_negatives_to_mine: 0
+hard_negatives_threshold: 0.0
+mine_hard_negatives_with_probability: 1.0
+
+# early section
+early_stopping: true
+early_stopping_patience: 10
+early_stopping_kwargs: null
+
+# logging section
+log_to_wandb: true
+wandb_entity: null
+wandb_save_dir:  "/leonardo_work/IscrC_DELEE/entity-rag/retriever/experiments/"
+wandb_experiment_name: "aida-e5-base-v2-index-8-july-self"
+wandb_project_name: "golden-retriever-entity-rag"
+wandb_online_mode: false
+wandb_kwargs: null
+
+# checkpointing section
+model_checkpointing: true
+checkpoint_dir: "/leonardo_work/IscrC_DELEE/entity-rag/retriever/experiments/checkpoints"
+save_top_k: 1
+checkpoint_kwargs: null
+resume_from_checkpoint_path: null
+
+# additional kwargs to pass to the Lightning Trainer
+lightning_trainer_kwargs: null
+
+# other parameters
+seed: 42
+float32_matmul_precision: "high"
+
+# to use for Trainer.test()
+test_kwargs: null

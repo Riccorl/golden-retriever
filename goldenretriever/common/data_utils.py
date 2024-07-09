@@ -21,6 +21,8 @@ from streaming import MDSWriter
 from streaming.base.format import get_index_basename
 from tqdm import tqdm
 
+from torch.utils.data import DataLoader
+
 from goldenretriever.common.hf_utils import build_hf_dataset
 from goldenretriever.common.log import get_logger
 from goldenretriever.common.utils import (
@@ -262,8 +264,34 @@ def preprocess_to_mds(
         dataset = dataset.map(tokenizer_fn, desc="Tokenizing data")
 
     columns = {col: "pkl" for col in dataset.column_names}
+    # dataloader = DataLoader(
+    #     dataset=dataset,
+    #     sampler=None,
+    #     batch_size=512,
+    #     num_workers=num_workers,
+    # )
+    # samples = generate_samples(dataloader)
     with MDSWriter(columns=columns, out=str(cache_path)) as out:
+        # for sample in tqdm(samples, desc=f"Converting {source} to MDS"):
         for sample in tqdm(dataset, desc=f"Converting {source} to MDS"):
             out.write(sample)
 
     return str(cache_path)
+
+
+def generate_samples(loader: DataLoader) -> Iterable[Dict[str, bytes]]:
+    """Generator over samples of a dataloader.
+
+    Args:
+       loader (DataLoader): A dataloader emitting batches like {key: [sample0_bytes, sample1_bytes, sample2_bytes, ...]}
+
+    Yields:
+        Sample dicts.
+    """
+    for batch in loader:
+        # invert batch from dict of list to list of dict
+        batch = [dict(zip(batch, t)) for t in zip(*batch.values())]
+        for sample in batch:
+            print(sample)
+            exit()
+            yield sample

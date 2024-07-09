@@ -714,6 +714,7 @@ class GoldenRetrieverCollator:
         passage_index = {tuple(c["input_ids"]): i for i, c in enumerate(batch.passages)}
 
         # now we can create the labels
+        
         labels = torch.zeros(
             questions["input_ids"].shape[0], passages["input_ids"].shape[0]
         )

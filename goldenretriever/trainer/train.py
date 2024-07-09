@@ -137,6 +137,7 @@ class Trainer(FromConfig):
         save_last: bool = False,
         checkpoint_kwargs: dict | None = None,
         # prediction callback parameters
+        skip_eval: bool = False,
         prediction_batch_size: int = 128,
         # hard negatives callback parameters
         max_hard_negatives_to_mine: int = 15,
@@ -216,6 +217,7 @@ class Trainer(FromConfig):
         self.save_last = save_last
         self.checkpoint_kwargs = checkpoint_kwargs
         # prediction callback parameters
+        self.skip_eval = skip_eval
         self.prediction_batch_size = prediction_batch_size
         # hard negatives callback parameters
         self.max_hard_negatives_to_mine = max_hard_negatives_to_mine
@@ -788,12 +790,13 @@ class Trainer(FromConfig):
         # set-up training specific callbacks
         self.training_callbacks()
         # add the evaluation callbacks
-        self.callbacks_store.append(
-            self.configure_prediction_callbacks(
-                batch_size=self.prediction_batch_size,
-                precision=self.precision,
+        if not self.skip_eval:
+            self.callbacks_store.append(
+                self.configure_prediction_callbacks(
+                    batch_size=self.prediction_batch_size,
+                    precision=self.precision,
+                )
             )
-        )
         # add the hard negatives callback after the evaluation callback
         if self.max_hard_negatives_to_mine > 0:
             self.callbacks_store.append(self.configure_hard_negatives_callback())
