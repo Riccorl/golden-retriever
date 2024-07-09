@@ -16,7 +16,7 @@
 
 # How to use
 
-Install the library from [PyPI](https://pypi.org/project/goldenretriever-core/):
+Install the library from [PyPi](https://pypi.org/project/goldenretriever-core/):
 
 ```bash
 pip install goldenretriever-core
@@ -32,59 +32,19 @@ pip install -e .
 
 # Usage
 
-## How to run an experiment
+Golden Retriever is built on top of PyTorch Lightning and Hydra. To run an experiment, you need to create a configuration file and pass 
+it to the `golden-retriever` command. Few examples are provided in the `conf` folder.
 
-### Training
+## Training
 
 Here a simple example on how to train a DPR-like Retriever on the NQ dataset.
 First download the dataset from [DPR](https://github.com/facebookresearch/DPR?tab=readme-ov-file#retriever-input-data-format). The run the following code:
 
-```python
-from goldenretriever.trainer import Trainer
-from goldenretriever import GoldenRetriever
-from goldenretriever.data.datasets import InBatchNegativesDataset
-
-# create a retriever
-retriever = GoldenRetriever(
-    question_encoder="intfloat/e5-small-v2",
-    passage_encoder="intfloat/e5-small-v2"
-)
-
-# create a dataset
-train_dataset = InBatchNegativesDataset(
-    name="webq_train",
-    path="path/to/webq_train.json",
-    tokenizer=retriever.question_tokenizer,
-    question_batch_size=64,
-    passage_batch_size=400,
-    max_passage_length=64,
-    shuffle=True,
-)
-val_dataset = InBatchNegativesDataset(
-    name="webq_dev",
-    path="path/to/webq_dev.json",
-    tokenizer=retriever.question_tokenizer,
-    question_batch_size=64,
-    passage_batch_size=400,
-    max_passage_length=64,
-)
-
-trainer = Trainer(
-    retriever=retriever,
-    train_dataset=train_dataset,
-    val_dataset=val_dataset,
-    max_steps=25_000,
-    wandb_online_mode=True,
-    wandb_project_name="golden-retriever-dpr",
-    wandb_experiment_name="e5-small-webq",
-    max_hard_negatives_to_mine=5,
-)
-
-# start training
-trainer.train()
+```bash
+golden-retriever train conf/nq-dpr.yaml
 ```
 
-### Evaluation
+## Evaluation
 
 ```python
 from goldenretriever.trainer import Trainer
@@ -115,6 +75,22 @@ trainer = Trainer(
 )
 
 trainer.test()
+```
+
+### Distributed environment
+
+Golden Retriever supports distributed training. For the moment, it is only possible to train on a single node with multiple GPUs and without model sharding, i.e.
+only DDP and FSDP with `NO_SHARD` strategy are supported.
+
+To run a distributed training, just add the following keys to the configuration file:
+
+```yaml
+devices: 4  # number of GPUs
+# strategy: "ddp_find_unused_parameters_true"  # DDP
+# FSDP with NO_SHARD
+strategy:
+  _target_: lightning.pytorch.strategies.FSDPStrategy
+  sharding_strategy: "NO_SHARD"
 ```
 
 ## Inference
