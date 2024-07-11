@@ -494,11 +494,17 @@ class InBatchNegativesDataset(GoldenRetrieverDataset):
         if max_positives != -1:
             positives = positives[:max_positives]
 
-        negatives = list(set([n["text"] for n in sample["negative_ctxs"]]))
+        if "negative_ctxs" in sample:
+            negatives = list(set([n["text"] for n in sample["negative_ctxs"]]))
+        else:
+            negatives = []
         if max_negatives != -1:
             negatives = negatives[:max_negatives]
 
-        hard_negatives = list(set([h["text"] for h in sample["hard_negative_ctxs"]]))
+        if "hard_negative_ctxs" in sample:
+            hard_negatives = list(set([h["text"] for h in sample["hard_negative_ctxs"]]))
+        else:
+            hard_negatives = []
         if max_hard_negatives != -1:
             hard_negatives = hard_negatives[:max_hard_negatives]
 
