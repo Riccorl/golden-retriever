@@ -100,7 +100,7 @@ if [ -z "$NODES" ]; then
 fi
 
 if [ -z "$MODULES" ]; then
-    MODULES="profile/deeplrn cuda/12.1"
+    MODULES="cuda/12.1"
 fi
 
 if [ -z "$TIME" ]; then
@@ -212,10 +212,10 @@ export INTERACTIVE
 # export TORCH_NCCL_USE_COMM_NONBLOCKING=1
 
 # singolo nodo, 4 gpu, con e senza
-# export NCCL_IB_SL=1
-# export UCX_IB_SL=1
-# export NVSHMEM_IB_SL=1
-# export NVSHMEM_DISABLE_NCCL=1
+export NCCL_IB_SL=1
+export UCX_IB_SL=1
+export NVSHMEM_IB_SL=1
+export NVSHMEM_DISABLE_NCCL=1
 
 cat <<EOF
 

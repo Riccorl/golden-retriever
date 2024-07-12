@@ -95,19 +95,22 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
                 kwargs = self.train_dataset
             else:
                 logger.debug("No data path found, skipping preprocessing")
-            dataset_class = kwargs.get("_target_", GoldenRetrieverStreamingDataset)
 
-            preprocessing_fn = None
-            if kwargs.get("preprocess", False):
-                preprocessing_fn = partial(
-                    dataset_class.tokenize,
-                    **{
-                        "question_tokenizer": self.question_tokenizer,
-                        "passage_tokenizer": self.passage_tokenizer,
-                        **kwargs,
-                    },
-                )
-            preprocess_to_mds(data_path, preprocessing_fn)
+            if data_path:
+                logger.debug(f"Building train dataset from {data_path}")
+
+                dataset_class = kwargs.get("_target_", GoldenRetrieverStreamingDataset)
+                preprocessing_fn = None
+                if kwargs.get("preprocess", False):
+                    preprocessing_fn = partial(
+                        dataset_class.tokenize,
+                        **{
+                            "question_tokenizer": self.question_tokenizer,
+                            "passage_tokenizer": self.passage_tokenizer,
+                            **kwargs,
+                        },
+                    )
+                preprocess_to_mds(data_path, preprocessing_fn)
 
         if self.val_datasets is not None:
             for i, dataset in enumerate(self.val_datasets):
@@ -121,19 +124,24 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
                     kwargs = dataset
                 else:
                     logger.debug("No data path found, skipping preprocessing")
-                dataset_class = kwargs.get("_target_", GoldenRetrieverStreamingDataset)
 
-                preprocessing_fn = None
-                if kwargs.get("preprocess", False):
-                    preprocessing_fn = partial(
-                        dataset_class.tokenize,
-                        **{
-                            "question_tokenizer": self.question_tokenizer,
-                            "passage_tokenizer": self.passage_tokenizer,
-                            **kwargs,
-                        },
+                if data_path:
+                    logger.debug(f"Building val dataset from {data_path}")
+
+                    dataset_class = kwargs.get(
+                        "_target_", GoldenRetrieverStreamingDataset
                     )
-                preprocess_to_mds(data_path, preprocessing_fn)
+                    preprocessing_fn = None
+                    if kwargs.get("preprocess", False):
+                        preprocessing_fn = partial(
+                            dataset_class.tokenize,
+                            **{
+                                "question_tokenizer": self.question_tokenizer,
+                                "passage_tokenizer": self.passage_tokenizer,
+                                **kwargs,
+                            },
+                        )
+                    preprocess_to_mds(data_path, preprocessing_fn)
 
         if self.test_datasets is not None:
             for dataset in self.test_datasets:
@@ -147,19 +155,24 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
                     kwargs = dataset
                 else:
                     logger.debug("No data path found, skipping preprocessing")
-                dataset_class = kwargs.get("_target_", GoldenRetrieverStreamingDataset)
 
-                preprocessing_fn = None
-                if kwargs.get("preprocess", False):
-                    preprocessing_fn = partial(
-                        dataset_class.tokenize,
-                        **{
-                            "question_tokenizer": self.question_tokenizer,
-                            "passage_tokenizer": self.passage_tokenizer,
-                            **self.test_datasets_kwargs[i],
-                        },
+                if data_path:
+                    logger.debug(f"Building test dataset from {data_path}")
+
+                    dataset_class = kwargs.get(
+                        "_target_", GoldenRetrieverStreamingDataset
                     )
-                preprocess_to_mds(data_path, preprocessing_fn)
+                    preprocessing_fn = None
+                    if kwargs.get("preprocess", False):
+                        preprocessing_fn = partial(
+                            dataset_class.tokenize,
+                            **{
+                                "question_tokenizer": self.question_tokenizer,
+                                "passage_tokenizer": self.passage_tokenizer,
+                                **self.test_datasets_kwargs[i],
+                            },
+                        )
+                    preprocess_to_mds(data_path, preprocessing_fn)
 
     def setup(self, stage: str | None = None):
 
@@ -167,9 +180,9 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
         os.environ["LOCAL_WORLD_SIZE"] = str(dist.get_local_world_size())
         os.environ["RANK"] = str(dist.get_rank())
 
-        # logger.debug(f"World size: {os.environ['WORLD_SIZE']}")
-        # logger.debug(f"Local world size: {os.environ['LOCAL_WORLD_SIZE']}")
-        # logger.debug(f"Rank: {os.environ['RANK']}")
+        logger.debug(f"World size: {os.environ['WORLD_SIZE']}")
+        logger.debug(f"Local world size: {os.environ['LOCAL_WORLD_SIZE']}")
+        logger.debug(f"Rank: {os.environ['RANK']}")
 
         if stage == "fit" or stage is None:
             # usually there is only one dataset for train
@@ -381,14 +394,14 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
 
     @staticmethod
     def dataset_builder(
-        dataset: str | GoldenRetrieverStreamingDataset = None,
-        name: str = None,
-        batch_size: int = None,
-        question_tokenizer: tr.PreTrainedTokenizerBase = None,
-        passage_tokenizer: tr.PreTrainedTokenizerBase = None,
-        shuffle: bool = None,
-        shuffle_seed: int = None,
-        dataset_kwargs: dict = None,
+        dataset: str | GoldenRetrieverStreamingDataset | None = None,
+        name: str | None = None,
+        batch_size: int | None = None,
+        question_tokenizer: tr.PreTrainedTokenizerBase | None = None,
+        passage_tokenizer: tr.PreTrainedTokenizerBase | None = None,
+        shuffle: bool | None = None,
+        shuffle_seed: int | None = None,
+        dataset_kwargs: dict | None = None,
     ):
         dataset = dataset or dataset_kwargs.get("local", None)
         if dataset is None:

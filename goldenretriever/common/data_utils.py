@@ -238,7 +238,7 @@ def preprocess_to_mds(
     # the file is already here, return it
     if use_cache and file_exists(cache_path):  # and not force_download:
         logger.info(
-            f"{source} found in cache."  # , set `force_download=True` to force the download"
+            f"{source} found in cache at {cache_path}, using cached file."
         )
         return str(cache_path)
 
@@ -292,6 +292,4 @@ def generate_samples(loader: DataLoader) -> Iterable[Dict[str, bytes]]:
         # invert batch from dict of list to list of dict
         batch = [dict(zip(batch, t)) for t in zip(*batch.values())]
         for sample in batch:
-            print(sample)
-            exit()
             yield sample

@@ -26,8 +26,6 @@ train_dataset:
   predownload: 2048 # (64*32)
   max_question_length: 256
   max_passage_length: 256
-  # max_positives: 15
-  # max_negatives: 15
   batch_size: 32
   shuffle_passages: True
   preprocess: False
@@ -41,9 +39,9 @@ val_dataset:
     predownload: 2048 # (64*32)
     max_question_length: 256
     max_passage_length: 256
-    # max_positives: 15
-    # max_negatives: 15
-    batch_size: 32
+    max_positives: 30
+    max_negatives: 0
+    batch_size: 64
     shuffle_passages: True
     preprocess: False
 
@@ -54,9 +52,9 @@ optimizer: goldenretriever.pytorch_modules.optim.RAdamW
 lr: 2e-5
 weight_decay: 0.01
 lr_scheduler: goldenretriever.pytorch_modules.scheduler.LinearScheduler
-max_steps: 1_000_000
+max_steps: 100_000
 # max_epochs: 1
-accumulate_grad_batches: 1
+accumulate_grad_batches: 4
 gradient_clip_val: 1.0
 deterministic: False
 num_sanity_val_steps: 0
@@ -65,19 +63,21 @@ check_val_every_n_epoch: 1
 
 # compute section
 # micro_batch_size: 8
+automatic_optimization: True
 precision: "bf16"
 accelerator: "auto"
 devices: 4
 # strategy: "auto"
-# strategy: "ddp_find_unused_parameters_true"
+strategy: "ddp_find_unused_parameters_true"
 # strategy: "fsdp"
 # FSDP
-strategy:
-  _target_: lightning.pytorch.strategies.FSDPStrategy
-  sharding_strategy: "NO_SHARD"
+# strategy:
+#   _target_: lightning.pytorch.strategies.FSDPStrategy
+#   sharding_strategy: "NO_SHARD"
 
 # eval section
-metric_to_monitor: "validate_recall@{top_k}"
+skip_eval: True
+metric_to_monitor: "val_loss"
 monitor_mode: "max"
 top_k: 100
 # prediction section
@@ -96,7 +96,7 @@ early_stopping_kwargs: null
 log_to_wandb: true
 wandb_entity: null
 wandb_save_dir:  "/leonardo_work/IscrC_DELEE/entity-rag/retriever/experiments/"
-wandb_experiment_name: "aida-e5-base-v2-index-8-july-self"
+wandb_experiment_name: "e5-base-v2-index-8-july-self-wikipedia"
 wandb_project_name: "golden-retriever-entity-rag"
 wandb_online_mode: false
 wandb_kwargs: null
@@ -104,7 +104,7 @@ wandb_kwargs: null
 # checkpointing section
 model_checkpointing: true
 checkpoint_dir: "/leonardo_work/IscrC_DELEE/entity-rag/retriever/experiments/checkpoints"
-save_top_k: 1
+save_top_k: -1
 checkpoint_kwargs: null
 resume_from_checkpoint_path: null
 

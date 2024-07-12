@@ -144,19 +144,17 @@ retriever.retrieve("What is the capital of France?", k=5)
 The retriever expects a jsonl file similar to [DPR](https://github.com/facebookresearch/DPR):
 
 ```json lines
-[
-  {
-  "question": "....",
-  "answers": ["...", "...", "..."],
-  "positive_ctxs": [{
-    "title": "...",
-    "text": "...."
-  }],
-  "negative_ctxs": ["..."],
-  "hard_negative_ctxs": ["..."]
-  },
-  ...
-]
+{
+"question": "....",
+"answers": ["...", "...", "..."],
+"positive_ctxs": [{
+  "title": "...",
+  "text": "...."
+}],
+"negative_ctxs": ["..."],
+"hard_negative_ctxs": ["..."]
+},
+...
 ```
 
 ### Index data
@@ -171,14 +169,12 @@ The document to index can be either a jsonl file or a tsv file similar to
 jsonl example:
 
 ```json lines
-[
-  {
-    "id": "...",
-    "text": "...",
-    "metadata": ["{...}"]
-  },
-  ...
-]
+{
+  "id": "...",
+  "text": "...",
+  "metadata": ["{...}"]
+},
+...
 ```
 
 tsv example:

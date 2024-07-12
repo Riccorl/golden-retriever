@@ -19,6 +19,7 @@ class GoldenRetrieverPLModule(pl.LightningModule):
         optimizer: Union[torch.optim.Optimizer, DictConfig],
         lr_scheduler: Union[torch.optim.lr_scheduler.LRScheduler, DictConfig] = None,
         micro_batch_size: int | None = None,
+        automatic_optimization: bool = True,
         *args,
         **kwargs,
     ) -> None:
@@ -35,7 +36,7 @@ class GoldenRetrieverPLModule(pl.LightningModule):
         self.lr_scheduler_config = lr_scheduler
         self.micro_batch_size = micro_batch_size
 
-        # self.automatic_optimization = False
+        self.automatic_optimization = automatic_optimization
         self.loss = None
 
     def forward(self, **kwargs) -> dict:
@@ -53,24 +54,26 @@ class GoldenRetrieverPLModule(pl.LightningModule):
     def training_step(self, batch: ModelInputs, batch_idx: int) -> torch.Tensor:
         # apply hard negative algorithm
         batch = self.hn_algo(batch, self)
-        # split the batch into micro-batches
-        # micro_batches = self.trainer.train_dataloader.collate_fn.split_batch(
-        #     batch, self.micro_batch_size
-        # )
-        # accumulate_micro_batches = len(micro_batches)
-        # cumulative_loss = torch.tensor(0.0, device=self.device)
-        # for mb in micro_batches:
-        #     forward_output = self.forward(**mb, return_loss=True)
-        #     # scale losses by the number of micro-batches
-        #     loss = forward_output["loss"] / accumulate_micro_batches
-        #     # self.manual_backward(loss)
-        #     # accumulate loss over micro-batches for logging
-        #     cumulative_loss += loss
 
-        # self.loss = cumulative_loss
+        if self.automatic_optimization:
+            forward_output = self.forward(**batch, return_loss=True)
+            cumulative_loss = forward_output["loss"]
+        else:
+            # split the batch into micro-batches
+            micro_batches = self.trainer.train_dataloader.collate_fn.split_batch(
+                batch, self.micro_batch_size
+            )
+            accumulate_micro_batches = len(micro_batches)
+            cumulative_loss = torch.tensor(0.0, device=self.device)
+            for mb in micro_batches:
+                forward_output = self.forward(**mb, return_loss=True)
+                # scale losses by the number of micro-batches
+                loss = forward_output["loss"] / accumulate_micro_batches
+                # self.manual_backward(loss)
+                # accumulate loss over micro-batches for logging
+                cumulative_loss += loss
 
-        forward_output = self.forward(**batch, return_loss=True)
-        cumulative_loss = forward_output["loss"]
+            self.loss = cumulative_loss
 
         # log info
         self.log(
@@ -87,22 +90,27 @@ class GoldenRetrieverPLModule(pl.LightningModule):
             prog_bar=True,
             sync_dist=True,
         )
-        return cumulative_loss  # forward_output["loss"]
+        return cumulative_loss
 
-    # def on_train_batch_end(self, outputs, batch, batch_idx):
-    #     # get the optimizer
-    #     opt = self.optimizers()
-    #     opt.zero_grad()
-    #     self.manual_backward(self.loss)
-    #     # clip gradients
-    #     self.clip_gradients(opt, gradient_clip_val=1.0, gradient_clip_algorithm="value")
-    #     # update weights
-    #     opt.step()
-    #     # update lr schedulers
-    #     sch = self.lr_schedulers()
-    #     sch.step()
-    #     # reset the loss
-    #     self.loss = None
+    def on_train_batch_end(self, outputs, batch, batch_idx):
+        if not self.automatic_optimization:
+            # get the optimizer
+            opt = self.optimizers()
+            opt.zero_grad()
+            self.manual_backward(self.loss)
+            # clip gradients
+            self.clip_gradients(
+                opt, gradient_clip_val=1.0, gradient_clip_algorithm="value"
+            )
+            # update weights
+            opt.step()
+            # update lr schedulers
+            sch = self.lr_schedulers()
+            sch.step()
+            # reset the loss
+            self.loss = None
+        else:
+            super().on_train_batch_end(outputs, batch, batch_idx)
 
     def validation_step(self, batch: ModelInputs, batch_idx: int) -> None:
         forward_output = self.forward(**batch, return_loss=True)

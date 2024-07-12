@@ -93,6 +93,7 @@ class Trainer(FromConfig):
         num_warmup_steps: int = 0,
         loss: torch.nn.Module = MultiLabelNCELoss,
         micro_batch_size: int | None = None,
+        automatic_optimization: bool = True,
         callbacks: list | None = None,
         accelerator: str = "auto",
         devices: int = 1,
@@ -173,6 +174,7 @@ class Trainer(FromConfig):
         self.num_warmup_steps = num_warmup_steps
         self.loss = loss
         self.micro_batch_size = micro_batch_size
+        self.automatic_optimization = automatic_optimization
         self.callbacks = callbacks
         self.accelerator = accelerator
         self.devices = devices
@@ -292,7 +294,15 @@ class Trainer(FromConfig):
             self.top_k = [self.top_k]
         # save the target top_k
         self.target_top_k = self.top_k[0]
-        self.metric_to_monitor = self.metric_to_monitor.format(top_k=self.target_top_k)
+        if "top_k" in self.metric_to_monitor:
+            self.metric_to_monitor = self.metric_to_monitor.format(
+                top_k=self.target_top_k
+            )
+        else:
+            logger.warning(
+                "The `metric_to_monitor` does not contain the `top_k` placeholder. "
+                "Please make sure to include it in the metric name."
+            )
 
         # explicitly configure some callbacks that will be needed not only by the
         # pl.Trainer but also in this class
@@ -443,6 +453,7 @@ class Trainer(FromConfig):
             optimizer=self.optimizer,
             lr_scheduler=self.lr_scheduler,
             micro_batch_size=self.micro_batch_size,
+            automatic_optimization=self.automatic_optimization,
             *args,
             **kwargs,
         )
@@ -696,8 +707,8 @@ class Trainer(FromConfig):
                     **self.checkpoint_kwargs
                 )
                 if self.save_last:
-                    self.latest_model_checkpoint_callback = self.configure_model_checkpoint(
-                        **self.last_checkpoint_kwargs
+                    self.latest_model_checkpoint_callback = (
+                        self.configure_model_checkpoint(**self.last_checkpoint_kwargs)
                     )
         if self.early_stopping:
             self.early_stopping_callback = self.configure_early_stopping(
@@ -803,7 +814,13 @@ class Trainer(FromConfig):
 
         self.callbacks_store.append(FreeUpIndexerVRAMCallback())
 
-        # from lightning.pytorch.plugins import TorchElasticEnvironment
+        for callback in self.callbacks_store:
+            logger.info(
+                f"Adding callback: {callback.__class__.__module__}.{callback.__class__.__name__}"
+            )
+
+        if not self.automatic_optimization:
+            self.accumulate_grad_batches = 1
 
         if self.trainer is None:
             logger.info("Instantiating the Trainer")
@@ -826,7 +843,6 @@ class Trainer(FromConfig):
                 ),
                 callbacks=self.callbacks_store,
                 logger=self.wandb_logger,
-                # plugins=TorchElasticEnvironment(),
                 # limit_train_batches=10,
                 **self.trainer_kwargs,
             )
