@@ -80,6 +80,7 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
         # other stuff
         self.preprocess = preprocess
         self.seed = seed
+        self.resume_state_dict = {}
 
     def prepare_data(self, *args, **kwargs):
         """
@@ -333,6 +334,8 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
             timeout=0,
         )
         self.train_dataloader_obj = train_dataloader_obj
+        if "train_dataloader" in self.resume_state_dict:
+            train_dataloader_obj.load_state_dict(self.resume_state_dict["train_dataloader"])
         return train_dataloader_obj
 
     def val_dataloader(self, *args, **kwargs) -> Union[DataLoader, List[DataLoader]]:
@@ -357,6 +360,9 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
                 )
             )
         self.val_dataloader_obj = dataloaders
+        if "val_dataloader" in self.resume_state_dict:
+            for i, dataloader in enumerate(dataloaders):
+                dataloader.load_state_dict(self.resume_state_dict["val_dataloader"][i])
         return dataloaders
 
     def test_dataloader(self, *args, **kwargs) -> Union[DataLoader, List[DataLoader]]:
@@ -386,6 +392,9 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
                 )
             )
         self.test_dataloader_obj = dataloaders
+        if "test_dataloaders" in self.resume_state_dict:
+            for i, dataloader in enumerate(dataloaders):
+                dataloader.load_state_dict(self.resume_state_dict["test_dataloaders"][i])
         return dataloaders
 
     def predict_dataloader(self) -> EVAL_DATALOADERS:
@@ -417,9 +426,7 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
             state_dict: the datamodule state returned by ``state_dict``.
 
         """
-        print("Loading state dict")
-        print(state_dict.keys())
-        exit
+        self.resume_state_dict = state_dict
 
     def transfer_batch_to_device(
         self, batch: Any, device: torch.device, dataloader_idx: int
