@@ -634,6 +634,7 @@ class GoldenRetriever(torch.nn.Module):
             f"Saving question encoder state to {output_dir / question_encoder_name}"
         )
         # self.question_encoder.config._name_or_path = question_encoder_name
+        self.question_encoder.config.register_for_auto_class()
         self.question_encoder.register_for_auto_class()
         self.question_encoder.save_pretrained(
             str(output_dir / question_encoder_name), push_to_hub=push_to_hub, **kwargs
@@ -646,6 +647,7 @@ class GoldenRetriever(torch.nn.Module):
                 f"Saving passage encoder state to {output_dir / passage_encoder_name}"
             )
             # self.passage_encoder.config._name_or_path = passage_encoder_name
+            self.passage_encoder.config.register_for_auto_class()
             self.passage_encoder.register_for_auto_class()
             self.passage_encoder.save_pretrained(
                 str(output_dir / passage_encoder_name),

@@ -636,12 +636,15 @@ class Trainer(FromConfig):
                 if self.wandb_project_name
                 else Path(dirpath)
             )
+            # also add the experiment id to the dirpath
+            if self.wandb_experiment_name is not None:
+                dirpath = dirpath / self.wandb_experiment_name
             # also add the run id to the dirpath
             if self.wandb_logger is not None:
                 dirpath = dirpath / self.wandb_logger.experiment.id
         if filename is None:
             filename = (
-                "checkpoint-" + monitor + "_{" + monitor + ":.4f}-epoch_{epoch:02d}"
+                "checkpoint-" + monitor + "_{" + monitor + ":.4f}-epoch_{epoch:02d}-step_{step}"
             )
         dirpath.mkdir(parents=True, exist_ok=True)
         self.checkpoint_path = dirpath / filename if dirpath is not None else None

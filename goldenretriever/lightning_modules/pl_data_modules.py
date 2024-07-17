@@ -1,6 +1,6 @@
 import os
 from functools import partial
-from typing import Any, List, Optional, Sequence, Union
+from typing import Any, Dict, List, Optional, Sequence, Union
 
 import hydra
 import lightning as pl
@@ -70,6 +70,9 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
         self.test_datasets: Optional[Sequence[GoldenRetrieverStreamingDataset]] = (
             test_datasets
         )
+        self.train_dataloader_obj = None
+        self.val_dataloader_obj = []
+        self.test_dataloader_obj = []
         self.tokenizer = tokenizer
         self.question_tokenizer = question_tokenizer or tokenizer
         self.passage_tokenizer = passage_tokenizer or tokenizer
@@ -313,7 +316,7 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
     def train_dataloader(self, train_dataset=None, *args, **kwargs) -> DataLoader:
         train_dataset = train_dataset or self.train_dataset
         logger.debug(f"Building train dataloader for {self.train_dataset.name}")
-        return GoldenStreamingDataLoader(
+        train_dataloader_obj = GoldenStreamingDataLoader(
             train_dataset,
             collate_fn=GoldenRetrieverCollator(
                 pad_token_type_id=train_dataset.question_tokenizer.pad_token_type_id,
@@ -329,6 +332,8 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
             # persistent_workers=True if self.num_workers.train > 0 else False,
             timeout=0,
         )
+        self.train_dataloader_obj = train_dataloader_obj
+        return train_dataloader_obj
 
     def val_dataloader(self, *args, **kwargs) -> Union[DataLoader, List[DataLoader]]:
         dataloaders = []
@@ -351,11 +356,14 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
                     timeout=0,
                 )
             )
+        self.val_dataloader_obj = dataloaders
         return dataloaders
 
     def test_dataloader(self, *args, **kwargs) -> Union[DataLoader, List[DataLoader]]:
         dataloaders = []
-        for i, dataset in enumerate(self.test_datasets):
+        # test datasets are optional
+        test_datasets = self.test_datasets or []
+        for i, dataset in enumerate(test_datasets):
             dataloaders.append(
                 GoldenStreamingDataLoader(
                     dataset,
@@ -377,10 +385,41 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
                     timeout=0,
                 )
             )
+        self.test_dataloader_obj = dataloaders
         return dataloaders
 
     def predict_dataloader(self) -> EVAL_DATALOADERS:
         raise NotImplementedError
+
+    def state_dict(self) -> Dict[str, Any]:
+        """Called when saving a checkpoint, implement to generate and save datamodule state.
+
+        Returns:
+            A dictionary containing datamodule state.
+
+        """
+        state_dict = {
+            "train_dataloader": self.train_dataloader_obj.state_dict(),
+            "val_dataloader": [
+                dataloader.state_dict() for dataloader in self.val_dataloader_obj
+            ],
+        }
+        if self.test_dataloader_obj:
+            state_dict["test_dataloaders"] = [
+                dataloader.state_dict() for dataloader in self.test_dataloader_obj
+            ]
+        return state_dict
+
+    def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
+        """Called when loading a checkpoint, implement to reload datamodule state given datamodule state_dict.
+
+        Args:
+            state_dict: the datamodule state returned by ``state_dict``.
+
+        """
+        print("Loading state dict")
+        print(state_dict.keys())
+        exit
 
     def transfer_batch_to_device(
         self, batch: Any, device: torch.device, dataloader_idx: int

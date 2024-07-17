@@ -180,6 +180,7 @@ fi
 # if NODES is 1, then we don't need all this shit'
 export NODES
 export GPU_PER_NODE
+export MODULES
 # if [ $NODES -gt 1 ]; then
 #     # export NPROCS=$GPU_PER_NODE # number of GPUs per node
 #     # export MASTER_ADDR=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)

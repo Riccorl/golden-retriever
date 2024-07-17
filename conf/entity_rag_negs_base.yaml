@@ -2,7 +2,8 @@
 retriever:
   _target_: goldenretriever.GoldenRetriever
   # question_encoder: "intfloat/e5-base-v2"
-  question_encoder: "/leonardo_work/IscrC_DELEE/models/riccorl/e5-base-v2-blink-1M-32words-windows"
+  # question_encoder: "/leonardo_work/IscrC_DELEE/models/riccorl/e5-base-v2-blink-1M-32words-windows"
+  question_encoder: "/leonardo_work/IscrC_DELEE/entity-rag/retriever/experiments/checkpoints/golden-retriever-entity-rag/tmlsc3tc/retriever/question_encoder"
   attn_implementation: "sdpa"
   use_hf_model: False
 
@@ -22,7 +23,8 @@ train_dataset:
   local: "/leonardo_scratch/fast/IscrC_DELEE/data/retriever/aida-context-21june-top30/dpr-format/aida-train-kilt-Wikipedia.DM.v4.jsonl"
   shuffle: True # force shuffle True for training
   shuffle_seed: 42
-  max_question_length: 256
+  predownload: 2048 # (64*32)
+  max_question_length: 512
   max_passage_length: 256
   max_positives: 15
   max_negatives: 15
@@ -36,7 +38,7 @@ val_dataset:
     local: "/leonardo_scratch/fast/IscrC_DELEE/data/retriever/aida-context-21june-top30/dpr-format/aida-dev-kilt-Wikipedia.DM.v4.jsonl"
     shuffle: False # force shuffle True for training
     shuffle_seed: 42
-    max_question_length: 256
+    max_question_length: 512
     max_passage_length: 256
     max_positives: 15
     max_negatives: 15
@@ -53,7 +55,7 @@ weight_decay: 0.01
 lr_scheduler: goldenretriever.pytorch_modules.scheduler.LinearScheduler
 max_steps: 50_000
 # max_epochs: 1
-accumulate_grad_batches: 1
+accumulate_grad_batches: 2
 gradient_clip_val: 1.0
 deterministic: False
 num_sanity_val_steps: 0
@@ -93,7 +95,7 @@ early_stopping_kwargs: null
 log_to_wandb: true
 wandb_entity: null
 wandb_save_dir:  "/leonardo_work/IscrC_DELEE/entity-rag/retriever/experiments/"
-wandb_experiment_name: "aida-e5-base-v2-index-4-july-from-blink"
+wandb_experiment_name: "aida-e5-base-v2-index-12-july-from-self-wikipedia"
 wandb_project_name: "golden-retriever-entity-rag"
 wandb_online_mode: false
 wandb_kwargs: null

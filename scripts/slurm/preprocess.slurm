@@ -9,8 +9,8 @@
 #SBATCH --time 4:00:00          # format: HH:MM:SS
 
 #SBATCH -A IscrC_DELEE
-#SBATCH -p lrd_all_serial
+#SBATCH -p boost_usr_prod #lrd_all_serial
 
 source /leonardo_work/IscrC_DELEE/python-envs/golden-retriever-dist/bin/activate
 
-python scripts/preprocess_data_to_mds.py /leonardo_work/IscrC_DELEE/entity-rag/data/aida+ood+zelda_contexts_en.similarity.goldenindex.06-july.top-10.dpr.jsonl --num-workers 8
+python scripts/preprocess_data_to_mds.py /leonardo_work/IscrC_DELEE/entity-rag/data/aida+ood+zelda_contexts_en.similarity.goldenindex.06-july.top-10.dpr.target.jsonl --num-workers 8

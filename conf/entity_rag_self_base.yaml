@@ -20,7 +20,7 @@ document_index:
 train_dataset:
   _target_: goldenretriever.data.datasets.GoldenRetrieverStreamingDataset
   name: "train_dataset"
-  local: "/leonardo_work/IscrC_DELEE/entity-rag/data/aida+ood+zelda_contexts_en.similarity.goldenindex.06-july.top-10.dpr.jsonl"
+  local: "/leonardo_work/IscrC_DELEE/entity-rag/data/aida+ood+zelda_contexts_en.similarity.goldenindex.06-july.top-10.dpr.target.jsonl"
   shuffle: True # force shuffle True for training
   shuffle_seed: 42
   predownload: 2048 # (64*32)
@@ -58,7 +58,7 @@ accumulate_grad_batches: 4
 gradient_clip_val: 1.0
 deterministic: False
 num_sanity_val_steps: 0
-val_check_interval: 1.0
+val_check_interval: 10
 check_val_every_n_epoch: 1
 
 # compute section
@@ -66,9 +66,9 @@ check_val_every_n_epoch: 1
 automatic_optimization: True
 precision: "bf16"
 accelerator: "auto"
-devices: 4
+# devices: 2
 # strategy: "auto"
-strategy: "ddp_find_unused_parameters_true"
+# strategy: "ddp_find_unused_parameters_true"
 # strategy: "fsdp"
 # FSDP
 # strategy:
@@ -96,17 +96,18 @@ early_stopping_kwargs: null
 log_to_wandb: true
 wandb_entity: null
 wandb_save_dir:  "/leonardo_work/IscrC_DELEE/entity-rag/retriever/experiments/"
-wandb_experiment_name: "e5-base-v2-index-8-july-self-wikipedia"
+wandb_experiment_name: "e5-base-v2-index-8-july-self-wikipedia-target"
 wandb_project_name: "golden-retriever-entity-rag"
 wandb_online_mode: false
-wandb_kwargs: null
+# wandb_kwargs:
+#   id: h22qn9rp
 
 # checkpointing section
 model_checkpointing: true
 checkpoint_dir: "/leonardo_work/IscrC_DELEE/entity-rag/retriever/experiments/checkpoints"
 save_top_k: -1
 checkpoint_kwargs: null
-resume_from_checkpoint_path: null
+resume_from_checkpoint_path: /leonardo_work/IscrC_DELEE/entity-rag/retriever/experiments/checkpoints/golden-retriever-entity-rag/e5-base-v2-index-8-july-self-wikipedia-target/8uixbrwn/checkpoint-val_loss_1706.2776-epoch_00-5.ckpt
 
 # additional kwargs to pass to the Lightning Trainer
 lightning_trainer_kwargs: null
