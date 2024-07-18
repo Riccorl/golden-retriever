@@ -1,7 +1,7 @@
 #------- Core dependencies -------
 torch>=2.1,<2.3
 
-transformers>=4.33,<4.38
+transformers>=4.33,<4.43
 datasets>=2.15,<2.17
 rich>=13.0.0,<14.0.0
 scikit-learn>=1.3,<1.5
