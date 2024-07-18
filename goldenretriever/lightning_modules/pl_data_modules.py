@@ -360,9 +360,6 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
                 )
             )
         self.val_dataloader_obj = dataloaders
-        if "val_dataloader" in self.resume_state_dict:
-            for i, dataloader in enumerate(dataloaders):
-                dataloader.load_state_dict(self.resume_state_dict["val_dataloader"][i])
         return dataloaders
 
     def test_dataloader(self, *args, **kwargs) -> Union[DataLoader, List[DataLoader]]:
@@ -392,9 +389,6 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
                 )
             )
         self.test_dataloader_obj = dataloaders
-        if "test_dataloaders" in self.resume_state_dict:
-            for i, dataloader in enumerate(dataloaders):
-                dataloader.load_state_dict(self.resume_state_dict["test_dataloaders"][i])
         return dataloaders
 
     def predict_dataloader(self) -> EVAL_DATALOADERS:
@@ -409,14 +403,14 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
         """
         state_dict = {
             "train_dataloader": self.train_dataloader_obj.state_dict(),
-            "val_dataloader": [
-                dataloader.state_dict() for dataloader in self.val_dataloader_obj
-            ],
+            # "val_dataloader": [
+            #     dataloader.state_dict() for dataloader in self.val_dataloader_obj
+            # ],
         }
-        if self.test_dataloader_obj:
-            state_dict["test_dataloaders"] = [
-                dataloader.state_dict() for dataloader in self.test_dataloader_obj
-            ]
+        # if self.test_dataloader_obj:
+        #     state_dict["test_dataloaders"] = [
+        #         dataloader.state_dict() for dataloader in self.test_dataloader_obj
+        #     ]
         return state_dict
 
     def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
