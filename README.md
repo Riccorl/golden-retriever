@@ -116,15 +116,15 @@ The retriever expects a jsonl file similar to [DPR](https://github.com/facebookr
 
 ```json lines
 {
-"question": "....",
-"answers": ["...", "...", "..."],
-"positive_ctxs": [{
-  "title": "...",
-  "text": "...."
-}],
-"negative_ctxs": ["..."],
-"hard_negative_ctxs": ["..."]
-},
+  "question": "....",
+  "answers": ["...", "...", "..."],
+  "positive_ctxs": [{
+    "title": "...",
+    "text": "...."
+  }],
+  "negative_ctxs": ["..."],
+  "hard_negative_ctxs": ["..."]
+}
 ...
 ```
 
