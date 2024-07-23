@@ -75,36 +75,7 @@ golden-retriever train conf/nq-dpr.yaml
 
 ## Evaluation
 
-```python
-from goldenretriever.trainer import Trainer
-from goldenretriever import GoldenRetriever
-from goldenretriever.data.datasets import InBatchNegativesDataset
-
-retriever = GoldenRetriever(
-  question_encoder="",
-  document_index="",
-  device="cuda",
-  precision="16",
-)
-
-test_dataset = InBatchNegativesDataset(
-  name="test",
-  path="",
-  tokenizer=retriever.question_tokenizer,
-  question_batch_size=64,
-  passage_batch_size=400,
-  max_passage_length=64,
-)
-
-trainer = Trainer(
-  retriever=retriever,
-  test_dataset=test_dataset,
-  log_to_wandb=False,
-  top_k=[20, 100]
-)
-
-trainer.test()
-```
+TODO
 
 ### Distributed environment
 
@@ -145,15 +116,15 @@ The retriever expects a jsonl file similar to [DPR](https://github.com/facebookr
 
 ```json lines
 {
-"question": "....",
-"answers": ["...", "...", "..."],
-"positive_ctxs": [{
-  "title": "...",
-  "text": "...."
-}],
-"negative_ctxs": ["..."],
-"hard_negative_ctxs": ["..."]
-},
+  "question": "....",
+  "answers": ["...", "...", "..."],
+  "positive_ctxs": [{
+    "title": "...",
+    "text": "...."
+  }],
+  "negative_ctxs": ["..."],
+  "hard_negative_ctxs": ["..."]
+}
 ...
 ```
 
