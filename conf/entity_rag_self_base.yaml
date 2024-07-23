@@ -58,7 +58,7 @@ accumulate_grad_batches: 4
 gradient_clip_val: 1.0
 deterministic: False
 num_sanity_val_steps: 0
-val_check_interval: 10
+val_check_interval: 0.2
 check_val_every_n_epoch: 1
 
 # compute section
@@ -66,9 +66,9 @@ check_val_every_n_epoch: 1
 automatic_optimization: True
 precision: "bf16"
 accelerator: "auto"
-# devices: 2
+devices: 4
 # strategy: "auto"
-# strategy: "ddp_find_unused_parameters_true"
+strategy: "ddp_find_unused_parameters_true"
 # strategy: "fsdp"
 # FSDP
 # strategy:
@@ -107,7 +107,7 @@ model_checkpointing: true
 checkpoint_dir: "/leonardo_work/IscrC_DELEE/entity-rag/retriever/experiments/checkpoints"
 save_top_k: -1
 checkpoint_kwargs: null
-resume_from_checkpoint_path: /leonardo_work/IscrC_DELEE/entity-rag/retriever/experiments/checkpoints/golden-retriever-entity-rag/e5-base-v2-index-8-july-self-wikipedia-target/8uixbrwn/checkpoint-val_loss_1706.2776-epoch_00-5.ckpt
+# resume_from_checkpoint_path: /leonardo_work/IscrC_DELEE/entity-rag/retriever/experiments/checkpoints/golden-retriever-entity-rag/e5-base-v2-index-8-july-self-wikipedia-target/8uixbrwn/checkpoint-val_loss_1706.2776-epoch_00-5.ckpt
 
 # additional kwargs to pass to the Lightning Trainer
 lightning_trainer_kwargs: null

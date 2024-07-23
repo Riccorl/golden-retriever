@@ -811,7 +811,7 @@ class GoldenStreamingDataLoader(StreamingDataLoader):
                 # number of samples seen is half the number of samples yielded, since every pair
                 # of devices shares sample ids. So the index into the sample partition is halved.
                 num_samples = num_samples // self.dataset.replication
-            return self.dataset.state_dict(num_samples, True)
+            return self.dataset.state_dict(num_samples, False)
         return None
 
     def load_state_dict(self, obj: Dict[str, Any]) -> None:

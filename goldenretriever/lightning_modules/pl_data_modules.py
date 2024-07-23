@@ -335,7 +335,14 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
         )
         self.train_dataloader_obj = train_dataloader_obj
         if "train_dataloader" in self.resume_state_dict:
-            train_dataloader_obj.load_state_dict(self.resume_state_dict["train_dataloader"])
+            self.resume_state_dict["train_dataloader"]["sample_in_epoch"] = (
+                self.resume_state_dict["train_dataloader"]["sample_in_epoch"]
+                // self.resume_state_dict["train_dataloader"]["epoch"]
+            )
+            logger.debug(f"Train dataloader state: {self.resume_state_dict}")
+            train_dataloader_obj.load_state_dict(
+                self.resume_state_dict["train_dataloader"]
+            )
         return train_dataloader_obj
 
     def val_dataloader(self, *args, **kwargs) -> Union[DataLoader, List[DataLoader]]:
@@ -420,6 +427,10 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
             state_dict: the datamodule state returned by ``state_dict``.
 
         """
+        # state_dict["train_dataloader"]["sample_in_epoch"] = (
+        #     state_dict["train_dataloader"]["sample_in_epoch"]
+        #     // state_dict["train_dataloader"]["epoch"]
+        # )
         self.resume_state_dict = state_dict
 
     def transfer_batch_to_device(

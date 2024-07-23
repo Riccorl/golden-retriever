@@ -1,9 +1,12 @@
 import contextlib
 import os
 from dataclasses import dataclass
-from typing import Callable, List, Optional, Union
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Union
 
 import numpy
+from omegaconf import OmegaConf
+from pprintpp import pformat
 import psutil
 import torch
 from torch.utils.data import DataLoader
@@ -11,6 +14,7 @@ from tqdm import tqdm
 
 from goldenretriever.common.log import get_logger
 from goldenretriever.common.model_inputs import ModelInputs
+from goldenretriever.common.upload import upload
 from goldenretriever.common.utils import is_package_available
 from goldenretriever.data.base.datasets import BaseDataset
 from goldenretriever.indexers.base import BaseDocumentIndex
@@ -369,73 +373,76 @@ class FaissDocumentIndex(BaseDocumentIndex):
         ]
         return batch_retrieved_samples
 
-    # def save(self, saving_dir: Union[str, os.PathLike]):
-    #     """
-    #     Save the indexer to the disk.
+    def save_pretrained(
+        self,
+        output_dir: Union[str, os.PathLike],
+        config: Optional[Dict[str, Any]] = None,
+        config_file_name: str | None = None,
+        document_file_name: str | None = None,
+        embedding_file_name: str | None = None,
+        index_file_name: str | None = None,
+        push_to_hub: bool = False,
+        model_id: str | None = None,
+        **kwargs,
+    ):
+        """
+        Save the retriever to a directory.
 
-    #     Args:
-    #         saving_dir (:obj:`Union[str, os.PathLike]`):
-    #             The directory where the indexer will be saved.
-    #     """
-    #     saving_dir = Path(saving_dir)
-    #     # save the passage embeddings
-    #     index_path = saving_dir / self.INDEX_FILE_NAME
-    #     logger.info(f"Saving passage embeddings to {index_path}")
-    #     faiss.write_index(self.embeddings, str(index_path))
-    #     # save the passage index
-    #     documents_path = saving_dir / self.DOCUMENTS_FILE_NAME
-    #     logger.info(f"Saving passage index to {documents_path}")
-    #     self.documents.save(documents_path)
+        Args:
+            output_dir (`str`):
+                The directory to save the retriever to.
+            config (`Optional[Dict[str, Any]]`, `optional`):
+                The configuration to save. If `None`, the current configuration of the retriever will be
+                saved. Defaults to `None`.
+            config_file_name (`str | None`, `optional`):
+                The name of the configuration file. Defaults to `config.yaml`.
+            document_file_name (`str | None`, `optional`):
+                The name of the document file. Defaults to `documents.json`.
+            embedding_file_name (`str | None`, `optional`):
+                The name of the embedding file. Defaults to `embeddings.pt`.
+            push_to_hub (`bool`, `optional`):
+                Whether to push the saved retriever to the hub. Defaults to `False`.
+            model_id (`str | None`, `optional`):
+                The id of the model to push to the hub. If `None`, the name of the output
+                directory will be used. Defaults to `None`.
+            **kwargs:
+                Additional keyword arguments to pass to `upload`.
+        """
+        if config is None:
+            # create a default config
+            config = self.config
 
-    # @classmethod
-    # def load(
-    #     cls,
-    #     loading_dir: Union[str, os.PathLike],
-    #     device: str = "cpu",
-    #     document_file_name: str | None = None,
-    #     embedding_file_name: str | None = None,
-    #     index_file_name: str | None = None,
-    #     **kwargs,
-    # ) -> "FaissDocumentIndex":
-    #     loading_dir = Path(loading_dir)
+        config_file_name = config_file_name or self.CONFIG_NAME
+        document_file_name = document_file_name or self.DOCUMENTS_FILE_NAME
+        index_file_name = index_file_name or self.INDEX_FILE_NAME
 
-    #     document_file_name = document_file_name or cls.DOCUMENTS_FILE_NAME
-    #     embedding_file_name = embedding_file_name or cls.EMBEDDINGS_FILE_NAME
-    #     index_file_name = index_file_name or cls.INDEX_FILE_NAME
+        # create the output directory
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
 
-    #     # load the documents
-    #     documents_path = loading_dir / document_file_name
+        logger.info(f"Saving retriever to {output_dir}")
+        logger.info(f"Saving config to {output_dir / config_file_name}")
+        # pretty print the config
+        OmegaConf.save(config, output_dir / config_file_name)
+        logger.info(pformat(config))
 
-    #     if not documents_path.exists():
-    #         raise ValueError(f"Document file `{documents_path}` does not exist.")
-    #     logger.info(f"Loading documents from {documents_path}")
-    #     documents = Labels.from_file(documents_path)
+        # save the current state of the retriever
+        index_path = output_dir / index_file_name
+        logger.info(f"Saving FAISS index state to {output_dir / index_path}")
+        faiss.write_index(self.embeddings, str(index_path))
 
-    #     index = None
-    #     embeddings = None
-    #     # try to load the index directly
-    #     index_path = loading_dir / index_file_name
-    #     if not index_path.exists():
-    #         # try to load the embeddings
-    #         embedding_path = loading_dir / embedding_file_name
-    #         # run some checks
-    #         if embedding_path.exists():
-    #             logger.info(f"Loading embeddings from {embedding_path}")
-    #             embeddings = torch.load(embedding_path, map_location="cpu")
-    #         logger.warning(
-    #             f"Index file `{index_path}` and embedding file `{embedding_path}` do not exist."
-    #         )
-    #     else:
-    #         logger.info(f"Loading index from {index_path}")
-    #         index = faiss.read_index(str(embedding_path))
+        # save the passage index
+        documents_path = output_dir / document_file_name
+        logger.info(f"Saving passage index to {documents_path}")
+        self.documents.save(documents_path)
 
-    #     return cls(
-    #         documents=documents,
-    #         embeddings=embeddings,
-    #         index=index,
-    #         device=device,
-    #         **kwargs,
-    #     )
+        logger.info("Saving document index to disk done.")
+
+        if push_to_hub:
+            # push to hub
+            logger.info("Pushing to hub")
+            model_id = model_id or output_dir.name
+            upload(output_dir, model_id, **kwargs)
 
     def get_embeddings_from_index(
         self, index: int

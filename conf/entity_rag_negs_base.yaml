@@ -3,7 +3,8 @@ retriever:
   _target_: goldenretriever.GoldenRetriever
   # question_encoder: "intfloat/e5-base-v2"
   # question_encoder: "/leonardo_work/IscrC_DELEE/models/riccorl/e5-base-v2-blink-1M-32words-windows"
-  question_encoder: "/leonardo_work/IscrC_DELEE/entity-rag/retriever/experiments/checkpoints/golden-retriever-entity-rag/tmlsc3tc/retriever/question_encoder"
+  # question_encoder: "/leonardo_work/IscrC_DELEE/entity-rag/retriever/experiments/checkpoints/golden-retriever-entity-rag/tmlsc3tc/retriever/question_encoder"
+  question_encoder: "/leonardo_work/IscrC_DELEE/entity-rag/retriever/experiments/checkpoints/golden-retriever-entity-rag/e5-base-v2-index-8-july-self-wikipedia-target/lmxzc4sc/retriever/question_encoder"
   attn_implementation: "sdpa"
   use_hf_model: False
 
@@ -46,7 +47,7 @@ val_dataset:
     shuffle_passages: True
     preprocess: False
 
-num_workers: 8  # 4 * num gpus
+num_workers: 0  # 4 * num gpus
 
 # optimizer section
 optimizer: goldenretriever.pytorch_modules.optim.RAdamW
@@ -55,7 +56,7 @@ weight_decay: 0.01
 lr_scheduler: goldenretriever.pytorch_modules.scheduler.LinearScheduler
 max_steps: 50_000
 # max_epochs: 1
-accumulate_grad_batches: 2
+accumulate_grad_batches: 1
 gradient_clip_val: 1.0
 deterministic: False
 num_sanity_val_steps: 0
@@ -95,7 +96,7 @@ early_stopping_kwargs: null
 log_to_wandb: true
 wandb_entity: null
 wandb_save_dir:  "/leonardo_work/IscrC_DELEE/entity-rag/retriever/experiments/"
-wandb_experiment_name: "aida-e5-base-v2-index-12-july-from-self-wikipedia"
+wandb_experiment_name: "aida-e5-base-v2-index-19-july-from-self-wikipedia"
 wandb_project_name: "golden-retriever-entity-rag"
 wandb_online_mode: false
 wandb_kwargs: null
@@ -105,7 +106,7 @@ model_checkpointing: true
 checkpoint_dir: "/leonardo_work/IscrC_DELEE/entity-rag/retriever/experiments/checkpoints"
 save_top_k: 1
 checkpoint_kwargs: null
-resume_from_checkpoint_path: null
+resume_from_checkpoint_path: "/leonardo_work/IscrC_DELEE/entity-rag/retriever/experiments/checkpoints/golden-retriever-entity-rag/aida-e5-base-v2-index-19-july-from-self-wikipedia/xrjsr1m8/checkpoint-validate_recall@100_0.9041-epoch_07-step_9224.ckpt"
 
 # additional kwargs to pass to the Lightning Trainer
 lightning_trainer_kwargs: null
