@@ -45,6 +45,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         other_callbacks: List[DictConfig] | List["NLPTemplateCallback"] | None = None,
         dataset: DictConfig | BaseDataset | None = None,
         dataloader: DataLoader | None = None,
+        limit_batches: int | None = None,
         # index: Optional[DictConfig] = None,
         *args,
         **kwargs,
@@ -55,6 +56,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
         self.precision = precision
         self.force_reindex = force_reindex
         self.retriever_dir = retriever_dir
+        self.limit_batches = limit_batches
 
         self.document_index = None
 
@@ -81,7 +83,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
             DictConfig | BaseDataset | List[DictConfig] | List[BaseDataset] | None
         ) = None,
         dataloaders: DataLoader | List[DataLoader] | None = None,
-        limit_batches: int | None = None,
+        # limit_batches: int | None = None,
         *args,
         **kwargs,
     ) -> dict:
@@ -182,7 +184,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
             progress_bar = tqdm(
                 dataloader,
                 initial=0,
-                total=limit_batches or len(dataloader),
+                total=self.limit_batches or len(dataloader),
                 desc=f"Computing predictions for dataset {current_dataset.name} on rank {trainer.global_rank}",
             )
             # for batch in tqdm(
@@ -240,7 +242,7 @@ class GoldenRetrieverPredictionCallback(PredictionCallback):
                     predictions.append(prediction_output)
                 progress_bar.update(1)
                 batch_augmented += 1
-                if limit_batches is not None and batch_augmented >= limit_batches:
+                if self.limit_batches is not None and batch_augmented >= self.limit_batches:
                     logger.info(
                         f"Augmented next iteration batches ({batch_augmented}). "
                         "Stopping the hard negative mining."

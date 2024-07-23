@@ -11,6 +11,7 @@ from typing import Any, Dict, Iterator, List, Mapping, Optional, Sequence, Union
 import torch
 from streaming import Stream, StreamingDataLoader, StreamingDataset
 from streaming.base.dataset import _Iterator
+from streaming.base.world import World
 from transformers import PreTrainedTokenizerBase
 
 from goldenretriever.common.data_utils import preprocess_to_mds
@@ -396,7 +397,9 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
 
         # invert the passage data structure from a dict of lists to a list of dicts
         passage = [dict(zip(passage, t)) for t in zip(*passage.values())]
-        all_positives = [dict(zip(all_positives, t)) for t in zip(*all_positives.values())]
+        all_positives = [
+            dict(zip(all_positives, t)) for t in zip(*all_positives.values())
+        ]
 
         output = dict(
             id=sample["id"],
@@ -409,6 +412,48 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
             all_positives=all_positives,
         )
         return output
+
+    def state_dict(self, num_samples: int, from_beginning: bool) -> Dict[str, Any]:
+        """Get a dict containing training state (called from non-worker process).
+
+        This is called on rank zero.
+
+        Our stock StreamingDataLoader counts samples from start of training (from_beginning=false).
+        However, if you are always counting from the start of the epoch, set from_beginning=true.
+
+        Args:
+            num_samples (int): The number of samples processed so far in the current epoch.
+            from_beginning (int): Whether we are counting samples from the start of this epoch, or
+                the start of just this potentially resumed training run this epoch.
+
+        Returns:
+            Dict[str, Any]: The state.
+        """
+        world = self._parallel_rank_world
+        epoch = self.next_epoch - 1
+        epoch, offset = self._resume(world, epoch)
+
+        if num_samples == len(self):
+            num_samples = 0
+            epoch += 1
+        if from_beginning:
+            sample_in_epoch = num_samples
+        else:
+            sample_in_epoch = offset + num_samples
+
+        # If `self.initial_physical_nodes` is None, we are running for the first time, so we set
+        # initial_physical_nodes to the current number of physical nodes. Otherwise, we persist
+        # initial_physical_nodes as the value loaded and set from the resumption state.
+        initial_physical_nodes = world.num_nodes if self.initial_physical_nodes is None \
+            else self.initial_physical_nodes
+
+        return {
+            'epoch': epoch,
+            'sample_in_epoch': sample_in_epoch,
+            'num_canonical_nodes': self.num_canonical_nodes,
+            'shuffle_seed': self.shuffle_seed,
+            'initial_physical_nodes': initial_physical_nodes,
+        }
 
 
 class TxtStreamingDataset(StreamingDataset):
@@ -714,7 +759,7 @@ class GoldenRetrieverCollator:
         passage_index = {tuple(c["input_ids"]): i for i, c in enumerate(batch.passages)}
 
         # now we can create the labels
-        
+
         labels = torch.zeros(
             questions["input_ids"].shape[0], passages["input_ids"].shape[0]
         )
@@ -746,20 +791,6 @@ class GoldenRetrieverCollator:
         if self.postpone_collate:
             return batch
         return self.collate_fn(batch, *args, **kwargs)
-
-
-# Copyright 2022-2024 MosaicML Streaming authors
-# SPDX-License-Identifier: Apache-2.0
-
-"""Streaming DataLoader."""
-
-from typing import Any, Dict, Iterator, Optional
-
-from streaming.base.dataset import StreamingDataset
-from streaming.base.world import World
-from torch import Tensor
-from torch.utils.data import DataLoader
-from transformers import BatchEncoding, BatchFeature
 
 
 class GoldenStreamingDataLoader(StreamingDataLoader):
@@ -811,7 +842,10 @@ class GoldenStreamingDataLoader(StreamingDataLoader):
                 # number of samples seen is half the number of samples yielded, since every pair
                 # of devices shares sample ids. So the index into the sample partition is halved.
                 num_samples = num_samples // self.dataset.replication
-            return self.dataset.state_dict(num_samples, False)
+            state_dict = self.dataset.state_dict(num_samples, True)
+            logger.info(f"state_dict: {state_dict}")
+            # return self.dataset.state_dict(num_samples, True)
+            return state_dict
         return None
 
     def load_state_dict(self, obj: Dict[str, Any]) -> None:

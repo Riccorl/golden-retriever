@@ -140,6 +140,7 @@ class Trainer(FromConfig):
         # prediction callback parameters
         skip_eval: bool = False,
         prediction_batch_size: int = 128,
+        limit_prediction_batches: int | None = None,
         # hard negatives callback parameters
         max_hard_negatives_to_mine: int = 15,
         hard_negatives_threshold: float = 0.0,
@@ -221,6 +222,7 @@ class Trainer(FromConfig):
         # prediction callback parameters
         self.skip_eval = skip_eval
         self.prediction_batch_size = prediction_batch_size
+        self.limit_prediction_batches = limit_prediction_batches
         # hard negatives callback parameters
         self.max_hard_negatives_to_mine = max_hard_negatives_to_mine
         self.hard_negatives_threshold = hard_negatives_threshold
@@ -771,6 +773,7 @@ class Trainer(FromConfig):
             force_reindex=force_reindex,
             other_callbacks=metrics_callbacks,
             document_index=self.document_index,
+            limit_batches=self.limit_prediction_batches,
             *args,
             **kwargs,
         )

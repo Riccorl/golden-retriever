@@ -317,6 +317,7 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
     def train_dataloader(self, train_dataset=None, *args, **kwargs) -> DataLoader:
         train_dataset = train_dataset or self.train_dataset
         logger.debug(f"Building train dataloader for {self.train_dataset.name}")
+        print("Len: ", len(train_dataset))
         train_dataloader_obj = GoldenStreamingDataLoader(
             train_dataset,
             collate_fn=GoldenRetrieverCollator(
@@ -334,12 +335,8 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
             timeout=0,
         )
         self.train_dataloader_obj = train_dataloader_obj
+        logger.debug(f"Train dataloader state: {self.resume_state_dict}")
         if "train_dataloader" in self.resume_state_dict:
-            self.resume_state_dict["train_dataloader"]["sample_in_epoch"] = (
-                self.resume_state_dict["train_dataloader"]["sample_in_epoch"]
-                // self.resume_state_dict["train_dataloader"]["epoch"]
-            )
-            logger.debug(f"Train dataloader state: {self.resume_state_dict}")
             train_dataloader_obj.load_state_dict(
                 self.resume_state_dict["train_dataloader"]
             )
@@ -410,14 +407,7 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
         """
         state_dict = {
             "train_dataloader": self.train_dataloader_obj.state_dict(),
-            # "val_dataloader": [
-            #     dataloader.state_dict() for dataloader in self.val_dataloader_obj
-            # ],
         }
-        # if self.test_dataloader_obj:
-        #     state_dict["test_dataloaders"] = [
-        #         dataloader.state_dict() for dataloader in self.test_dataloader_obj
-        #     ]
         return state_dict
 
     def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
@@ -427,10 +417,6 @@ class GoldenRetrieverPLDataModule(pl.LightningDataModule):
             state_dict: the datamodule state returned by ``state_dict``.
 
         """
-        # state_dict["train_dataloader"]["sample_in_epoch"] = (
-        #     state_dict["train_dataloader"]["sample_in_epoch"]
-        #     // state_dict["train_dataloader"]["epoch"]
-        # )
         self.resume_state_dict = state_dict
 
     def transfer_batch_to_device(
