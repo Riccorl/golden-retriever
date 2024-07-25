@@ -686,25 +686,6 @@ class Trainer(FromConfig):
             )
         return self.model_checkpoint_callback
 
-    def configure_hard_negatives_callback(self):
-        metrics_to_monitor = (
-            self.metrics_to_monitor_for_hard_negatives or self.metric_to_monitor
-        )
-        hard_negatives_callback = NegativeAugmentationCallback(
-            k=self.target_top_k,
-            batch_size=self.prediction_batch_size,
-            dataset=self.hard_negative_dataset,
-            num_workers=self.num_workers,
-            precision=self.precision,
-            stages=["validate"],
-            metrics_to_monitor=metrics_to_monitor,
-            threshold=self.hard_negatives_threshold,
-            max_negatives=self.max_hard_negatives_to_mine,
-            add_with_probability=self.mine_hard_negatives_with_probability,
-            refresh_every_n_epochs=1,
-        )
-        return hard_negatives_callback
-
     def training_callbacks(self):
         if self.model_checkpointing:
             if rank_zero_only.rank == 0:
@@ -768,16 +749,36 @@ class Trainer(FromConfig):
         prediction_callback = GoldenRetrieverPredictionCallback(
             batch_size=batch_size,
             num_workers=self.num_workers,
+            document_index=self.document_index,
             precision=precision,
             k=k,
             force_reindex=force_reindex,
             other_callbacks=metrics_callbacks,
-            document_index=self.document_index,
             limit_batches=self.limit_prediction_batches,
             *args,
             **kwargs,
         )
         return prediction_callback
+
+    def configure_hard_negatives_callback(self):
+        metrics_to_monitor = (
+            self.metrics_to_monitor_for_hard_negatives or self.metric_to_monitor
+        )
+        hard_negatives_callback = NegativeAugmentationCallback(
+            k=self.target_top_k,
+            batch_size=self.prediction_batch_size,
+            dataset=self.hard_negative_dataset,
+            num_workers=self.num_workers,
+            document_index=self.document_index,
+            precision=self.precision,
+            stages=["validate"],
+            metrics_to_monitor=metrics_to_monitor,
+            threshold=self.hard_negatives_threshold,
+            max_negatives=self.max_hard_negatives_to_mine,
+            add_with_probability=self.mine_hard_negatives_with_probability,
+            refresh_every_n_epochs=1,
+        )
+        return hard_negatives_callback
 
     def train(self, *args, **kwargs):
         """

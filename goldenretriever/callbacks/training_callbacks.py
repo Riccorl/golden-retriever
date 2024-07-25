@@ -18,6 +18,8 @@ import goldenretriever.common.dist_utils as dist
 from goldenretriever.callbacks.prediction_callbacks import (
     GoldenRetrieverPredictionCallback,
 )
+from goldenretriever.indexers.base import BaseDocumentIndex
+
 from goldenretriever.common.log import get_logger
 from goldenretriever.data.base.datasets import BaseDataset
 from goldenretriever.data.datasets import (
@@ -75,6 +77,7 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
         k: int = 100,
         batch_size: int = 32,
         num_workers: int = 0,
+        document_index: BaseDocumentIndex | DictConfig | None = None,
         force_reindex: bool = False,
         retriever_dir: Optional[Path] = None,
         stages: Sequence[Union[str, RunningStage]] = None,
@@ -92,6 +95,7 @@ class NegativeAugmentationCallback(GoldenRetrieverPredictionCallback):
             k=k,
             batch_size=batch_size,
             num_workers=num_workers,
+            document_index=document_index,
             force_reindex=force_reindex,
             retriever_dir=retriever_dir,
             stages=stages,
