@@ -2,9 +2,10 @@
 retriever:
   _target_: goldenretriever.GoldenRetriever
   # question_encoder: "intfloat/e5-base-v2"
-  # question_encoder: "/leonardo_work/IscrC_DELEE/models/riccorl/e5-base-v2-blink-1M-32words-windows"
+  question_encoder: "/leonardo_work/IscrC_DELEE/models/riccorl/e5-base-v2-blink-1M-32words-windows"
   # question_encoder: "/leonardo_work/IscrC_DELEE/entity-rag/retriever/experiments/checkpoints/golden-retriever-entity-rag/tmlsc3tc/retriever/question_encoder"
-  question_encoder: "/leonardo_work/IscrC_DELEE/entity-rag/retriever/experiments/checkpoints/golden-retriever-entity-rag/e5-base-v2-index-8-july-self-wikipedia-target/lmxzc4sc/retriever/question_encoder"
+  # question_encoder: "/leonardo_work/IscrC_DELEE/entity-rag/retriever/experiments/checkpoints/golden-retriever-entity-rag/e5-base-v2-index-8-july-self-wikipedia-target/lmxzc4sc/retriever/question_encoder"
+  # question_encoder: "/leonardo_work/IscrC_DELEE/entity-rag/retriever/experiments/checkpoints/golden-retriever-entity-rag/45ovew6e/retriever/question_encoder"
   attn_implementation: "sdpa"
   use_hf_model: False
 
@@ -21,14 +22,16 @@ document_index:
 train_dataset:
   _target_: goldenretriever.data.datasets.GoldenRetrieverStreamingDataset
   name: "train_dataset"
+  # local: "/leonardo_work/IscrC_DELEE/entity-rag/retriever/data/zelda_train.jsonl"
   local: "/leonardo_scratch/fast/IscrC_DELEE/data/retriever/aida-context-21june-top30/dpr-format/aida-train-kilt-Wikipedia.DM.v4.jsonl"
   shuffle: True # force shuffle True for training
   shuffle_seed: 42
   predownload: 2048 # (64*32)
-  max_question_length: 512
+  max_question_length: 256
   max_passage_length: 256
   max_positives: 15
-  max_negatives: 15
+  max_negatives: 5
+  max_hard_negatives: 15
   batch_size: 16
   shuffle_passages: True
   preprocess: False
@@ -39,22 +42,23 @@ val_dataset:
     local: "/leonardo_scratch/fast/IscrC_DELEE/data/retriever/aida-context-21june-top30/dpr-format/aida-dev-kilt-Wikipedia.DM.v4.jsonl"
     shuffle: False # force shuffle True for training
     shuffle_seed: 42
-    max_question_length: 512
+    max_question_length: 256
     max_passage_length: 256
     max_positives: 15
-    max_negatives: 15
+    max_negatives: 5
+    max_hard_negatives: 15
     batch_size: 16
     shuffle_passages: True
     preprocess: False
 
-num_workers: 0  # 4 * num gpus
+num_workers: 8  # 4 * num gpus
 
 # optimizer section
 optimizer: goldenretriever.pytorch_modules.optim.RAdamW
 lr: 2e-5
 weight_decay: 0.01
 lr_scheduler: goldenretriever.pytorch_modules.scheduler.LinearScheduler
-max_steps: 50_000
+max_steps: 100_000
 # max_epochs: 1
 accumulate_grad_batches: 1
 gradient_clip_val: 1.0
@@ -83,7 +87,7 @@ top_k: 100
 # prediction section
 prediction_batch_size: 1024
 # hard negatives section
-max_hard_negatives_to_mine: 0
+max_hard_negatives_to_mine: 5
 hard_negatives_threshold: 0.0
 mine_hard_negatives_with_probability: 1.0
 
@@ -96,7 +100,7 @@ early_stopping_kwargs: null
 log_to_wandb: true
 wandb_entity: null
 wandb_save_dir:  "/leonardo_work/IscrC_DELEE/entity-rag/retriever/experiments/"
-wandb_experiment_name: "aida-e5-base-v2-index-19-july-from-self-wikipedia"
+wandb_experiment_name: "aida-e5-base-v2-index-5-aug-from-blink-hard-negs"
 wandb_project_name: "golden-retriever-entity-rag"
 wandb_online_mode: false
 wandb_kwargs: null
@@ -106,7 +110,7 @@ model_checkpointing: true
 checkpoint_dir: "/leonardo_work/IscrC_DELEE/entity-rag/retriever/experiments/checkpoints"
 save_top_k: 1
 checkpoint_kwargs: null
-resume_from_checkpoint_path: "/leonardo_work/IscrC_DELEE/entity-rag/retriever/experiments/checkpoints/golden-retriever-entity-rag/aida-e5-base-v2-index-19-july-from-self-wikipedia/xrjsr1m8/checkpoint-validate_recall@100_0.9041-epoch_07-step_9224.ckpt"
+# resume_from_checkpoint_path: "/leonardo_work/IscrC_DELEE/entity-rag/retriever/experiments/checkpoints/golden-retriever-entity-rag/aida-e5-base-v2-index-19-july-from-self-wikipedia/xrjsr1m8/checkpoint-validate_recall@100_0.9041-epoch_07-step_9224.ckpt"
 
 # additional kwargs to pass to the Lightning Trainer
 lightning_trainer_kwargs: null

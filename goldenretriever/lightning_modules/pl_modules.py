@@ -231,9 +231,9 @@ class HardNegativeAlgorithm:
         if len(hn_passages) == 0:
             return batch
 
-        logger.debug(
-            f"{i} samples have hard negatives out of {len(sample_idxs)} samples."
-        )
+        # logger.debug(
+        #     f"{i} samples have hard negatives out of {len(sample_idxs)} samples."
+        # )
 
         # get dataloader collator
         collator = collator or pl_module.trainer.train_dataloader.collate_fn
@@ -262,18 +262,18 @@ class HardNegativeAlgorithm:
                     labels[sample_idx, index] = 1
 
         # now concatenate the passages and the hard negatives
-        passages_ids = torch.cat(
-            [batch.passages["input_ids"], hn_passages_batch["input_ids"]], dim=0
+        passages_ids = self.pad_and_concat(
+            batch.passages["input_ids"],
+            hn_passages_batch["input_ids"],
+            self.hn_manager.tokenizer.pad_token_id,
         )
         # concatenate the attention masks
-        attention_mask = torch.cat(
-            [batch.passages["attention_mask"], hn_passages_batch["attention_mask"]],
-            dim=0,
+        attention_mask = self.pad_and_concat(
+            batch.passages["attention_mask"], hn_passages_batch["attention_mask"], 0
         )
         # concatenate the token type ids
-        token_type_ids = torch.cat(
-            [batch.passages["token_type_ids"], hn_passages_batch["token_type_ids"]],
-            dim=0,
+        token_type_ids = self.pad_and_concat(
+            batch.passages["token_type_ids"], hn_passages_batch["token_type_ids"], 0
         )
         # concatenate the labels
         labels = torch.cat([batch.labels, labels], dim=1)
@@ -312,3 +312,30 @@ class HardNegativeAlgorithm:
         # element-wise equality
         mask = (a_expand == b_expand).all(-1).any(-1)
         return mask
+
+    @staticmethod
+    def pad_and_concat(
+        tensor_one: torch.Tensor, tensor_two: torch.Tensor, pad_value: int
+    ) -> torch.Tensor:
+        """
+        Pad two tensors to the same length and concatenate them.
+
+        Args:
+            tensor_one (`torch.Tensor`): The first tensor.
+            tensor_two (`torch.Tensor`): The second tensor.
+            pad_value (`int`): The value to use for padding.
+
+        Returns:
+            `torch.Tensor`: The concatenated tensor.
+        """
+        # get the max length
+        max_length = max(tensor_one.shape[1], tensor_two.shape[1])
+        # pad the tensors
+        tensor_one = torch.nn.functional.pad(
+            tensor_one, (0, max_length - tensor_one.shape[1]), value=pad_value
+        )
+        tensor_two = torch.nn.functional.pad(
+            tensor_two, (0, max_length - tensor_two.shape[1]), value=pad_value
+        )
+        # concatenate the tensors
+        return torch.cat([tensor_one, tensor_two], dim=0)

@@ -203,7 +203,7 @@ class GoldenRetrieverStreamingDataset(StreamingDataset):
         max_hard_negatives: int = -1,
         max_passages: int = -1,
         max_question_length: int = 256,
-        max_passage_length: int = 64,
+        max_passage_length: int = 256,
         metadata_fields: Optional[Sequence[str]] = None,
         metadata_separator: str = "\t",
         shuffle_passages: bool = False,

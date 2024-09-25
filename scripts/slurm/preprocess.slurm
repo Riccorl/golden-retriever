@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=preprocess-data            # Job name
-#SBATCH -o logs/preprocess-data.out       # Name of stdout output file
-#SBATCH -e logs/preprocess-data.err       # Name of stderr error file
+#SBATCH -o logs/preprocess-data-zelda.out       # Name of stdout output file
+#SBATCH -e logs/preprocess-data-zelda.err       # Name of stderr error file
 
 #SBATCH --nodes=1               # number of nodes
 #SBATCH --ntasks-per-node=1     # number of tasks per node
@@ -13,4 +13,4 @@
 
 source /leonardo_work/IscrC_DELEE/python-envs/golden-retriever-dist/bin/activate
 
-python scripts/preprocess_data_to_mds.py /leonardo_work/IscrC_DELEE/entity-rag/data/aida+ood+zelda_contexts_en.similarity.goldenindex.06-july.top-10.dpr.target.jsonl --num-workers 8
+python scripts/preprocess_data_to_mds.py /leonardo_work/IscrC_DELEE/entity-rag/retriever/data/zelda_train.jsonl --num-workers 8

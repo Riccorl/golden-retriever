@@ -802,6 +802,11 @@ class Trainer(FromConfig):
             self.experiment_path = None
             try:
                 self.experiment_path = Path(self.wandb_logger.experiment.dir)
+                # save config to file
+                # OmegaConf.save(
+                #     OmegaConf.create(to_config(self)),
+                #     self.experiment_path / "trainer_config.yaml",
+                # )
             except Exception as e:
                 logger.info(f"Failed to get the experiment path: {e}")
 
